@@ -67,5 +67,25 @@ PrefabInstance:
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
-    m_AddedComponents: []
+    m_AddedComponents:
+    - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: 2234f82342c583b46a8bc2fcea9ce408, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: -6337929013249246712}
   m_SourcePrefab: {fileID: 100100000, guid: 2234f82342c583b46a8bc2fcea9ce408, type: 3}
+--- !u!1 &8018778174894856459 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 919132149155446097, guid: 2234f82342c583b46a8bc2fcea9ce408, type: 3}
+  m_PrefabInstance: {fileID: 7172270006779929690}
+  m_PrefabAsset: {fileID: 0}
+--- !u!114 &-6337929013249246712
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8018778174894856459}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a5d2f456bca296b41babbc745fb7b19b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlatformRailing

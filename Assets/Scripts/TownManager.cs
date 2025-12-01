@@ -1,285 +1,389 @@
 using System.Collections.Generic;
+using Grid;
+using Unity.AI.Navigation;
 using UnityEngine;
+using UnityEngine.AI;
 using WaterTown.Platforms;
 
 namespace WaterTown.Town
 {
-    /// <summary>
-    /// Holds city state for placements and acts as the lightweight runtime planner:
-    /// - Tracks which cells are occupied by which GamePlatform
-    /// - Listens to platform PoseChanged and recomputes links vs. neighbors (debounced)
-    /// - Recomputes on load
-    /// </summary>
+    [DisallowMultipleComponent]
     public class TownManager : MonoBehaviour
     {
-        [SerializeField] private Grid.WorldGrid worldGrid;
+        [Header("Grid")]
+        [SerializeField] private WorldGrid grid;
+        public WorldGrid Grid => grid;
 
-        // cell -> platform
-        private readonly Dictionary<Vector2Int, GamePlatform> cellToPlatform = new();
-        // platform -> cells
-        private readonly Dictionary<GamePlatform, HashSet<Vector2Int>> platformToCells = new();
+        [Header("Default Level")]
+        [Tooltip("Level index to use when auto-computing a platform's cells.")]
+        [SerializeField] private int defaultLevel = 0;
 
-        // runtime planner: pending platforms to reevaluate this frame (debounced)
-        private readonly HashSet<GamePlatform> _pending = new();
-        [SerializeField, Range(0f, 0.25f)] private float debounceSeconds = 0.05f;
-        private float _nextFlushTime;
+        // --- Platform occupancy bookkeeping ---
 
-        public Grid.WorldGrid Grid => worldGrid;
-        private static readonly HashSet<GamePlatform> _tmpNeighbors = new();
+        private class PlatformEntry
+        {
+            public GamePlatform platform;
+            public List<Vector2Int> cells2D = new();
+            public int level;
+            public bool marksOccupied; // true = we write Occupied flags into the grid
+        }
+
+        // Platforms we know about → their occupied cells
+        private readonly Dictionary<GamePlatform, PlatformEntry> _entries = new();
+
+        // temp lists
+        private static readonly List<GamePlatform> _tmpPlatforms = new();
+        private readonly List<Vector2Int> _tmpCells2D = new();
+
+        // ---------- Unity lifecycle ----------
+
         private void Awake()
         {
-            if (!worldGrid)
-                Debug.LogError("[TownManager] Missing WorldGrid reference.", this);
+            // Only auto-find if nothing is wired in the inspector
+            if (!grid)
+                grid = FindFirstObjectByType<WorldGrid>();
+        }
+
+        private void OnEnable()
+        {
+            GamePlatform.PlatformRegistered   += OnPlatformRegistered;
+            GamePlatform.PlatformUnregistered += OnPlatformUnregistered;
         }
 
         private void Start()
         {
-            // On load, find any preplaced platforms in the scene and register them.
-            var all = FindObjectsOfType<GamePlatform>(includeInactive: false);
-            foreach (var gp in all)
+            // Ensure all existing platforms in the scene are registered into the grid
+            if (!grid)
+                grid = FindFirstObjectByType<WorldGrid>();
+
+            foreach (var gp in GamePlatform.AllPlatforms)
             {
-                // If not already registered with cells (because they weren’t placed via BuildMode),
-                // try to infer a best-effort area from their footprint and transform center.
-                if (!platformToCells.ContainsKey(gp))
+                if (!gp) continue;
+                if (!gp.isActiveAndEnabled) continue;
+
+                _tmpCells2D.Clear();
+                ComputeCellsForPlatform(gp, defaultLevel, _tmpCells2D);
+                if (_tmpCells2D.Count > 0)
                 {
-                    var guess = GuessCellsFromTransform(gp);
-                    RegisterPlatform(gp, guess);
+                    // Registers occupancy AND triggers adjacency for all platforms
+                    RegisterPlatform(gp, _tmpCells2D, defaultLevel, markOccupiedInGrid: true);
+                }
+            }
+        }
+
+        private void OnDisable()
+        {
+            GamePlatform.PlatformRegistered   -= OnPlatformRegistered;
+            GamePlatform.PlatformUnregistered -= OnPlatformUnregistered;
+
+            // Best-effort cleanup of pose subscriptions
+            foreach (var kvp in _entries)
+            {
+                if (kvp.Key)
+                    kvp.Key.PoseChanged -= OnPlatformPoseChanged;
+            }
+        }
+
+        // ---------- GamePlatform events ----------
+
+        private void OnPlatformRegistered(GamePlatform gp)
+        {
+            // We intentionally DO NOT auto-register into the grid here,
+            // because BuildModeManager controls when a platform is
+            // preview-only vs actually placed.
+            // Scene platforms are registered once in Start().
+        }
+
+        private void OnPlatformUnregistered(GamePlatform gp)
+        {
+            if (!gp) return;
+            UnregisterPlatform(gp);
+        }
+
+        /// <summary>
+        /// Called when a platform reports its transform changed.
+        /// Optional runtime support for moving platforms (and the ghost).
+        /// </summary>
+        private void OnPlatformPoseChanged(GamePlatform gp)
+        {
+            if (!grid || gp == null) return;
+            if (!_entries.TryGetValue(gp, out var entry)) return;
+
+            int level = entry.level;
+            bool marksOccupied = entry.marksOccupied;
+
+            // 1) Clear old occupancy for this platform
+            if (marksOccupied)
+            {
+                foreach (var c2 in entry.cells2D)
+                {
+                    var cell = new Vector3Int(c2.x, c2.y, level);
+                    grid.TryRemoveFlag(cell, WorldGrid.CellFlag.Occupied);
                 }
             }
 
-            // Initial full recompute once everything is registered.
-            RecomputeAllLinks();
+            // 2) Compute new footprint cells from current transform (rotation-aware)
+            _tmpCells2D.Clear();
+            ComputeCellsForPlatform(gp, level, _tmpCells2D);
+
+            entry.cells2D.Clear();
+            entry.cells2D.AddRange(_tmpCells2D);
+
+            if (marksOccupied)
+            {
+                foreach (var c2 in entry.cells2D)
+                {
+                    var cell = new Vector3Int(c2.x, c2.y, level);
+                    grid.TryAddFlag(cell, WorldGrid.CellFlag.Occupied, platformId: 0, payload: gp.GetInstanceID());
+                }
+            }
+
+            // 3) Recompute adjacency for ALL platforms (global pass, same as SceneView tool)
+            RecomputeAllAdjacency();
         }
 
-        private void Update()
+        // ---------- Public API ----------
+
+        /// <summary>
+        /// True if all given 2D cells (at level) are inside the grid and not Occupied.
+        /// Used by BuildModeManager as placement validation.
+        /// </summary>
+        public bool IsAreaFree(List<Vector2Int> cells, int level = 0)
         {
-            if (_pending.Count == 0) return;
-            if (Time.time < _nextFlushTime) return;
-
-            // Flush the batch
-            var list = ListFromSet(_pending);
-            _pending.Clear();
-
-            foreach (var gp in list)
-                RecomputeLinksForPlatformAndNeighbors(gp);
-        }
-
-        // ------------ Public API unchanged for BuildModeManager ------------
-
-        public bool IsAreaFree(List<Vector2Int> cells)
-        {
-            for (int i = 0; i < cells.Count; i++)
-                if (cellToPlatform.ContainsKey(cells[i]))
+            if (!grid) return false;
+            foreach (var c in cells)
+            {
+                var cell = new Vector3Int(c.x, c.y, level);
+                if (!grid.CellInBounds(cell)) return false;
+                if (grid.CellHasAnyFlag(cell, WorldGrid.CellFlag.Occupied))
                     return false;
+            }
             return true;
         }
 
-        public void RegisterPlatform(GamePlatform gp, List<Vector2Int> cells)
+        /// <summary>
+        /// Register a platform at a set of grid cells on a given level.
+        /// markOccupiedInGrid=false is used for the GHOST (preview): it still participates
+        /// in adjacency, but does NOT reserve cells in the WorldGrid.
+        /// </summary>
+        public void RegisterPlatform(
+            GamePlatform gp,
+            List<Vector2Int> cells,
+            int level = 0,
+            bool markOccupiedInGrid = true)
         {
-            if (!gp) return;
-            if (!platformToCells.TryGetValue(gp, out var set))
+            if (!gp || cells == null || cells.Count == 0 || !grid) return;
+
+            // Remove old occupancy if any
+            if (_entries.TryGetValue(gp, out var oldEntry))
             {
-                set = new HashSet<Vector2Int>();
-                platformToCells[gp] = set;
-            }
-            foreach (var c in cells)
-            {
-                cellToPlatform[c] = gp;
-                set.Add(c);
+                if (oldEntry.marksOccupied)
+                {
+                    foreach (var c2 in oldEntry.cells2D)
+                    {
+                        var cell = new Vector3Int(c2.x, c2.y, oldEntry.level);
+                        grid.TryRemoveFlag(cell, WorldGrid.CellFlag.Occupied);
+                    }
+                }
             }
 
-            // Subscribe to pose changes so we can relink while dragging/moving/rotating
-            gp.PoseChanged += OnPlatformPoseChanged;
+            // Ensure we have an entry and are listening to pose changes
+            if (!_entries.TryGetValue(gp, out var entry))
+            {
+                entry = new PlatformEntry { platform = gp };
+                _entries[gp] = entry;
+                gp.PoseChanged += OnPlatformPoseChanged;
+            }
 
-            // Attempt initial adjacency connections right after placement
-            RecomputeConnectionsAround(gp);
+            entry.level         = level;
+            entry.marksOccupied = markOccupiedInGrid;
+            entry.cells2D.Clear();
+            entry.cells2D.AddRange(cells);
+
+            if (markOccupiedInGrid)
+            {
+                foreach (var c in cells)
+                {
+                    var cell = new Vector3Int(c.x, c.y, level);
+                    grid.TryAddFlag(cell, WorldGrid.CellFlag.Occupied, platformId: 0, payload: gp.GetInstanceID());
+                }
+            }
+
+            // Recompute adjacency for all platforms
+            RecomputeAllAdjacency();
         }
 
+        /// <summary>
+        /// Helper for preview: register platform using its current transform footprint,
+        /// but WITHOUT marking cells as Occupied in the grid.
+        /// The ghost still participates in adjacency (railing preview).
+        /// </summary>
+        public void RegisterPreviewPlatform(GamePlatform gp, int level = 0)
+        {
+            if (!gp || !grid) return;
+
+            _tmpCells2D.Clear();
+            ComputeCellsForPlatform(gp, level, _tmpCells2D);
+            if (_tmpCells2D.Count == 0) return;
+
+            RegisterPlatform(gp, _tmpCells2D, level, markOccupiedInGrid: false);
+        }
+
+        /// <summary>
+        /// Removes platform occupancy from the grid and clears its connections.
+        /// </summary>
         public void UnregisterPlatform(GamePlatform gp)
         {
-            if (!gp) return;
+            if (!gp || !grid) return;
+            if (!_entries.TryGetValue(gp, out var entry)) return;
 
-            // Unhook pose-change listener
             gp.PoseChanged -= OnPlatformPoseChanged;
 
-            if (!platformToCells.TryGetValue(gp, out var set)) return;
-
-            foreach (var c in set)
-                cellToPlatform.Remove(c);
-
-            platformToCells.Remove(gp);
-        }
-
-
-        public GamePlatform GetPlatformAtCell(Vector2Int cell)
-        {
-            return cellToPlatform.TryGetValue(cell, out var gp) ? gp : null;
-        }
-
-        public bool TryGetCells(GamePlatform gp, out HashSet<Vector2Int> cells)
-        {
-            return platformToCells.TryGetValue(gp, out cells);
-        }
-
-        // ------------ Runtime planner internals ------------
-        
-
-        private void QueueRecompute(GamePlatform gp)
-        {
-            if (!gp) return;
-            _pending.Add(gp);
-            _nextFlushTime = Time.time + debounceSeconds;
-        }
-
-        /// <summary>Full recompute for all registered platforms (used on load).</summary>
-        private void RecomputeAllLinks()
-        {
-            // Reset connections on all, then connect where adjacent
-            foreach (var gp in platformToCells.Keys)
-                gp.EditorResetAllConnections();
-
-            var list = ListFromSet(platformToCells.Keys);
-            int count = list.Count;
-            for (int i = 0; i < count; i++)
+            if (entry.marksOccupied)
             {
-                var a = list[i];
-                var neigh = CollectNeighborPlatforms(a);
-                foreach (var b in neigh)
+                foreach (var c2 in entry.cells2D)
                 {
-                    // To avoid double-work, connect only in a deterministic order
-                    if (a.GetInstanceID() < b.GetInstanceID())
-                        GamePlatform.ConnectIfAdjacent(a, b);
-                }
-            }
-        }
-
-        private void OnPlatformPoseChanged(GamePlatform moved)
-        {
-            // When a platform moves/rotates/scales, recompute connections with its immediate neighbors.
-            RecomputeConnectionsAround(moved);
-        }
-
-        private void RecomputeConnectionsAround(GamePlatform moved)
-        {
-            if (!moved) return;
-
-            // 1) Reset connections/hidden modules on the moved platform
-            moved.EditorResetAllConnections();
-
-            // 2) Collect immediate neighbors (4-neighborhood around each occupied cell)
-            _tmpNeighbors.Clear();
-            if (TryGetCells(moved, out var movedCells))
-            {
-                foreach (var c in movedCells)
-                {
-                    TryAddNeighbor(new Vector2Int(c.x + 1, c.y), moved);
-                    TryAddNeighbor(new Vector2Int(c.x - 1, c.y), moved);
-                    TryAddNeighbor(new Vector2Int(c.x, c.y + 1), moved);
-                    TryAddNeighbor(new Vector2Int(c.x, c.y - 1), moved);
+                    var cell = new Vector3Int(c2.x, c2.y, entry.level);
+                    grid.TryRemoveFlag(cell, WorldGrid.CellFlag.Occupied);
                 }
             }
 
-            // Reset neighbors too so their modules/links are in a clean state
-            foreach (var n in _tmpNeighbors)
-                n.EditorResetAllConnections();
+            _entries.Remove(gp);
 
-            // 3) Reconnect moved <-> each neighbor (minimal span + hide railings handled inside)
-            foreach (var n in _tmpNeighbors)
-                GamePlatform.ConnectIfAdjacent(moved, n);
-
-            // 4) Optional: also reconnect neighbor pairs among themselves to keep chains valid while sliding
-            var arr = new List<GamePlatform>(_tmpNeighbors);
-            for (int i = 0; i < arr.Count; i++)
-            for (int j = i + 1; j < arr.Count; j++)
-                GamePlatform.ConnectIfAdjacent(arr[i], arr[j]);
-        }
-
-        private void TryAddNeighbor(Vector2Int cell, GamePlatform exclude)
-        {
-            var gp = GetPlatformAtCell(cell);
-            if (gp && gp != exclude)
-                _tmpNeighbors.Add(gp);
-        }
-        
-        /// <summary>Recompute links only for one platform and the platforms that touch it.</summary>
-        private void RecomputeLinksForPlatformAndNeighbors(GamePlatform gp)
-        {
-            if (!gp) return;
-
-            var neighbors = CollectNeighborPlatforms(gp);
-
-            // First, clear connections on gp (show railings, delete links, rebuild gp navmesh)
+            // Clear connections on this platform
             gp.EditorResetAllConnections();
 
-            // Then clear connections on each neighbor that involve their touching edges.
-            // Simpler (and robust): reset neighbors fully too; we'll reconnect immediately after.
-            foreach (var n in neighbors)
-                n.EditorResetAllConnections();
-
-            // Now reconnect gp<->neighbor pairs if they are adjacent & linkable.
-            foreach (var n in neighbors)
-                GamePlatform.ConnectIfAdjacent(gp, n);
+            // Recompute adjacency for all remaining platforms
+            RecomputeAllAdjacency();
         }
 
-        /// <summary>Collect platforms that touch any cell edge of gp (4-neighborhood based on the grid map).</summary>
-        private HashSet<GamePlatform> CollectNeighborPlatforms(GamePlatform gp)
+        // ---------- Core adjacency logic (GLOBAL) ----------
+
+        /// <summary>
+        /// Recomputes connections for ALL platforms (runtime),
+        /// using the exact same algorithm as the editor SceneView tester:
+        /// - Reset all connections/modules/railings
+        /// - Try pairwise GamePlatform.ConnectIfAdjacent
+        /// </summary>
+        private void RecomputeAllAdjacency()
         {
-            var result = new HashSet<GamePlatform>();
-            if (!platformToCells.TryGetValue(gp, out var myCells)) return result;
+            if (!grid) return;
 
-            // For each occupied cell, check 4 neighbors in the grid dictionary.
-            foreach (var c in myCells)
+            _tmpPlatforms.Clear();
+            foreach (var gp in GamePlatform.AllPlatforms)
             {
-                TryAddNeighbor(new Vector2Int(c.x + 1, c.y), gp, result);
-                TryAddNeighbor(new Vector2Int(c.x - 1, c.y), gp, result);
-                TryAddNeighbor(new Vector2Int(c.x, c.y + 1), gp, result);
-                TryAddNeighbor(new Vector2Int(c.x, c.y - 1), gp, result);
+                if (!gp) continue;
+                if (!gp.isActiveAndEnabled) continue;
+                _tmpPlatforms.Add(gp);
             }
-            return result;
 
-            void TryAddNeighbor(Vector2Int cell, GamePlatform self, HashSet<GamePlatform> into)
+            // Ensure registration is always valid
+            foreach (var p in _tmpPlatforms)
             {
-                if (cellToPlatform.TryGetValue(cell, out var other) && other && other != self)
-                    into.Add(other);
+                p.EnsureChildrenModulesRegistered();
+                p.EnsureChildrenRailingsRegistered();
+            }
+
+            // Reset everything first so rails reappear when platforms separate
+            foreach (var p in _tmpPlatforms)
+                p.EditorResetAllConnections();
+
+            // Try pairwise connections for currently touching platforms
+            int count = _tmpPlatforms.Count;
+            for (int i = 0; i < count; i++)
+            {
+                var a = _tmpPlatforms[i];
+                for (int j = i + 1; j < count; j++)
+                {
+                    var b = _tmpPlatforms[j];
+                    GamePlatform.ConnectIfAdjacent(a, b);
+                }
             }
         }
 
-        // If platforms existed already in the scene (not placed through BuildMode),
-        // make a best-effort guess of their occupied cells from transform & footprint.
-        private List<Vector2Int> GuessCellsFromTransform(GamePlatform gp)
+        // ---------- Helpers ----------
+
+        /// <summary>
+        /// Compute which 2D grid cells a platform covers on a given level,
+        /// assuming its footprint is aligned to the 1x1 world grid AND
+        /// that rotation is in 90° steps (0, 90, 180, 270).
+        /// This is the single source of truth for runtime footprint.
+        /// </summary>
+        public void ComputeCellsForPlatform(GamePlatform gp, int level, List<Vector2Int> into)
         {
-            var list = new List<Vector2Int>(gp.Footprint.x * gp.Footprint.y);
+            into.Clear();
+            if (!gp || !grid) return;
 
-            // We align its center to nearest cell center and fill footprint, respecting 90° rotation.
-            Vector3 p = gp.transform.position;
-            int rotSteps = Mathf.RoundToInt((gp.transform.eulerAngles.y % 360f) / 90f) & 3;
-            bool swapped = (rotSteps % 2) == 1;
-            int fw = swapped ? gp.Footprint.y : gp.Footprint.x;
-            int fh = swapped ? gp.Footprint.x : gp.Footprint.y;
+            // Use platform's world position to find a "center" cell on the desired level
+            Vector3 worldCenter = gp.transform.position;
+            var centerCell = grid.WorldToCellOnLevel(worldCenter, new Vector3Int(0, 0, level));
+            int cx = centerCell.x;
+            int cy = centerCell.y;
 
-            // Compute the "start cell" (lower-left of the footprint rectangle)
-            float cs = worldGrid ? worldGrid.cellSize : 1f;
-            Vector3 o = worldGrid ? worldGrid.worldOrigin : Vector3.zero;
+            int w = Mathf.Max(1, gp.Footprint.x);
+            int h = Mathf.Max(1, gp.Footprint.y);
 
-            // nearest cell center
-            int cx = Mathf.RoundToInt((p.x - o.x) / cs);
-            int cy = Mathf.RoundToInt((p.z - o.z) / cs);
+            // Determine rotation in 90° steps (0..3)
+            float yaw = gp.transform.eulerAngles.y;
+            int steps = Mathf.RoundToInt(yaw / 90f) & 3;
+            bool swap = (steps % 2) == 1; // 90 or 270
+
+            int fw = swap ? h : w; // width in cells after rotation
+            int fh = swap ? w : h; // height in cells after rotation
 
             int startX = cx - fw / 2;
             int startY = cy - fh / 2;
 
             for (int y = 0; y < fh; y++)
+            {
                 for (int x = 0; x < fw; x++)
-                    list.Add(new Vector2Int(startX + x, startY + y));
+                {
+                    int gx = startX + x;
+                    int gy = startY + y;
+                    var cell = new Vector3Int(gx, gy, level);
+                    if (!grid.CellInBounds(cell))
+                        continue;
 
-            return list;
+                    into.Add(new Vector2Int(gx, gy));
+                }
+            }
         }
 
-        private static List<T> ListFromSet<T>(IEnumerable<T> s)
+        private static Transform GetOrCreateChild(Transform parent, string name)
         {
-            var l = new List<T>();
-            foreach (var x in s) l.Add(x);
-            return l;
+            var t = parent.Find(name);
+            if (!t)
+            {
+                var go = new GameObject(name);
+                t = go.transform;
+                t.SetParent(parent, false);
+                t.localPosition = Vector3.zero;
+                t.localRotation = Quaternion.identity;
+                t.localScale    = Vector3.one;
+            }
+            return t;
+        }
+
+        private void CreateNavLinkBetween(GamePlatform a, int socketA, GamePlatform b, int socketB, Vector3 center)
+        {
+            Vector3 posA = a.GetSocketWorldPosition(socketA);
+            Vector3 posB = b.GetSocketWorldPosition(socketB);
+
+            var owner = GetOrCreateChild(a.transform, "Links");
+            var go    = new GameObject($"Link_{a.name}_s{socketA}_to_{b.name}_s{socketB}");
+            go.transform.SetParent(owner, false);
+            go.transform.position = center;
+
+            var link = go.AddComponent<NavMeshLink>();
+            link.startPoint    = go.transform.InverseTransformPoint(posA);
+            link.endPoint      = go.transform.InverseTransformPoint(posB);
+            link.bidirectional = true;
+            link.width         = 0.6f;
+            link.area          = 0;
+            link.agentTypeID   = a.NavSurface ? a.NavSurface.agentTypeID : 0;
+
+            a.QueueRebuild();
+            b.QueueRebuild();
         }
     }
 }
