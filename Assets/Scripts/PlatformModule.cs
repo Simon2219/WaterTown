@@ -100,9 +100,12 @@ namespace WaterTown.Platforms
             var socketIndices = new List<int>();
             if (!platform) return socketIndices;
 
-            // Corner modules no longer have dedicated corner sockets; this path will simply do nothing.
+            // DEPRECATED: Corner modules no longer have dedicated corner sockets.
+            // This feature is not supported in the current socket system.
             if (isCornerModule)
             {
+                Debug.LogWarning($"[PlatformModule] '{name}': isCornerModule is deprecated. " +
+                                 "Corner sockets no longer exist. Set isCornerModule to false and use attachEdge instead.", this);
                 int nearestCornerIndex = FindNearestCornerSocketIndex(platform);
                 if (nearestCornerIndex >= 0) socketIndices.Add(nearestCornerIndex);
                 return socketIndices;

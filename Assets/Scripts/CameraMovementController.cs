@@ -1,6 +1,6 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
-using Unity.Cinemachine;
+using Cinemachine;
 using UnityEngine.Serialization;
 
 [RequireComponent(typeof(PlayerInput))]

@@ -17,6 +17,8 @@ namespace Grid
     [DisallowMultipleComponent]
     public class WorldGrid : MonoBehaviour
     {
+        #region Configuration & Data Structures
+        
         [Header("Settings Asset (optional but recommended)")]
         [Tooltip("If assigned, the grid reads all configuration from this asset.")]
         public GridSettings settings;
@@ -73,7 +75,11 @@ namespace Grid
             Occupied  = 1 << 2,
             // Extend as needed: Preview = 1<<3, ServiceZone = 1<<4, etc.
         }
+        
+        #endregion
 
+        #region Lifecycle & Initialization
+        
         // ---------- Lifecycle ----------
 
         private void Awake()
@@ -132,7 +138,11 @@ namespace Grid
                 StructureChanged?.Invoke();
             }
         }
+        
+        #endregion
 
+        #region Coordinate Transforms & Bounds
+        
         // ---------- Bounds & transforms ----------
 
         /// <summary>True if (x,y,level) lies inside the grid.</summary>
@@ -275,7 +285,11 @@ namespace Grid
             );
             return true;
         }
+        
+        #endregion
 
+        #region Raycast Helpers
+        
         // ---------- Raycast helper ----------
 
         /// <summary>
@@ -296,7 +310,11 @@ namespace Grid
             cell = default; hitPoint = default;
             return false;
         }
+        
+        #endregion
 
+        #region Cell Data Access & Flags
+        
         // ---------- Single-cell data & flags ----------
 
         /// <summary>Read cell data if in bounds.</summary>
@@ -363,7 +381,11 @@ namespace Grid
         {
             return CellInBounds(cell) && (_cells[cell.x, cell.y, cell.z].flags & flags) != 0;
         }
+        
+        #endregion
 
+        #region Area Operations
+        
         // ---------- Area helpers (two corners, inclusive, level = a.z) ----------
 
         private void ClampAreaInclusive(Vector3Int a, Vector3Int b, out Vector3Int min, out Vector3Int max)
@@ -502,7 +524,11 @@ namespace Grid
                 if ((_cells[x, y, min.z].flags & flags) != 0) count++;
             return count;
         }
+        
+        #endregion
 
+        #region Neighbor Queries
+        
         // ---------- Neighbors (pathing/adjacency) ----------
 
         public void GetNeighbors4(Vector3Int cell, List<Vector3Int> into)
@@ -525,5 +551,7 @@ namespace Grid
                 if (CellInBounds(n)) into.Add(n);
             }
         }
+        
+        #endregion
     }
 }

@@ -10,6 +10,12 @@ namespace WaterTown.Town
     [DisallowMultipleComponent]
     public class TownManager : MonoBehaviour
     {
+        #region Configuration & Constants
+        
+        // ---------- Constants ----------
+        private const int ROTATION_STEP_DEGREES = 90;
+        private const int ROTATION_MODULO_MASK = 3; // 0-3 for 4 cardinal directions (0°, 90°, 180°, 270°)
+
         [Header("Grid")]
         [SerializeField] private WorldGrid grid;
         public WorldGrid Grid => grid;
@@ -39,6 +45,14 @@ namespace WaterTown.Town
         private static readonly List<GamePlatform> _tmpPlatforms = new();
         private readonly List<Vector2Int> _tmpCells2D = new();
 
+        // Adjacency recomputation batching (performance optimization)
+        private bool _adjacencyDirty = false;
+        private bool _isRecomputingAdjacency = false;
+        
+        #endregion
+
+        #region Unity Lifecycle
+        
         // ---------- Unity lifecycle ----------
 
         private void Awake()
@@ -75,6 +89,16 @@ namespace WaterTown.Town
             }
         }
 
+        private void LateUpdate()
+        {
+            // Batch adjacency recomputation to once per frame if dirty
+            if (_adjacencyDirty && !_isRecomputingAdjacency)
+            {
+                _adjacencyDirty = false;
+                RecomputeAllAdjacency();
+            }
+        }
+
         private void OnDisable()
         {
             GamePlatform.PlatformRegistered   -= OnPlatformRegistered;
@@ -87,7 +111,11 @@ namespace WaterTown.Town
                     kvp.Key.PoseChanged -= OnPlatformPoseChanged;
             }
         }
+        
+        #endregion
 
+        #region GamePlatform Event Handlers
+        
         // ---------- GamePlatform events ----------
 
         private void OnPlatformRegistered(GamePlatform platform)
@@ -142,10 +170,14 @@ namespace WaterTown.Town
                 }
             }
 
-            // 3) Recompute adjacency for ALL platforms (global pass, same as SceneView tool)
-            RecomputeAllAdjacency();
+            // 3) Mark adjacency as dirty for batched recomputation (performance optimization)
+            MarkAdjacencyDirty();
         }
+        
+        #endregion
 
+        #region Public API (Platform Registration)
+        
         // ---------- Public API ----------
 
         /// <summary>
@@ -167,8 +199,13 @@ namespace WaterTown.Town
 
         /// <summary>
         /// Register a platform at a set of grid cells on a given level.
-        /// markOccupiedInGrid=false is used for the GHOST (preview): it still participates
-        /// in adjacency, but does NOT reserve cells in the WorldGrid.
+        /// 
+        /// markOccupiedInGrid controls ghost vs. permanent platforms:
+        /// - false (GHOST/PREVIEW): Participates in adjacency for railing previews,
+        ///                          but does NOT block placement in WorldGrid
+        /// - true (PERMANENT): Reserves cells and fully participates in the game world
+        /// 
+        /// This dual-mode design enables live preview of connections before placement.
         /// </summary>
         public void RegisterPlatform(
             GamePlatform platform,
@@ -211,10 +248,23 @@ namespace WaterTown.Town
                     var gridCell = new Vector3Int(cell2D.x, cell2D.y, level);
                     grid.TryAddFlag(gridCell, WorldGrid.CellFlag.Occupied, platformId: 0, payload: platform.GetInstanceID());
                 }
+                
+                // Build NavMesh for newly placed permanent platforms
+                // (Skip for preview platforms where markOccupiedInGrid = false)
+                platform.BuildLocalNavMesh();
             }
 
-            // Recompute adjacency for all platforms
-            RecomputeAllAdjacency();
+            // Mark adjacency for batched recomputation
+            MarkAdjacencyDirty();
+        }
+
+        /// <summary>
+        /// Marks adjacency as needing recomputation. Batched to LateUpdate for performance.
+        /// Multiple pose changes in the same frame will only trigger one recomputation.
+        /// </summary>
+        private void MarkAdjacencyDirty()
+        {
+            _adjacencyDirty = true;
         }
 
         /// <summary>
@@ -257,10 +307,14 @@ namespace WaterTown.Town
             // Clear connections on this platform
             platform.EditorResetAllConnections();
 
-            // Recompute adjacency for all remaining platforms
-            RecomputeAllAdjacency();
+            // Mark adjacency for batched recomputation
+            MarkAdjacencyDirty();
         }
+        
+        #endregion
 
+        #region Adjacency System (Grid-Based)
+        
         // ---------- Core adjacency logic (GLOBAL) ----------
 
         /// <summary>
@@ -464,10 +518,15 @@ namespace WaterTown.Town
         /// using grid cell adjacency checking:
         /// - Reset all connections/modules/railings
         /// - Check pairwise platform cell adjacency using WorldGrid
+        /// This is batched to run once per frame maximum via LateUpdate.
         /// </summary>
         private void RecomputeAllAdjacency()
         {
             if (!grid) return;
+
+            // Prevent recursive calls during adjacency computation
+            if (_isRecomputingAdjacency) return;
+            _isRecomputingAdjacency = true;
 
             _tmpPlatforms.Clear();
             foreach (var gp in GamePlatform.AllPlatforms)
@@ -504,8 +563,14 @@ namespace WaterTown.Town
                     ConnectIfAdjacentByGridCells(platformA, entryA, platformB, entryB);
                 }
             }
-        }
 
+            _isRecomputingAdjacency = false;
+        }
+        
+        #endregion
+
+        #region Helper Methods
+        
         // ---------- Helpers ----------
 
         /// <summary>
@@ -530,8 +595,8 @@ namespace WaterTown.Town
 
             // Determine rotation in 90° steps (0..3)
             float yaw = platform.transform.eulerAngles.y;
-            int rotationSteps = Mathf.RoundToInt(yaw / 90f) & 3;
-            bool isRotated90Or270 = (rotationSteps % 2) == 1; // 90 or 270
+            int rotationSteps = Mathf.RoundToInt(yaw / ROTATION_STEP_DEGREES) & ROTATION_MODULO_MASK;
+            bool isRotated90Or270 = (rotationSteps % 2) == 1; // 90° or 270° rotations swap width/height
 
             int rotatedWidth = isRotated90Or270 ? footprintHeight : footprintWidth; // width in cells after rotation
             int rotatedHeight = isRotated90Or270 ? footprintWidth : footprintHeight; // height in cells after rotation
@@ -553,6 +618,8 @@ namespace WaterTown.Town
                 }
             }
         }
+        
+        #endregion
 
     }
 }

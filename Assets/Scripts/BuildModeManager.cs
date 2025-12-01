@@ -15,6 +15,8 @@ namespace WaterTown.Building
     [DisallowMultipleComponent]
     public class BuildModeManager : MonoBehaviour
     {
+        #region Configuration & Dependencies
+        
         [Header("References")]
         [SerializeField] private TownManager townManager;
         [SerializeField] private WorldGrid grid;
@@ -46,7 +48,11 @@ namespace WaterTown.Building
         private bool _isValidPlacement = false;
         private List<Vector2Int> _ghostCells = new List<Vector2Int>();
         private List<Renderer> _ghostRenderers = new List<Renderer>();
+        
+        #endregion
 
+        #region Unity Lifecycle
+        
         // ---------- Unity Lifecycle ----------
 
         private void Awake()
@@ -58,28 +64,36 @@ namespace WaterTown.Building
 
         private void OnEnable()
         {
+            // Verify critical references before enabling
+            if (townManager == null || grid == null || mainCamera == null)
+            {
+                Debug.LogError("[BuildModeManager] Missing critical references. Disabling component.", this);
+                enabled = false;
+                return;
+            }
+
             if (gameUI != null)
                 gameUI.OnBlueprintSelected += OnBlueprintSelected;
 
-            if (placeAction != null)
+            if (placeAction != null && placeAction.action != null)
             {
                 placeAction.action.Enable();
                 placeAction.action.performed += OnPlacePerformed;
             }
 
-            if (cancelAction != null)
+            if (cancelAction != null && cancelAction.action != null)
             {
                 cancelAction.action.Enable();
                 cancelAction.action.performed += OnCancelPerformed;
             }
 
-            if (rotateCWAction != null)
+            if (rotateCWAction != null && rotateCWAction.action != null)
             {
                 rotateCWAction.action.Enable();
                 rotateCWAction.action.performed += OnRotateCWPerformed;
             }
 
-            if (rotateCCWAction != null)
+            if (rotateCCWAction != null && rotateCCWAction.action != null)
             {
                 rotateCCWAction.action.Enable();
                 rotateCCWAction.action.performed += OnRotateCCWPerformed;
@@ -91,25 +105,25 @@ namespace WaterTown.Building
             if (gameUI != null)
                 gameUI.OnBlueprintSelected -= OnBlueprintSelected;
 
-            if (placeAction != null)
+            if (placeAction != null && placeAction.action != null)
             {
                 placeAction.action.performed -= OnPlacePerformed;
                 placeAction.action.Disable();
             }
 
-            if (cancelAction != null)
+            if (cancelAction != null && cancelAction.action != null)
             {
                 cancelAction.action.performed -= OnCancelPerformed;
                 cancelAction.action.Disable();
             }
 
-            if (rotateCWAction != null)
+            if (rotateCWAction != null && rotateCWAction.action != null)
             {
                 rotateCWAction.action.performed -= OnRotateCWPerformed;
                 rotateCWAction.action.Disable();
             }
 
-            if (rotateCCWAction != null)
+            if (rotateCCWAction != null && rotateCCWAction.action != null)
             {
                 rotateCCWAction.action.performed -= OnRotateCCWPerformed;
                 rotateCCWAction.action.Disable();
@@ -127,7 +141,11 @@ namespace WaterTown.Building
                 UpdateGhostVisuals();
             }
         }
+        
+        #endregion
 
+        #region Blueprint Selection
+        
         // ---------- Blueprint Selection ----------
 
         private void OnBlueprintSelected(PlatformBlueprint blueprint)
@@ -143,7 +161,11 @@ namespace WaterTown.Building
             _currentRotation = 0f;
             CreateGhost();
         }
+        
+        #endregion
 
+        #region Ghost Management
+        
         // ---------- Ghost Management ----------
 
         private void CreateGhost()
@@ -207,7 +229,11 @@ namespace WaterTown.Building
             _ghostRenderers.Clear();
             _ghostCells.Clear();
         }
+        
+        #endregion
 
+        #region Ghost Updates & Validation
+        
         // ---------- Ghost Updates ----------
 
         private void UpdateGhostPosition()
@@ -260,7 +286,10 @@ namespace WaterTown.Building
 
             _isValidPlacement = areaFree && meetsAdjacency;
 
-            // Register ghost as preview (participates in railing preview but doesn't occupy)
+            // Register ghost as preview platform:
+            // - Does NOT mark cells as Occupied (players can still place here)
+            // - DOES participate in adjacency calculations (enables railing preview)
+            // This allows players to see how railings will look when platform is placed
             if (townManager != null && _ghostPlatformComponent != null)
                 townManager.RegisterPreviewPlatform(_ghostPlatformComponent, previewLevel);
         }
@@ -318,7 +347,11 @@ namespace WaterTown.Building
                 }
             }
         }
+        
+        #endregion
 
+        #region Input Handlers
+        
         // ---------- Input Handlers ----------
 
         private void OnPlacePerformed(InputAction.CallbackContext context)
@@ -365,7 +398,11 @@ namespace WaterTown.Building
 
             _ghostPlatform.transform.rotation = Quaternion.Euler(0f, _currentRotation, 0f);
         }
+        
+        #endregion
 
+        #region Platform Placement
+        
         // ---------- Placement ----------
 
         private void PlacePlatform()
@@ -390,10 +427,8 @@ namespace WaterTown.Building
             if (platformComponent != null && townManager != null)
             {
                 // Register as permanent platform (marks cells as Occupied)
+                // TownManager will handle NavMesh building via event subscription
                 townManager.RegisterPlatform(platformComponent, _ghostCells, previewLevel, markOccupiedInGrid: true);
-
-                // Build NavMesh
-                platformComponent.BuildLocalNavMesh();
             }
             else
             {
@@ -405,7 +440,11 @@ namespace WaterTown.Building
             // Keep ghost active for continued placement
             // (User can cancel with Cancel action or select different blueprint)
         }
+        
+        #endregion
 
+        #region Public API
+        
         // ---------- Public API ----------
 
         public bool IsInBuildMode => _ghostPlatform != null;
@@ -416,5 +455,7 @@ namespace WaterTown.Building
         {
             previewLevel = Mathf.Max(0, level);
         }
+        
+        #endregion
     }
 }

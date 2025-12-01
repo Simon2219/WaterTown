@@ -10,6 +10,8 @@ namespace WaterTown.Platforms
     [RequireComponent(typeof(NavMeshSurface))]
     public class GamePlatform : MonoBehaviour
     {
+        #region Global Registry & Events
+        
         // ---------- Global registry & events ----------
         public static event System.Action<GamePlatform> PlatformRegistered;
         public static event System.Action<GamePlatform> PlatformUnregistered;
@@ -22,7 +24,11 @@ namespace WaterTown.Platforms
 
         /// <summary>Fired whenever this platform's pose changes (position/rotation/scale).</summary>
         public event System.Action<GamePlatform> PoseChanged;
+        
+        #endregion
 
+        #region Footprint & NavMesh
+        
         // ---------- Footprint & NavMesh ----------
         [Header("Footprint (cells @ 1m)")]
         [SerializeField] private Vector2Int footprint = new Vector2Int(4, 4);
@@ -51,7 +57,11 @@ namespace WaterTown.Platforms
         private Vector3 _lastPos;
         private Quaternion _lastRot;
         private Vector3 _lastScale;
+        
+        #endregion
 
+        #region Edge & Socket System
+        
         // ---------- Edge enum (for compatibility with PlatformModule) ----------
 
         public enum Edge { North, East, South, West }
@@ -132,6 +142,9 @@ namespace WaterTown.Platforms
 
             sockets.Clear();
             _socketsBuilt = false;
+            
+            // Invalidate world position cache when rebuilding sockets
+            _worldPositionsCacheValid = false;
 
             int footprintWidth = Mathf.Max(1, footprint.x);
             int footprintLength = Mathf.Max(1, footprint.y);
@@ -185,18 +198,32 @@ namespace WaterTown.Platforms
             }
 
             _socketsBuilt = true;
-            _worldPositionsCacheValid = false; // Invalidate cache when sockets are rebuilt
+            
+            // Ensure cache is rebuilt on next access
+            _worldPositionsCacheValid = false;
         }
 
         public SocketInfo GetSocket(int index)
         {
             if (!_socketsBuilt) BuildSockets();
+            if (index < 0 || index >= sockets.Count)
+            {
+                Debug.LogWarning($"[GamePlatform] GetSocket: index {index} out of range (0..{sockets.Count - 1}).", this);
+                return default;
+            }
             return sockets[index];
         }
 
         public Vector3 GetSocketWorldPosition(int index)
         {
             if (!_socketsBuilt) BuildSockets();
+            
+            // Bounds check
+            if (index < 0 || index >= sockets.Count)
+            {
+                Debug.LogWarning($"[GamePlatform] GetSocketWorldPosition: index {index} out of range (0..{sockets.Count - 1}). Returning transform position.", this);
+                return transform.position;
+            }
             
             // Check if cache is valid
             if (!_worldPositionsCacheValid || _cachedWorldPositions == null || _cachedWorldPositions.Length != sockets.Count)
@@ -217,6 +244,11 @@ namespace WaterTown.Platforms
         public void SetSocketStatus(int index, SocketStatus status)
         {
             if (!_socketsBuilt) BuildSockets();
+            if (index < 0 || index >= sockets.Count)
+            {
+                Debug.LogWarning($"[GamePlatform] SetSocketStatus: index {index} out of range (0..{sockets.Count - 1}).", this);
+                return;
+            }
             var s = sockets[index];
             s.SetStatus(status);
             sockets[index] = s;
@@ -346,7 +378,11 @@ namespace WaterTown.Platforms
             Vector3 local = transform.InverseTransformPoint(worldPos);
             return FindNearestSocketIndexLocal(local);
         }
+        
+        #endregion
 
+        #region Module Registry
+        
         // ---------- Module registry ----------
 
         [System.Serializable]
@@ -401,7 +437,11 @@ namespace WaterTown.Platforms
             }
             _moduleRegs.Remove(moduleGo);
         }
+        
+        #endregion
 
+        #region Railing Registry
+        
         // ---------- Railing registry ----------
 
         private readonly Dictionary<int, List<PlatformRailing>> _socketToRailings = new();
@@ -526,7 +566,11 @@ namespace WaterTown.Platforms
                 sockets[i] = s;
             }
         }
+        
+        #endregion
 
+        #region Connection Management
+        
         public void SetModuleHidden(GameObject moduleGo, bool hidden)
         {
             if (!moduleGo) return;
@@ -614,7 +658,11 @@ namespace WaterTown.Platforms
             QueueRebuild();
             ConnectionsChanged?.Invoke(this);
         }
+        
+        #endregion
 
+        #region Lifecycle & Initialization
+        
         // ---------- Lifecycle ----------
 
         private void Awake()
@@ -703,7 +751,11 @@ namespace WaterTown.Platforms
                 NavSurface.BuildNavMesh();
             _pendingRebuild = null;
         }
+        
+        #endregion
 
+        #region Gizmos (Editor Visualization)
+        
         // ---------- Gizmos ----------
 
         public static class GizmoSettings
@@ -793,7 +845,11 @@ namespace WaterTown.Platforms
             }
         }
 #endif
+        
+        #endregion
 
+        #region NavMesh Link Creation & Adjacency (Deprecated)
+        
         // ---------- Link creation & adjacency ----------
 
         /// <summary>
@@ -930,5 +986,7 @@ namespace WaterTown.Platforms
             foreach (var r in railings)
                 r.EnsureRegistered();
         }
+        
+        #endregion
     }
 }

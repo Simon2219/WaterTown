@@ -76,27 +76,31 @@ namespace WaterTown.Building.UI
 
         private void OnEnable()
         {
+            if (baseControls == null) return; // Safety check (Awake should have disabled component)
+
             baseControls.Enable();
 
             // Always-on maps
-            _mapGlobal.Enable();   // ToggleBuildUI, etc.
-            _mapCamera.Enable();   // camera controls
+            _mapGlobal?.Enable();   // ToggleBuildUI, etc.
+            _mapCamera?.Enable();   // camera controls
 
             // Start in "gameplay" mode:
-            _mapPlayer.Enable();        // Select/Context/OpenMenu
-            _mapBuildMode.Disable();    // rotate/place/cancel inactive
+            _mapPlayer?.Enable();        // Select/Context/OpenMenu
+            _mapBuildMode?.Disable();    // rotate/place/cancel inactive
 
-            _actToggleBuildUI.performed += OnToggleBuildUI;
+            if (_actToggleBuildUI != null)
+                _actToggleBuildUI.performed += OnToggleBuildUI;
         }
 
         private void OnDisable()
         {
-            _actToggleBuildUI.performed -= OnToggleBuildUI;
+            if (_actToggleBuildUI != null)
+                _actToggleBuildUI.performed -= OnToggleBuildUI;
         }
 
         private void OnToggleBuildUI(InputAction.CallbackContext ctx)
         {
-            if (gameUI == null) return;
+            if (gameUI == null || _mapPlayer == null || _mapBuildMode == null) return;
 
             bool enteringBuildMode = !gameUI.IsBuildBarVisible;
 
