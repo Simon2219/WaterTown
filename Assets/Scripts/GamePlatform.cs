@@ -17,10 +17,10 @@ namespace WaterTown.Platforms
         private static readonly HashSet<GamePlatform> _allPlatforms = new();
         public static IReadOnlyCollection<GamePlatform> AllPlatforms => _allPlatforms;
 
-        /// <summary>Fired whenever this platform’s connection/railing state changes.</summary>
+        /// <summary>Fired whenever this platform's connection/railing state changes.</summary>
         public event System.Action<GamePlatform> ConnectionsChanged;
 
-        /// <summary>Fired whenever this platform’s pose changes (position/rotation/scale).</summary>
+        /// <summary>Fired whenever this platform's pose changes (position/rotation/scale).</summary>
         public event System.Action<GamePlatform> PoseChanged;
 
         // ---------- Footprint & NavMesh ----------
@@ -488,7 +488,7 @@ namespace WaterTown.Platforms
                 UpdateRailingVisibility(r);
         }
 
-        /// <summary>Recompute every socket’s status from current modules + connection state.</summary>
+        /// <summary>Recompute every socket's status from current modules + connection state.</summary>
         public void RefreshSocketStatuses()
         {
             if (!_socketsBuilt) BuildSockets();
@@ -847,178 +847,6 @@ namespace WaterTown.Platforms
                 bIdxSet.Add(p.bIdx);
                 sumA += a.GetSocketWorldPosition(p.aIdx);
                 sumB += b.GetSocketWorldPosition(p.bIdx);
-            }
-
-            a.ApplyConnectionVisuals(aIdxSet, true);
-            b.ApplyConnectionVisuals(bIdxSet, true);
-
-            a.QueueRebuild();
-            b.QueueRebuild();
-
-            Vector3 centerA = sumA / pairs.Count;
-            Vector3 centerB = sumB / pairs.Count;
-            CreateSimpleNavLink(a, centerA, centerB, navLinkWidth);
-
-            return true;
-        }
-
-        private static void CreateSimpleNavLink(GamePlatform owner, Vector3 aPos, Vector3 bPos, float linkWidth)
-        {
-            var parent = GetOrCreate(owner.transform, "Links");
-            var go = new GameObject("Link_" + owner.name);
-            go.transform.SetParent(parent, false);
-
-            Vector3 center = 0.5f * (aPos + bPos);
-            go.transform.position = center;
-
-            var link = go.AddComponent<NavMeshLink>();
-            link.startPoint = go.transform.InverseTransformPoint(aPos);
-            link.endPoint   = go.transform.InverseTransformPoint(bPos);
-            link.bidirectional = true;
-            link.width = linkWidth;
-            link.area = 0;
-            link.agentTypeID = owner.NavSurface ? owner.NavSurface.agentTypeID : 0;
-        }
-
-        /// <summary>
-        /// Creates a NavMesh link between two world positions. Link is attached to platform A.
-        /// </summary>
-        public static void CreateNavLinkBetween(GamePlatform platformA, Vector3 posA, GamePlatform platformB, Vector3 posB, float linkWidth)
-        {
-            if (!platformA || !platformB) return;
-            
-            var parent = GetOrCreate(platformA.transform, "Links");
-            var go = new GameObject($"Link_{platformA.name}_to_{platformB.name}");
-            go.transform.SetParent(parent, false);
-
-            Vector3 center = 0.5f * (posA + posB);
-            go.transform.position = center;
-
-            var link = go.AddComponent<NavMeshLink>();
-            link.startPoint = go.transform.InverseTransformPoint(posA);
-            link.endPoint   = go.transform.InverseTransformPoint(posB);
-            link.bidirectional = true;
-            link.width = linkWidth;
-            link.area = 0;
-            link.agentTypeID = platformA.NavSurface ? platformA.NavSurface.agentTypeID : 0;
-        }
-
-        private static Transform GetOrCreate(Transform parent, string name)
-        {
-            var t = parent.Find(name);
-            if (!t)
-            {
-                var go = new GameObject(name);
-                t = go.transform;
-                t.SetParent(parent, false);
-                t.localPosition = Vector3.zero;
-                t.localRotation = Quaternion.identity;
-                t.localScale = Vector3.one;
-            }
-            return t;
-        }
-
-        public void EnsureChildrenModulesRegistered()
-        {
-            var modules = GetComponentsInChildren<PlatformModule>(true);
-            foreach (var m in modules) m.EnsureRegistered();
-        }
-
-        public void EnsureChildrenRailingsRegistered()
-        {
-            var railings = GetComponentsInChildren<PlatformRailing>(true);
-            foreach (var r in railings)
-                r.EnsureRegistered();
-        }
-    }
-}
-
-            }
-
-            a.ApplyConnectionVisuals(aIdxSet, true);
-            b.ApplyConnectionVisuals(bIdxSet, true);
-
-            a.QueueRebuild();
-            b.QueueRebuild();
-
-            Vector3 centerA = sumA / pairs.Count;
-            Vector3 centerB = sumB / pairs.Count;
-            CreateSimpleNavLink(a, centerA, centerB, navLinkWidth);
-
-            return true;
-        }
-
-        private static void CreateSimpleNavLink(GamePlatform owner, Vector3 aPos, Vector3 bPos, float linkWidth)
-        {
-            var parent = GetOrCreate(owner.transform, "Links");
-            var go = new GameObject("Link_" + owner.name);
-            go.transform.SetParent(parent, false);
-
-            Vector3 center = 0.5f * (aPos + bPos);
-            go.transform.position = center;
-
-            var link = go.AddComponent<NavMeshLink>();
-            link.startPoint = go.transform.InverseTransformPoint(aPos);
-            link.endPoint   = go.transform.InverseTransformPoint(bPos);
-            link.bidirectional = true;
-            link.width = linkWidth;
-            link.area = 0;
-            link.agentTypeID = owner.NavSurface ? owner.NavSurface.agentTypeID : 0;
-        }
-
-        /// <summary>
-        /// Creates a NavMesh link between two world positions. Link is attached to platform A.
-        /// </summary>
-        public static void CreateNavLinkBetween(GamePlatform platformA, Vector3 posA, GamePlatform platformB, Vector3 posB, float linkWidth)
-        {
-            if (!platformA || !platformB) return;
-            
-            var parent = GetOrCreate(platformA.transform, "Links");
-            var go = new GameObject($"Link_{platformA.name}_to_{platformB.name}");
-            go.transform.SetParent(parent, false);
-
-            Vector3 center = 0.5f * (posA + posB);
-            go.transform.position = center;
-
-            var link = go.AddComponent<NavMeshLink>();
-            link.startPoint = go.transform.InverseTransformPoint(posA);
-            link.endPoint   = go.transform.InverseTransformPoint(posB);
-            link.bidirectional = true;
-            link.width = linkWidth;
-            link.area = 0;
-            link.agentTypeID = platformA.NavSurface ? platformA.NavSurface.agentTypeID : 0;
-        }
-
-        private static Transform GetOrCreate(Transform parent, string name)
-        {
-            var t = parent.Find(name);
-            if (!t)
-            {
-                var go = new GameObject(name);
-                t = go.transform;
-                t.SetParent(parent, false);
-                t.localPosition = Vector3.zero;
-                t.localRotation = Quaternion.identity;
-                t.localScale = Vector3.one;
-            }
-            return t;
-        }
-
-        public void EnsureChildrenModulesRegistered()
-        {
-            var modules = GetComponentsInChildren<PlatformModule>(true);
-            foreach (var m in modules) m.EnsureRegistered();
-        }
-
-        public void EnsureChildrenRailingsRegistered()
-        {
-            var railings = GetComponentsInChildren<PlatformRailing>(true);
-            foreach (var r in railings)
-                r.EnsureRegistered();
-        }
-    }
-}
-
             }
 
             a.ApplyConnectionVisuals(aIdxSet, true);
