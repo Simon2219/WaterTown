@@ -1,6 +1,6 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
-using Cinemachine;
+using Unity.Cinemachine;
 using UnityEngine.Serialization;
 
 [RequireComponent(typeof(PlayerInput))]
@@ -139,22 +139,25 @@ public class CameraMovementController : MonoBehaviour
     
     
     
-    /// <summary>
-    /// Processes horizontal movement relative to the assigned Cinemachine camera's orientation.
-    /// The effective move speed scales based on the zoom distance.
-    /// </summary>
-    private void ProcessHorizontalMovement()
-    {
-        // Cache the current transform position.
-        Vector3 currentPos = transform.position;
+        /// <summary>
+        /// Processes horizontal movement relative to the assigned Cinemachine camera's orientation.
+        /// The effective move speed scales based on the zoom distance.
+        /// </summary>
+        private void ProcessHorizontalMovement()
+        {
+            // Safety check - return if camera is not available
+            if (cinemachineCamera == null) return;
 
-        // Calculate effective move speed based on the zoom distance.
-        float zoomDistance = Vector3.Distance(currentPos, cinemachineCamera.transform.position);
-        float effectiveSpeed = moveSpeed * (1f + zoomDistance * moveSpeedZoomScale);
-        
-        // Get the camera's forward and right vectors projected onto the horizontal plane.
-        Vector3 camForward = Vector3.ProjectOnPlane(cinemachineCamera.transform.forward, Vector3.up).normalized;
-        Vector3 camRight = Vector3.ProjectOnPlane(cinemachineCamera.transform.right, Vector3.up).normalized;
+            // Cache the current transform position.
+            Vector3 currentPos = transform.position;
+
+            // Calculate effective move speed based on the zoom distance.
+            float zoomDistance = Vector3.Distance(currentPos, cinemachineCamera.transform.position);
+            float effectiveSpeed = moveSpeed * (1f + zoomDistance * moveSpeedZoomScale);
+            
+            // Get the camera's forward and right vectors projected onto the horizontal plane.
+            Vector3 camForward = Vector3.ProjectOnPlane(cinemachineCamera.transform.forward, Vector3.up).normalized;
+            Vector3 camRight = Vector3.ProjectOnPlane(cinemachineCamera.transform.right, Vector3.up).normalized;
 
         // Calculate the desired movement direction relative to the camera.
         Vector3 relativeMovement = (camForward * moveInput.y + camRight * moveInput.x) * effectiveSpeed;
