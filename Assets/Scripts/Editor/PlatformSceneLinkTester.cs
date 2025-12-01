@@ -2,6 +2,7 @@
 using UnityEditor;
 using UnityEngine;
 using WaterTown.Platforms;
+using WaterTown.Town;
 
 namespace Editor
 {
@@ -38,15 +39,80 @@ namespace Editor
             foreach (var p in all)
                 p.EditorResetAllConnections();
 
-            // Try pairwise connections for currently touching platforms
-            for (int i = 0; i < all.Length; i++)
+            // Try to use TownManager's grid-based adjacency checking if available
+            var townManager = Object.FindFirstObjectByType<TownManager>();
+            
+            if (townManager != null)
             {
-                var a = all[i];
-                for (int j = i + 1; j < all.Length; j++)
+                // Use grid-based adjacency checking
+                for (int i = 0; i < all.Length; i++)
                 {
-                    var b = all[j];
-                    GamePlatform.ConnectIfAdjacent(a, b);
+                    var a = all[i];
+                    for (int j = i + 1; j < all.Length; j++)
+                    {
+                        var b = all[j];
+                        townManager.ConnectPlatformsIfAdjacent(a, b);
+                    }
                 }
+            }
+            else
+            {
+                // Fallback to old distance-based method (deprecated)
+                #pragma warning disable 0618
+                for (int i = 0; i < all.Length; i++)
+                {
+                    var a = all[i];
+                    for (int j = i + 1; j < all.Length; j++)
+                    {
+                        var b = all[j];
+                        GamePlatform.ConnectIfAdjacent(a, b);
+                    }
+                }
+                #pragma warning restore 0618
+            }
+        }
+    }
+}
+#endif
+                    }
+                }
+            }
+            else
+            {
+                // Fallback to old distance-based method (deprecated)
+                #pragma warning disable 0618
+                for (int i = 0; i < all.Length; i++)
+                {
+                    var a = all[i];
+                    for (int j = i + 1; j < all.Length; j++)
+                    {
+                        var b = all[j];
+                        GamePlatform.ConnectIfAdjacent(a, b);
+                    }
+                }
+                #pragma warning restore 0618
+            }
+        }
+    }
+}
+#endif
+                    }
+                }
+            }
+            else
+            {
+                // Fallback to old distance-based method (deprecated)
+                #pragma warning disable 0618
+                for (int i = 0; i < all.Length; i++)
+                {
+                    var a = all[i];
+                    for (int j = i + 1; j < all.Length; j++)
+                    {
+                        var b = all[j];
+                        GamePlatform.ConnectIfAdjacent(a, b);
+                    }
+                }
+                #pragma warning restore 0618
             }
         }
     }

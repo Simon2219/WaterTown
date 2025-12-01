@@ -53,10 +53,10 @@ public class CameraMovementController : MonoBehaviour
     public float heightSmoothTime = 0.2f;
     
     [Tooltip("Height above Focus Object from which to start downward raycast.")]
-    public float raycastOriginHeight = 50f;
+    [SerializeField] private float raycastOriginHeight = 50f;
     
     [Tooltip("Maximum distance for the downward raycast.")]
-    public float raycastDistance = 100f;
+    [SerializeField] private float raycastDistance = 100f;
     
     [Tooltip("Layer mask for ground/buildings to follow.")]
     public LayerMask collisionLayers;

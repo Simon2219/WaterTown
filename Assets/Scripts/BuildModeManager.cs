@@ -40,6 +40,7 @@ namespace WaterTown.Building
         [Tooltip("Optional extra tint alpha for all renderers (only used if material supports _Color).")]
         [Range(0f, 1f)] public float ghostAlpha = 0.6f;
 
+
         // --- runtime ---
         private PlatformBlueprint _activeBlueprint;
 
@@ -51,6 +52,7 @@ namespace WaterTown.Building
         private GamePlatform _ghostPlatform;
 
         private readonly List<Renderer> _ghostRenderers = new();
+        private readonly List<Material> _ghostMaterialInstances = new(); // Track material instances for cleanup
         private int _rotationSteps; // 0..3 (90° steps)
         private readonly List<Vector2Int> _tmpCells = new();
 
@@ -120,11 +122,9 @@ namespace WaterTown.Building
 
             if (!cw && !ccw) return;
 
-            int step = Mathf.Max(1, (int)_activeBlueprint.RotStep); // enum -> int (90, 45, ...)
-            int logicalSteps = Mathf.Max(1, step / 90);             // we only support 90° grid steps
-
-            if (cw)  _rotationSteps = (_rotationSteps + logicalSteps) & 3;     // 0..3
-            if (ccw) _rotationSteps = (_rotationSteps + 4 - logicalSteps) & 3; // 0..3
+            // Simple 90° step rotation: 0 -> 1 -> 2 -> 3 -> 0
+            if (cw)  _rotationSteps = (_rotationSteps + 1) & 3; // 0..3
+            if (ccw) _rotationSteps = (_rotationSteps + 3) & 3; // 0..3 (adding 3 = subtracting 1 mod 4)
         }
 
         private void HandleCancel()
@@ -202,6 +202,13 @@ namespace WaterTown.Building
                 town.UnregisterPlatform(_ghostPlatform);
             }
 
+            // Clean up material instances
+            foreach (var matInstance in _ghostMaterialInstances)
+            {
+                if (matInstance) Destroy(matInstance);
+            }
+            _ghostMaterialInstances.Clear();
+
             if (_ghostGO)
             {
                 Destroy(_ghostGO);
@@ -231,7 +238,7 @@ namespace WaterTown.Building
             if (!grid.RaycastToCell(ray, levelRef, out var _ /*cell*/, out var hit))
                 return;
 
-            // Stable center-aligned snapping (rotation-aware only via _rotationSteps)
+            // Stable center-aligned snapping (rotation-aware via _rotationSteps)
             ComputePlacement(hit, out var worldCenter, out var worldRot);
 
             // position/rotate ghost
@@ -241,7 +248,9 @@ namespace WaterTown.Building
             _tmpCells.Clear();
             town.ComputeCellsForPlatform(_ghostPlatform, level: 0, _tmpCells);
 
-            bool isValid = _tmpCells.Count > 0 && town.IsAreaFree(_tmpCells, level: 0);
+            bool isValid = _tmpCells.Count > 0 
+                && town.IsAreaFree(_tmpCells, level: 0)
+                && ValidatePlacementRules(_tmpCells, level: 0);
 
             ApplyGhostMaterial(isValid);
 
@@ -268,25 +277,24 @@ namespace WaterTown.Building
         {
             var grid = town.Grid;
 
-            float cs = grid.cellSize;
+            float cellSize = grid.cellSize;
             Vector3 origin = grid.worldOrigin;
 
-            // Convert world to continuous grid coords (u,v), then snap center to nearest cell center
-            float u = (hitWorldOnGridPlane.x - origin.x) / cs;   // continuous column
-            float v = (hitWorldOnGridPlane.z - origin.z) / cs;   // continuous row
+            // Convert world to continuous grid coordinates, then snap center to nearest cell center
+            float continuousColumn = (hitWorldOnGridPlane.x - origin.x) / cellSize;   // continuous column
+            float continuousRow = (hitWorldOnGridPlane.z - origin.z) / cellSize;   // continuous row
 
-            int cx = Mathf.RoundToInt(u);
-            int cy = Mathf.RoundToInt(v);
+            int snappedColumn = Mathf.RoundToInt(continuousColumn);
+            int snappedRow = Mathf.RoundToInt(continuousRow);
 
-            // World center from snapped (cx,cy)
-            float cxWorld = origin.x + cx * cs;
-            float czWorld = origin.z + cy * cs;
-            float cyWorld = grid.GetLevelWorldY(0);
-            worldCenter = new Vector3(cxWorld, cyWorld, czWorld);
+            // World center from snapped grid coordinates
+            float worldX = origin.x + snappedColumn * cellSize;
+            float worldZ = origin.z + snappedRow * cellSize;
+            float worldY = grid.GetLevelWorldY(0);
+            worldCenter = new Vector3(worldX, worldY, worldZ);
 
-            // Rotation
-            int steps = _rotationSteps & 3;         // 0..3
-            worldRot = Quaternion.Euler(0f, steps * 90f, 0f);
+            // Rotation (90° steps only)
+            worldRot = Quaternion.Euler(0f, _rotationSteps * 90f, 0f);
         }
 
         /// <summary>
@@ -310,25 +318,116 @@ namespace WaterTown.Building
             }
 
             // Reuse ghost as final placed platform
-            var placedGO = _ghostGO;
-            var gp = _ghostPlatform;
+            var placedGameObject = _ghostGO;
+            var placedPlatform = _ghostPlatform;
 
             // Detach ghost from BuildModeManager control
             _ghostGO = null;
             _ghostPlatform = null;
             _ghostRenderers.Clear();
 
-            placedGO.name = _activeBlueprint.DisplayName;
-            placedGO.transform.SetPositionAndRotation(worldCenter, worldRot);
+            placedGameObject.name = _activeBlueprint.DisplayName;
+            placedGameObject.transform.SetPositionAndRotation(worldCenter, worldRot);
 
             // Register this platform in the grid / TownManager as a REAL placed platform
-            town.RegisterPlatform(gp, cells, level: 0, markOccupiedInGrid: true);
+            town.RegisterPlatform(placedPlatform, cells, level: 0, markOccupiedInGrid: true);
 
             // Let the platform build its local NavMesh if needed
-            gp.QueueRebuild();
+            placedPlatform.QueueRebuild();
 
             // For multi-place: create a NEW ghost at the next frame using the same blueprint.
             RebuildGhost();
+        }
+
+        /// <summary>
+        /// Validates placement rules from the active blueprint:
+        /// - requireEdgeAdjacency: platform must share an edge with an existing platform
+        /// - disallowCornerAdjacency: corner-only (diagonal) contact is insufficient
+        /// </summary>
+        private bool ValidatePlacementRules(List<Vector2Int> cells, int level)
+        {
+            if (_activeBlueprint == null) return true; // No rules = always valid
+            if (!_activeBlueprint.RequireEdgeAdjacency) return true; // Rule not enabled
+
+            // Check if any existing platform is adjacent
+            // Only check platforms that are actually placed (registered with TownManager)
+            var existingPlatforms = GamePlatform.AllPlatforms;
+            int placedPlatformCount = 0;
+            
+            // Check if ghost platform is adjacent to any existing platform
+            bool hasEdgeAdjacency = false;
+            bool hasCornerOnlyAdjacency = false;
+
+            foreach (var existingPlatform in existingPlatforms)
+            {
+                if (!existingPlatform || existingPlatform == _ghostPlatform) continue;
+                if (!existingPlatform.isActiveAndEnabled) continue;
+                
+                // Check if this platform is actually placed (not just a preview)
+                // We can check if it has cells registered in TownManager
+                var tmpCheckCells = new List<Vector2Int>();
+                town.ComputeCellsForPlatform(existingPlatform, level, tmpCheckCells);
+                if (tmpCheckCells.Count == 0) continue; // Skip platforms with no footprint
+                
+                // Check if platform is actually occupying cells (not just preview)
+                bool isPlaced = false;
+                foreach (var cell in tmpCheckCells)
+                {
+                    var gridCell = new Vector3Int(cell.x, cell.y, level);
+                    if (town.Grid.CellHasAnyFlag(gridCell, Grid.WorldGrid.CellFlag.Occupied))
+                    {
+                        isPlaced = true;
+                        break;
+                    }
+                }
+                if (!isPlaced) continue; // Skip preview/ghost platforms
+                
+                placedPlatformCount++;
+
+                // Get cells of existing platform
+                var existingCells = new List<Vector2Int>();
+                town.ComputeCellsForPlatform(existingPlatform, level, existingCells);
+
+                // Check for edge adjacency (sharing a side)
+                foreach (var ghostCell in cells)
+                {
+                    foreach (var existingCell in existingCells)
+                    {
+                        // Check if cells share an edge (not just a corner)
+                        int deltaX = Mathf.Abs(ghostCell.x - existingCell.x);
+                        int deltaY = Mathf.Abs(ghostCell.y - existingCell.y);
+
+                        if (deltaX == 1 && deltaY == 0) // Share horizontal edge
+                        {
+                            hasEdgeAdjacency = true;
+                        }
+                        else if (deltaX == 0 && deltaY == 1) // Share vertical edge
+                        {
+                            hasEdgeAdjacency = true;
+                        }
+                        else if (deltaX == 1 && deltaY == 1) // Diagonal (corner only)
+                        {
+                            hasCornerOnlyAdjacency = true;
+                        }
+                    }
+                }
+
+                // Break early if we found edge adjacency
+                if (hasEdgeAdjacency) break;
+            }
+
+            // First platform placement is always allowed
+            if (placedPlatformCount == 0)
+                return true;
+
+            // Apply rules
+            if (_activeBlueprint.RequireEdgeAdjacency && !hasEdgeAdjacency)
+                return false;
+
+            if (_activeBlueprint.DisallowCornerAdjacency && hasCornerOnlyAdjacency && !hasEdgeAdjacency)
+                return false;
+
+            return true;
         }
 
         private void ApplyGhostMaterial(bool isValid)
@@ -336,39 +435,303 @@ namespace WaterTown.Building
             if (!_ghostGO) return;
 
             // Prefer blueprint-defined preview materials, fallback to generic ones
-            Material validMat =
-                (_activeBlueprint != null && _activeBlueprint.PreviewValidMaterial != null)
-                    ? _activeBlueprint.PreviewValidMaterial
-                    : ghostValidMat;
+            Material baseMat =
+                isValid
+                    ? ((_activeBlueprint != null && _activeBlueprint.PreviewValidMaterial != null)
+                        ? _activeBlueprint.PreviewValidMaterial
+                        : ghostValidMat)
+                    : ((_activeBlueprint != null && _activeBlueprint.PreviewInvalidMaterial != null)
+                        ? _activeBlueprint.PreviewInvalidMaterial
+                        : ghostInvalidMat);
 
-            Material invalidMat =
-                (_activeBlueprint != null && _activeBlueprint.PreviewInvalidMaterial != null)
-                    ? _activeBlueprint.PreviewInvalidMaterial
-                    : ghostInvalidMat;
-
-            var mat = isValid ? validMat : invalidMat;
-            if (!mat) return;
+            if (!baseMat) return;
 
             if (_ghostRenderers.Count == 0)
                 _ghostGO.GetComponentsInChildren(true, _ghostRenderers);
 
-            for (int i = 0; i < _ghostRenderers.Count; i++)
+            for (int rendererIndex = 0; rendererIndex < _ghostRenderers.Count; rendererIndex++)
             {
-                var r = _ghostRenderers[i];
-                if (!r) continue;
+                var renderer = _ghostRenderers[rendererIndex];
+                if (!renderer) continue;
 
-                var mats = r.sharedMaterials;
-                for (int m = 0; m < mats.Length; m++)
-                    mats[m] = mat;
-                r.sharedMaterials = mats;
-
-                // Optional alpha tweak if the material supports _Color.
-                if (ghostAlpha < 0.999f && mat.HasProperty("_Color"))
+                // Get current materials (creates instances automatically)
+                var instanceMats = renderer.materials;
+                
+                // Replace each material slot with an instance of the preview material
+                for (int materialSlotIndex = 0; materialSlotIndex < instanceMats.Length; materialSlotIndex++)
                 {
-                    var c = mat.color;
-                    c.a = ghostAlpha;
-                    mat.color = c;
+                    // Destroy old instance if it exists
+                    if (instanceMats[materialSlotIndex] != null)
+                    {
+                        // Check if it's an instance we created (not the original shared material)
+                        bool isOurInstance = _ghostMaterialInstances.Contains(instanceMats[materialSlotIndex]);
+                        if (!isOurInstance)
+                        {
+                            // Destroy the auto-created instance Unity made
+                            if (Application.isPlaying)
+                                Destroy(instanceMats[materialSlotIndex]);
+                            else
+                                DestroyImmediate(instanceMats[materialSlotIndex]);
+                        }
+                    }
+
+                    // Create new instance
+                    var newInstance = new Material(baseMat);
+                    _ghostMaterialInstances.Add(newInstance);
+
+                    // Apply alpha tweak if needed
+                    if (ghostAlpha < 0.999f && newInstance.HasProperty("_Color"))
+                    {
+                        var materialColor = newInstance.color;
+                        materialColor.a = ghostAlpha;
+                        newInstance.color = materialColor;
+                    }
+
+                    instanceMats[materialSlotIndex] = newInstance;
                 }
+                renderer.materials = instanceMats;
+            }
+        }
+    }
+}
+
+                    if (town.Grid.CellHasAnyFlag(gridCell, Grid.WorldGrid.CellFlag.Occupied))
+                    {
+                        isPlaced = true;
+                        break;
+                    }
+                }
+                if (!isPlaced) continue; // Skip preview/ghost platforms
+                
+                placedPlatformCount++;
+
+                // Get cells of existing platform
+                var existingCells = new List<Vector2Int>();
+                town.ComputeCellsForPlatform(existingPlatform, level, existingCells);
+
+                // Check for edge adjacency (sharing a side)
+                foreach (var ghostCell in cells)
+                {
+                    foreach (var existingCell in existingCells)
+                    {
+                        // Check if cells share an edge (not just a corner)
+                        int deltaX = Mathf.Abs(ghostCell.x - existingCell.x);
+                        int deltaY = Mathf.Abs(ghostCell.y - existingCell.y);
+
+                        if (deltaX == 1 && deltaY == 0) // Share horizontal edge
+                        {
+                            hasEdgeAdjacency = true;
+                        }
+                        else if (deltaX == 0 && deltaY == 1) // Share vertical edge
+                        {
+                            hasEdgeAdjacency = true;
+                        }
+                        else if (deltaX == 1 && deltaY == 1) // Diagonal (corner only)
+                        {
+                            hasCornerOnlyAdjacency = true;
+                        }
+                    }
+                }
+
+                // Break early if we found edge adjacency
+                if (hasEdgeAdjacency) break;
+            }
+
+            // First platform placement is always allowed
+            if (placedPlatformCount == 0)
+                return true;
+
+            // Apply rules
+            if (_activeBlueprint.RequireEdgeAdjacency && !hasEdgeAdjacency)
+                return false;
+
+            if (_activeBlueprint.DisallowCornerAdjacency && hasCornerOnlyAdjacency && !hasEdgeAdjacency)
+                return false;
+
+            return true;
+        }
+
+        private void ApplyGhostMaterial(bool isValid)
+        {
+            if (!_ghostGO) return;
+
+            // Prefer blueprint-defined preview materials, fallback to generic ones
+            Material baseMat =
+                isValid
+                    ? ((_activeBlueprint != null && _activeBlueprint.PreviewValidMaterial != null)
+                        ? _activeBlueprint.PreviewValidMaterial
+                        : ghostValidMat)
+                    : ((_activeBlueprint != null && _activeBlueprint.PreviewInvalidMaterial != null)
+                        ? _activeBlueprint.PreviewInvalidMaterial
+                        : ghostInvalidMat);
+
+            if (!baseMat) return;
+
+            if (_ghostRenderers.Count == 0)
+                _ghostGO.GetComponentsInChildren(true, _ghostRenderers);
+
+            for (int rendererIndex = 0; rendererIndex < _ghostRenderers.Count; rendererIndex++)
+            {
+                var renderer = _ghostRenderers[rendererIndex];
+                if (!renderer) continue;
+
+                // Get current materials (creates instances automatically)
+                var instanceMats = renderer.materials;
+                
+                // Replace each material slot with an instance of the preview material
+                for (int materialSlotIndex = 0; materialSlotIndex < instanceMats.Length; materialSlotIndex++)
+                {
+                    // Destroy old instance if it exists
+                    if (instanceMats[materialSlotIndex] != null)
+                    {
+                        // Check if it's an instance we created (not the original shared material)
+                        bool isOurInstance = _ghostMaterialInstances.Contains(instanceMats[materialSlotIndex]);
+                        if (!isOurInstance)
+                        {
+                            // Destroy the auto-created instance Unity made
+                            if (Application.isPlaying)
+                                Destroy(instanceMats[materialSlotIndex]);
+                            else
+                                DestroyImmediate(instanceMats[materialSlotIndex]);
+                        }
+                    }
+
+                    // Create new instance
+                    var newInstance = new Material(baseMat);
+                    _ghostMaterialInstances.Add(newInstance);
+
+                    // Apply alpha tweak if needed
+                    if (ghostAlpha < 0.999f && newInstance.HasProperty("_Color"))
+                    {
+                        var materialColor = newInstance.color;
+                        materialColor.a = ghostAlpha;
+                        newInstance.color = materialColor;
+                    }
+
+                    instanceMats[materialSlotIndex] = newInstance;
+                }
+                renderer.materials = instanceMats;
+            }
+        }
+    }
+}
+
+                    if (town.Grid.CellHasAnyFlag(gridCell, Grid.WorldGrid.CellFlag.Occupied))
+                    {
+                        isPlaced = true;
+                        break;
+                    }
+                }
+                if (!isPlaced) continue; // Skip preview/ghost platforms
+                
+                placedPlatformCount++;
+
+                // Get cells of existing platform
+                var existingCells = new List<Vector2Int>();
+                town.ComputeCellsForPlatform(existingPlatform, level, existingCells);
+
+                // Check for edge adjacency (sharing a side)
+                foreach (var ghostCell in cells)
+                {
+                    foreach (var existingCell in existingCells)
+                    {
+                        // Check if cells share an edge (not just a corner)
+                        int deltaX = Mathf.Abs(ghostCell.x - existingCell.x);
+                        int deltaY = Mathf.Abs(ghostCell.y - existingCell.y);
+
+                        if (deltaX == 1 && deltaY == 0) // Share horizontal edge
+                        {
+                            hasEdgeAdjacency = true;
+                        }
+                        else if (deltaX == 0 && deltaY == 1) // Share vertical edge
+                        {
+                            hasEdgeAdjacency = true;
+                        }
+                        else if (deltaX == 1 && deltaY == 1) // Diagonal (corner only)
+                        {
+                            hasCornerOnlyAdjacency = true;
+                        }
+                    }
+                }
+
+                // Break early if we found edge adjacency
+                if (hasEdgeAdjacency) break;
+            }
+
+            // First platform placement is always allowed
+            if (placedPlatformCount == 0)
+                return true;
+
+            // Apply rules
+            if (_activeBlueprint.RequireEdgeAdjacency && !hasEdgeAdjacency)
+                return false;
+
+            if (_activeBlueprint.DisallowCornerAdjacency && hasCornerOnlyAdjacency && !hasEdgeAdjacency)
+                return false;
+
+            return true;
+        }
+
+        private void ApplyGhostMaterial(bool isValid)
+        {
+            if (!_ghostGO) return;
+
+            // Prefer blueprint-defined preview materials, fallback to generic ones
+            Material baseMat =
+                isValid
+                    ? ((_activeBlueprint != null && _activeBlueprint.PreviewValidMaterial != null)
+                        ? _activeBlueprint.PreviewValidMaterial
+                        : ghostValidMat)
+                    : ((_activeBlueprint != null && _activeBlueprint.PreviewInvalidMaterial != null)
+                        ? _activeBlueprint.PreviewInvalidMaterial
+                        : ghostInvalidMat);
+
+            if (!baseMat) return;
+
+            if (_ghostRenderers.Count == 0)
+                _ghostGO.GetComponentsInChildren(true, _ghostRenderers);
+
+            for (int rendererIndex = 0; rendererIndex < _ghostRenderers.Count; rendererIndex++)
+            {
+                var renderer = _ghostRenderers[rendererIndex];
+                if (!renderer) continue;
+
+                // Get current materials (creates instances automatically)
+                var instanceMats = renderer.materials;
+                
+                // Replace each material slot with an instance of the preview material
+                for (int materialSlotIndex = 0; materialSlotIndex < instanceMats.Length; materialSlotIndex++)
+                {
+                    // Destroy old instance if it exists
+                    if (instanceMats[materialSlotIndex] != null)
+                    {
+                        // Check if it's an instance we created (not the original shared material)
+                        bool isOurInstance = _ghostMaterialInstances.Contains(instanceMats[materialSlotIndex]);
+                        if (!isOurInstance)
+                        {
+                            // Destroy the auto-created instance Unity made
+                            if (Application.isPlaying)
+                                Destroy(instanceMats[materialSlotIndex]);
+                            else
+                                DestroyImmediate(instanceMats[materialSlotIndex]);
+                        }
+                    }
+
+                    // Create new instance
+                    var newInstance = new Material(baseMat);
+                    _ghostMaterialInstances.Add(newInstance);
+
+                    // Apply alpha tweak if needed
+                    if (ghostAlpha < 0.999f && newInstance.HasProperty("_Color"))
+                    {
+                        var materialColor = newInstance.color;
+                        materialColor.a = ghostAlpha;
+                        newInstance.color = materialColor;
+                    }
+
+                    instanceMats[materialSlotIndex] = newInstance;
+                }
+                renderer.materials = instanceMats;
             }
         }
     }

@@ -97,6 +97,10 @@ namespace WaterTown.Platforms
         [Header("Sockets (perimeter, 1m spacing)")]
         [SerializeField] private List<SocketInfo> sockets = new();
         private bool _socketsBuilt;
+        
+        // Cache for socket world positions (invalidated on transform change)
+        private Vector3[] _cachedWorldPositions;
+        private bool _worldPositionsCacheValid;
 
         /// <summary>Set of socket indices that are currently part of a connection.</summary>
         private readonly HashSet<int> _connectedSockets = new();
@@ -129,58 +133,59 @@ namespace WaterTown.Platforms
             sockets.Clear();
             _socketsBuilt = false;
 
-            int w = Mathf.Max(1, footprint.x);
-            int l = Mathf.Max(1, footprint.y);
-            float hx = w * 0.5f;
-            float hz = l * 0.5f;
+            int footprintWidth = Mathf.Max(1, footprint.x);
+            int footprintLength = Mathf.Max(1, footprint.y);
+            float halfWidth = footprintWidth * 0.5f;
+            float halfLength = footprintLength * 0.5f;
 
-            int idx = 0;
+            int socketIndex = 0;
 
-            // North edge (local z ≈ +hz), segments along x
-            for (int m = 0; m < w; m++)
+            // North edge (local z ≈ +halfLength), segments along x
+            for (int segmentIndex = 0; segmentIndex < footprintWidth; segmentIndex++)
             {
-                float x = -hx + 0.5f + m;
-                Vector3 lp = new Vector3(x, 0f, +hz);
-                var si = new SocketInfo();
-                si.Initialize(idx, lp, prev.TryGetValue(lp, out var old) ? old : SocketStatus.Linkable);
-                sockets.Add(si);
-                idx++;
+                float localX = -halfWidth + 0.5f + segmentIndex;
+                Vector3 localPosition = new Vector3(localX, 0f, +halfLength);
+                var socketInfo = new SocketInfo();
+                socketInfo.Initialize(socketIndex, localPosition, prev.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
+                sockets.Add(socketInfo);
+                socketIndex++;
             }
 
-            // South edge (local z ≈ -hz)
-            for (int m = 0; m < w; m++)
+            // South edge (local z ≈ -halfLength)
+            for (int segmentIndex = 0; segmentIndex < footprintWidth; segmentIndex++)
             {
-                float x = -hx + 0.5f + m;
-                Vector3 lp = new Vector3(x, 0f, -hz);
-                var si = new SocketInfo();
-                si.Initialize(idx, lp, prev.TryGetValue(lp, out var old) ? old : SocketStatus.Linkable);
-                sockets.Add(si);
-                idx++;
+                float localX = -halfWidth + 0.5f + segmentIndex;
+                Vector3 localPosition = new Vector3(localX, 0f, -halfLength);
+                var socketInfo = new SocketInfo();
+                socketInfo.Initialize(socketIndex, localPosition, prev.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
+                sockets.Add(socketInfo);
+                socketIndex++;
             }
 
-            // East edge (local x ≈ +hx), along z
-            for (int m = 0; m < l; m++)
+            // East edge (local x ≈ +halfWidth), along z
+            for (int segmentIndex = 0; segmentIndex < footprintLength; segmentIndex++)
             {
-                float z = +hz - 0.5f - m;
-                Vector3 lp = new Vector3(+hx, 0f, z);
-                var si = new SocketInfo();
-                si.Initialize(idx, lp, prev.TryGetValue(lp, out var old) ? old : SocketStatus.Linkable);
-                sockets.Add(si);
-                idx++;
+                float localZ = +halfLength - 0.5f - segmentIndex;
+                Vector3 localPosition = new Vector3(+halfWidth, 0f, localZ);
+                var socketInfo = new SocketInfo();
+                socketInfo.Initialize(socketIndex, localPosition, prev.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
+                sockets.Add(socketInfo);
+                socketIndex++;
             }
 
-            // West edge (local x ≈ -hx)
-            for (int m = 0; m < l; m++)
+            // West edge (local x ≈ -halfWidth)
+            for (int segmentIndex = 0; segmentIndex < footprintLength; segmentIndex++)
             {
-                float z = +hz - 0.5f - m;
-                Vector3 lp = new Vector3(-hx, 0f, z);
-                var si = new SocketInfo();
-                si.Initialize(idx, lp, prev.TryGetValue(lp, out var old) ? old : SocketStatus.Linkable);
-                sockets.Add(si);
-                idx++;
+                float localZ = +halfLength - 0.5f - segmentIndex;
+                Vector3 localPosition = new Vector3(-halfWidth, 0f, localZ);
+                var socketInfo = new SocketInfo();
+                socketInfo.Initialize(socketIndex, localPosition, prev.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
+                sockets.Add(socketInfo);
+                socketIndex++;
             }
 
             _socketsBuilt = true;
+            _worldPositionsCacheValid = false; // Invalidate cache when sockets are rebuilt
         }
 
         public SocketInfo GetSocket(int index)
@@ -192,7 +197,21 @@ namespace WaterTown.Platforms
         public Vector3 GetSocketWorldPosition(int index)
         {
             if (!_socketsBuilt) BuildSockets();
-            return transform.TransformPoint(sockets[index].LocalPos);
+            
+            // Check if cache is valid
+            if (!_worldPositionsCacheValid || _cachedWorldPositions == null || _cachedWorldPositions.Length != sockets.Count)
+            {
+                // Rebuild cache
+                if (_cachedWorldPositions == null || _cachedWorldPositions.Length != sockets.Count)
+                    _cachedWorldPositions = new Vector3[sockets.Count];
+                
+                for (int i = 0; i < sockets.Count; i++)
+                    _cachedWorldPositions[i] = transform.TransformPoint(sockets[i].LocalPos);
+                
+                _worldPositionsCacheValid = true;
+            }
+            
+            return _cachedWorldPositions[index];
         }
 
         public void SetSocketStatus(int index, SocketStatus status)
@@ -204,6 +223,42 @@ namespace WaterTown.Platforms
         }
 
         /// <summary>
+        /// Gets the socket index range (start, end inclusive) for a given edge.
+        /// Useful for iterating sockets on a specific edge.
+        /// </summary>
+        public void GetSocketIndexRangeForEdge(Edge edge, out int startIndex, out int endIndex)
+        {
+            if (!_socketsBuilt) BuildSockets();
+
+            int footprintWidth = Mathf.Max(1, footprint.x);
+            int footprintLength = Mathf.Max(1, footprint.y);
+
+            switch (edge)
+            {
+                case Edge.North:
+                    startIndex = 0;
+                    endIndex = footprintWidth - 1;
+                    break;
+
+                case Edge.South:
+                    startIndex = footprintWidth;
+                    endIndex = 2 * footprintWidth - 1;
+                    break;
+
+                case Edge.East:
+                    startIndex = 2 * footprintWidth;
+                    endIndex = 2 * footprintWidth + footprintLength - 1;
+                    break;
+
+                case Edge.West:
+                default:
+                    startIndex = 2 * footprintWidth + footprintLength;
+                    endIndex = 2 * footprintWidth + 2 * footprintLength - 1;
+                    break;
+            }
+        }
+
+        /// <summary>
         /// Compatibility helper for code that thinks in Edge+mark (PlatformModule, old tools).
         /// Uses the socket ordering defined in BuildSockets().
         /// </summary>
@@ -211,27 +266,27 @@ namespace WaterTown.Platforms
         {
             if (!_socketsBuilt) BuildSockets();
 
-            int w = Mathf.Max(1, footprint.x);
-            int l = Mathf.Max(1, footprint.y);
+            int width = Mathf.Max(1, footprint.x);
+            int length = Mathf.Max(1, footprint.y);
 
             switch (edge)
             {
                 case Edge.North:
-                    mark = Mathf.Clamp(mark, 0, w - 1);
+                    mark = Mathf.Clamp(mark, 0, width - 1);
                     return mark;
 
                 case Edge.South:
-                    mark = Mathf.Clamp(mark, 0, w - 1);
-                    return w + mark;
+                    mark = Mathf.Clamp(mark, 0, width - 1);
+                    return width + mark;
 
                 case Edge.East:
-                    mark = Mathf.Clamp(mark, 0, l - 1);
-                    return 2 * w + mark;
+                    mark = Mathf.Clamp(mark, 0, length - 1);
+                    return 2 * width + mark;
 
                 case Edge.West:
                 default:
-                    mark = Mathf.Clamp(mark, 0, l - 1);
-                    return 2 * w + l + mark;
+                    mark = Mathf.Clamp(mark, 0, length - 1);
+                    return 2 * width + length + mark;
             }
         }
 
@@ -593,6 +648,9 @@ namespace WaterTown.Platforms
                 _lastRot = transform.rotation;
                 _lastScale = transform.localScale;
 
+                // Invalidate world position cache on transform change
+                _worldPositionsCacheValid = false;
+
                 PoseChanged?.Invoke(this);
             }
         }
@@ -699,8 +757,8 @@ namespace WaterTown.Platforms
 
             if (!_socketsBuilt) BuildSockets();
 
-            int w = Mathf.Max(1, footprint.x);
-            int l = Mathf.Max(1, footprint.y);
+            int footprintWidth = Mathf.Max(1, footprint.x);
+            int footprintLength = Mathf.Max(1, footprint.y);
 
             for (int i = 0; i < sockets.Count; i++)
             {
@@ -724,10 +782,10 @@ namespace WaterTown.Platforms
                     // Reconstruct pseudo edge+mark only for labeling (for debug)
                     Edge edge;
                     int mark;
-                    if (i < w)                { edge = Edge.North; mark = i; }
-                    else if (i < 2 * w)       { edge = Edge.South; mark = i - w; }
-                    else if (i < 2 * w + l)   { edge = Edge.East;  mark = i - 2 * w; }
-                    else                      { edge = Edge.West;  mark = i - (2 * w + l); }
+                    if (i < footprintWidth)                { edge = Edge.North; mark = i; }
+                    else if (i < 2 * footprintWidth)       { edge = Edge.South; mark = i - footprintWidth; }
+                    else if (i < 2 * footprintWidth + footprintLength)   { edge = Edge.East;  mark = i - 2 * footprintWidth; }
+                    else                      { edge = Edge.West;  mark = i - (2 * footprintWidth + footprintLength); }
 
                     string label = $"#{i} [{edge}:{mark}] {s.Status}";
                     UnityEditor.Handles.Label(wp + Vector3.up * 0.05f, label);
@@ -736,20 +794,25 @@ namespace WaterTown.Platforms
         }
 #endif
 
-        // ---------- Link creation & adjacency (socket-position based) ----------
+        // ---------- Link creation & adjacency ----------
 
         /// <summary>
-        /// Check if two platforms are adjacent on the same level by matching perimeter socket
-        /// positions in world space. If yes, mark those sockets as connected and create a NavMeshLink.
+        /// [DEPRECATED: Use TownManager's grid-based adjacency checking instead]
+        /// Check if two platforms are adjacent by matching socket positions.
+        /// This method uses distance-based calculations which should be replaced with grid cell adjacency.
+        /// Kept for backward compatibility with editor tools.
         /// </summary>
-        public static bool ConnectIfAdjacent(GamePlatform a, GamePlatform b)
+        [System.Obsolete("Use TownManager's grid-based adjacency checking instead. This method uses distance calculations.")]
+        public static bool ConnectIfAdjacent(GamePlatform a, GamePlatform b, 
+            float socketMatchingDistance = 0.25f, 
+            float heightTolerance = 0.1f, 
+            float navLinkWidth = 0.6f)
         {
             if (!a || !b || a == b) return false;
             if (!a._socketsBuilt) a.BuildSockets();
             if (!b._socketsBuilt) b.BuildSockets();
 
             var pairs = new List<(int aIdx, int bIdx)>();
-            float maxDist = 0.25f; // distance threshold for matching sockets
 
             var aSockets = a.Sockets;
             var bSockets = b.Sockets;
@@ -762,11 +825,11 @@ namespace WaterTown.Platforms
                     Vector3 wb = b.GetSocketWorldPosition(j);
 
                     // Require same approximate height (same deck level)
-                    if (Mathf.Abs(wa.y - wb.y) > 0.1f) continue;
+                    if (Mathf.Abs(wa.y - wb.y) > heightTolerance) continue;
 
                     Vector3 diff = wb - wa;
                     diff.y = 0f;
-                    if (diff.sqrMagnitude <= maxDist * maxDist)
+                    if (diff.sqrMagnitude <= socketMatchingDistance * socketMatchingDistance)
                         pairs.Add((i, j));
                 }
             }
@@ -794,12 +857,12 @@ namespace WaterTown.Platforms
 
             Vector3 centerA = sumA / pairs.Count;
             Vector3 centerB = sumB / pairs.Count;
-            CreateSimpleNavLink(a, centerA, centerB);
+            CreateSimpleNavLink(a, centerA, centerB, navLinkWidth);
 
             return true;
         }
 
-        private static void CreateSimpleNavLink(GamePlatform owner, Vector3 aPos, Vector3 bPos)
+        private static void CreateSimpleNavLink(GamePlatform owner, Vector3 aPos, Vector3 bPos, float linkWidth)
         {
             var parent = GetOrCreate(owner.transform, "Links");
             var go = new GameObject("Link_" + owner.name);
@@ -812,9 +875,204 @@ namespace WaterTown.Platforms
             link.startPoint = go.transform.InverseTransformPoint(aPos);
             link.endPoint   = go.transform.InverseTransformPoint(bPos);
             link.bidirectional = true;
-            link.width = 0.6f;
+            link.width = linkWidth;
             link.area = 0;
             link.agentTypeID = owner.NavSurface ? owner.NavSurface.agentTypeID : 0;
+        }
+
+        /// <summary>
+        /// Creates a NavMesh link between two world positions. Link is attached to platform A.
+        /// </summary>
+        public static void CreateNavLinkBetween(GamePlatform platformA, Vector3 posA, GamePlatform platformB, Vector3 posB, float linkWidth)
+        {
+            if (!platformA || !platformB) return;
+            
+            var parent = GetOrCreate(platformA.transform, "Links");
+            var go = new GameObject($"Link_{platformA.name}_to_{platformB.name}");
+            go.transform.SetParent(parent, false);
+
+            Vector3 center = 0.5f * (posA + posB);
+            go.transform.position = center;
+
+            var link = go.AddComponent<NavMeshLink>();
+            link.startPoint = go.transform.InverseTransformPoint(posA);
+            link.endPoint   = go.transform.InverseTransformPoint(posB);
+            link.bidirectional = true;
+            link.width = linkWidth;
+            link.area = 0;
+            link.agentTypeID = platformA.NavSurface ? platformA.NavSurface.agentTypeID : 0;
+        }
+
+        private static Transform GetOrCreate(Transform parent, string name)
+        {
+            var t = parent.Find(name);
+            if (!t)
+            {
+                var go = new GameObject(name);
+                t = go.transform;
+                t.SetParent(parent, false);
+                t.localPosition = Vector3.zero;
+                t.localRotation = Quaternion.identity;
+                t.localScale = Vector3.one;
+            }
+            return t;
+        }
+
+        public void EnsureChildrenModulesRegistered()
+        {
+            var modules = GetComponentsInChildren<PlatformModule>(true);
+            foreach (var m in modules) m.EnsureRegistered();
+        }
+
+        public void EnsureChildrenRailingsRegistered()
+        {
+            var railings = GetComponentsInChildren<PlatformRailing>(true);
+            foreach (var r in railings)
+                r.EnsureRegistered();
+        }
+    }
+}
+
+            }
+
+            a.ApplyConnectionVisuals(aIdxSet, true);
+            b.ApplyConnectionVisuals(bIdxSet, true);
+
+            a.QueueRebuild();
+            b.QueueRebuild();
+
+            Vector3 centerA = sumA / pairs.Count;
+            Vector3 centerB = sumB / pairs.Count;
+            CreateSimpleNavLink(a, centerA, centerB, navLinkWidth);
+
+            return true;
+        }
+
+        private static void CreateSimpleNavLink(GamePlatform owner, Vector3 aPos, Vector3 bPos, float linkWidth)
+        {
+            var parent = GetOrCreate(owner.transform, "Links");
+            var go = new GameObject("Link_" + owner.name);
+            go.transform.SetParent(parent, false);
+
+            Vector3 center = 0.5f * (aPos + bPos);
+            go.transform.position = center;
+
+            var link = go.AddComponent<NavMeshLink>();
+            link.startPoint = go.transform.InverseTransformPoint(aPos);
+            link.endPoint   = go.transform.InverseTransformPoint(bPos);
+            link.bidirectional = true;
+            link.width = linkWidth;
+            link.area = 0;
+            link.agentTypeID = owner.NavSurface ? owner.NavSurface.agentTypeID : 0;
+        }
+
+        /// <summary>
+        /// Creates a NavMesh link between two world positions. Link is attached to platform A.
+        /// </summary>
+        public static void CreateNavLinkBetween(GamePlatform platformA, Vector3 posA, GamePlatform platformB, Vector3 posB, float linkWidth)
+        {
+            if (!platformA || !platformB) return;
+            
+            var parent = GetOrCreate(platformA.transform, "Links");
+            var go = new GameObject($"Link_{platformA.name}_to_{platformB.name}");
+            go.transform.SetParent(parent, false);
+
+            Vector3 center = 0.5f * (posA + posB);
+            go.transform.position = center;
+
+            var link = go.AddComponent<NavMeshLink>();
+            link.startPoint = go.transform.InverseTransformPoint(posA);
+            link.endPoint   = go.transform.InverseTransformPoint(posB);
+            link.bidirectional = true;
+            link.width = linkWidth;
+            link.area = 0;
+            link.agentTypeID = platformA.NavSurface ? platformA.NavSurface.agentTypeID : 0;
+        }
+
+        private static Transform GetOrCreate(Transform parent, string name)
+        {
+            var t = parent.Find(name);
+            if (!t)
+            {
+                var go = new GameObject(name);
+                t = go.transform;
+                t.SetParent(parent, false);
+                t.localPosition = Vector3.zero;
+                t.localRotation = Quaternion.identity;
+                t.localScale = Vector3.one;
+            }
+            return t;
+        }
+
+        public void EnsureChildrenModulesRegistered()
+        {
+            var modules = GetComponentsInChildren<PlatformModule>(true);
+            foreach (var m in modules) m.EnsureRegistered();
+        }
+
+        public void EnsureChildrenRailingsRegistered()
+        {
+            var railings = GetComponentsInChildren<PlatformRailing>(true);
+            foreach (var r in railings)
+                r.EnsureRegistered();
+        }
+    }
+}
+
+            }
+
+            a.ApplyConnectionVisuals(aIdxSet, true);
+            b.ApplyConnectionVisuals(bIdxSet, true);
+
+            a.QueueRebuild();
+            b.QueueRebuild();
+
+            Vector3 centerA = sumA / pairs.Count;
+            Vector3 centerB = sumB / pairs.Count;
+            CreateSimpleNavLink(a, centerA, centerB, navLinkWidth);
+
+            return true;
+        }
+
+        private static void CreateSimpleNavLink(GamePlatform owner, Vector3 aPos, Vector3 bPos, float linkWidth)
+        {
+            var parent = GetOrCreate(owner.transform, "Links");
+            var go = new GameObject("Link_" + owner.name);
+            go.transform.SetParent(parent, false);
+
+            Vector3 center = 0.5f * (aPos + bPos);
+            go.transform.position = center;
+
+            var link = go.AddComponent<NavMeshLink>();
+            link.startPoint = go.transform.InverseTransformPoint(aPos);
+            link.endPoint   = go.transform.InverseTransformPoint(bPos);
+            link.bidirectional = true;
+            link.width = linkWidth;
+            link.area = 0;
+            link.agentTypeID = owner.NavSurface ? owner.NavSurface.agentTypeID : 0;
+        }
+
+        /// <summary>
+        /// Creates a NavMesh link between two world positions. Link is attached to platform A.
+        /// </summary>
+        public static void CreateNavLinkBetween(GamePlatform platformA, Vector3 posA, GamePlatform platformB, Vector3 posB, float linkWidth)
+        {
+            if (!platformA || !platformB) return;
+            
+            var parent = GetOrCreate(platformA.transform, "Links");
+            var go = new GameObject($"Link_{platformA.name}_to_{platformB.name}");
+            go.transform.SetParent(parent, false);
+
+            Vector3 center = 0.5f * (posA + posB);
+            go.transform.position = center;
+
+            var link = go.AddComponent<NavMeshLink>();
+            link.startPoint = go.transform.InverseTransformPoint(posA);
+            link.endPoint   = go.transform.InverseTransformPoint(posB);
+            link.bidirectional = true;
+            link.width = linkWidth;
+            link.area = 0;
+            link.agentTypeID = platformA.NavSurface ? platformA.NavSurface.agentTypeID : 0;
         }
 
         private static Transform GetOrCreate(Transform parent, string name)
