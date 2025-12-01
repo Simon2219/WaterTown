@@ -1,0 +1,30 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7d7cca3afba091b4889193da9331b173, type: 3}
+  m_Name: PlatformData_House_Test
+  m_EditorClassIdentifier: Assembly-CSharp::PlatformBlueprint
+  id: platform.house_test_1
+  displayName: Platform
+  icon: {fileID: 0}
+  category: Default
+  description: 
+  runtimePrefab: {fileID: 7036358462029885031, guid: f9c9b1ff1ed09174385b40e2a1db8fc7, type: 3}
+  previewPrefab: {fileID: 0}
+  previewValidMaterial: {fileID: 0}
+  previewInvalidMaterial: {fileID: 0}
+  footprint: {x: 4, y: 4}
+  pivot: 0
+  rotationStep: 90
+  requireEdgeAdjacency: 1
+  disallowCornerAdjacency: 1
+  cost: 0
+  costCurrency: Credits

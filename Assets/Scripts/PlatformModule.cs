@@ -7,11 +7,11 @@ namespace WaterTown.Platforms
     public class PlatformModule : MonoBehaviour
     {
         [Header("Size (meters on 1m grid)")]
-        [Min(1)] public int sizeAlongMeters = 2;   // occupies exactly sizeAlongMeters marks
+        [Min(1)] public int sizeAlongMeters = 2;   // occupies exactly sizeAlongMeters segments
         [Min(1)] public int sizeInwardMeters = 1;  // reserved for future (depth), not used for sockets
 
         [Header("Behavior")]
-        public bool isCornerModule = false; // true: occupy nearest corner socket only
+        public bool isCornerModule = false; // true: occupy nearest corner socket only (no-op with segment-only sockets)
         public bool blocksLink = false;     // true & active => socket becomes Occupied after Refresh
 
         public enum EdgeOverride { Auto, North, East, South, West }
@@ -100,6 +100,7 @@ namespace WaterTown.Platforms
             var result = new List<int>();
             if (!gp) return result;
 
+            // Corner modules no longer have dedicated corner sockets; this path will simply do nothing.
             if (isCornerModule)
             {
                 int nearest = NearestCornerIndex(gp);
@@ -138,12 +139,14 @@ namespace WaterTown.Platforms
             }
 
             float coord = edgeIsX ? lp.x : lp.z;
-            int kCenter = Mathf.RoundToInt(coord - baseCoord);
+            int lenSegments = gp.EdgeLengthMeters(edge); // same as len
+
+            // We want exactly sizeAlongMeters contiguous segment indices 0..len-1
+            float t = coord - baseCoord;  // 0..len
+            int centerMark = Mathf.Clamp(Mathf.RoundToInt(t - 0.5f), 0, Mathf.Max(0, lenSegments - 1));
 
             int L = Mathf.Max(1, sizeAlongMeters);
-
-            // Ensure exactly L marks within [0 .. len-1] (corners are 0 and len, skip them for mids)
-            int start = Mathf.Clamp(kCenter - (L / 2), 0, Mathf.Max(0, len - L));
+            int start = Mathf.Clamp(centerMark - L / 2, 0, Mathf.Max(0, lenSegments - L));
             int end   = start + (L - 1); // inclusive
 
             for (int m = start; m <= end; m++)
@@ -157,6 +160,8 @@ namespace WaterTown.Platforms
 
         private int NearestCornerIndex(GamePlatform gp)
         {
+            // With new segment-only sockets, there are no true corner sockets.
+            // This remains for backward compatibility; it will usually return -1.
             int best = -1; float bestD = float.MaxValue;
             var sockets = gp.Sockets;
             Vector3 myPos = transform.position;
@@ -180,6 +185,10 @@ namespace WaterTown.Platforms
             ApplyVisibilityImmediate();
         }
 
+        /// <summary>
+        /// Hidden = GameObject inactive (NOT destroyed).
+        /// This matches the previous behavior the system relied on.
+        /// </summary>
         private void ApplyVisibilityImmediate()
         {
             bool shouldBeActive = !_isHidden;

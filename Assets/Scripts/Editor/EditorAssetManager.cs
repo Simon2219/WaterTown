@@ -1,9 +1,11 @@
 #if UNITY_EDITOR
 using System.Collections.Generic;
+using System.IO;
 using Unity.AI.Navigation;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.AI;
 using WaterTown.Platforms;
 
 namespace Editor
@@ -19,28 +21,36 @@ namespace Editor
         }
 
         // -------- UI state --------
-        private int _wCells = 4;                   // width (X), 1 m per cell
-        private int _lCells = 4;                   // length (Z), 1 m per cell
-        private float _inset = 0.05f;              // inward inset from edge (m)
-        private float _railY = 0f;                 // local Y (0 if deck pivot is at top)
-        private GameObject _straightPrefab;        // 2.0 m segment
-        private GameObject _cornerPrefab;          // 1.0 m L piece (pivot at OUTER TIP)
+        private int _wCells = 4;
+        private int _lCells = 4;
+        private float _inset = 0.05f;
+        private float _railY = 0f;
 
-        private const float STRAIGHT_LEN = 2.0f;
-        private const float CORNER_LEN   = 1.0f;
+        private GameObject _postPrefab;
+        private GameObject _railPrefab;
+
+        private enum RailForwardAxis
+        {
+            PlusZ,
+            MinusZ,
+            PlusX,
+            MinusX
+        }
+
+        [SerializeField] private RailForwardAxis _railForwardAxis = RailForwardAxis.PlusZ;
 
         // ---- Platform Gizmos UI state ----
         private bool _gizmosVisible = GamePlatform.GizmoSettings.ShowGizmos;
         private bool _gizmosShowIndices = GamePlatform.GizmoSettings.ShowIndices;
         private float _gizmoSphereRadius = GamePlatform.GizmoSettings.SocketSphereRadius;
-        private Color _colFree     = GamePlatform.GizmoSettings.ColorFree;
+        private Color _colFree = GamePlatform.GizmoSettings.ColorFree;
         private Color _colOccupied = GamePlatform.GizmoSettings.ColorOccupied;
-        private Color _colLocked   = GamePlatform.GizmoSettings.ColorLocked;
+        private Color _colLocked = GamePlatform.GizmoSettings.ColorLocked;
         private Color _colDisabled = GamePlatform.GizmoSettings.ColorDisabled;
 
         // ---- Foldouts & scroll ----
         private bool _foldPlatformTools = true;
-        private bool _foldPlatformSetup = true;   // renamed
+        private bool _foldPlatformSetup = true;
         private bool _foldPlatformGizmos = true;
         private bool _foldNavMesh = true;
         private Vector2 _scroll;
@@ -58,7 +68,6 @@ namespace Editor
 
             _scroll = EditorGUILayout.BeginScrollView(_scroll);
 
-            // ===== Platform Tools (parent foldout) =====
             _foldPlatformTools = EditorGUILayout.Foldout(_foldPlatformTools, "Platform Tools", true);
             if (_foldPlatformTools)
             {
@@ -82,7 +91,10 @@ namespace Editor
                         }
                         else
                         {
-                            EditorGUILayout.HelpBox("Open a prefab (double-click in Project). Button enables only if the prefab root name contains 'Platform'.", MessageType.Info);
+                            EditorGUILayout.HelpBox(
+                                "Open a prefab (double-click in Project). " +
+                                "Button enables only if the prefab root name contains 'Platform'.",
+                                MessageType.Info);
                         }
                     }
 
@@ -92,36 +104,44 @@ namespace Editor
                     {
                         _wCells = Mathf.Max(1, EditorGUILayout.IntField("Width  (cells, X)", _wCells));
                         _lCells = Mathf.Max(1, EditorGUILayout.IntField("Length (cells, Z)", _lCells));
-                        _railY  = EditorGUILayout.FloatField("Railing Y (local)", _railY);
-                        _inset  = Mathf.Max(0f, EditorGUILayout.FloatField("Inset inward from edge (m)", _inset));
+                        _railY = EditorGUILayout.FloatField("Railing Y (local)", _railY);
+                        _inset = Mathf.Max(0f, EditorGUILayout.FloatField("Inset inward from edge (m)", _inset));
 
                         EditorGUILayout.Space(4);
-                        _straightPrefab = (GameObject)EditorGUILayout.ObjectField("Straight Prefab (2 m)", _straightPrefab, typeof(GameObject), false);
-                        _cornerPrefab   = (GameObject)EditorGUILayout.ObjectField("Corner Prefab (1 m, pivot at OUTER TIP)", _cornerPrefab, typeof(GameObject), false);
+                        _postPrefab = (GameObject)EditorGUILayout.ObjectField("Post Prefab", _postPrefab, typeof(GameObject), false);
+                        _railPrefab = (GameObject)EditorGUILayout.ObjectField("Rail Prefab (1 m)", _railPrefab, typeof(GameObject), false);
+
+                        EditorGUILayout.Space(4);
+                        _railForwardAxis = (RailForwardAxis)EditorGUILayout.EnumPopup("Rail Local Length Axis", _railForwardAxis);
 
                         bool canRun = inPrefabMode
                                       && root != null
                                       && root.name.ToLowerInvariant().Contains("platform")
-                                      && _straightPrefab != null
-                                      && _cornerPrefab   != null;
+                                      && _postPrefab != null
+                                      && _railPrefab != null;
 
                         using (new EditorGUI.DisabledScope(!canRun))
                         {
-                            if (GUILayout.Button("Run Platform Setup (Attach GamePlatform + Spawn Railings)"))
+                            if (GUILayout.Button("Run Platform Setup (GamePlatform + NavMeshSurface + Posts & Rails)"))
                             {
                                 Undo.RegisterFullObjectHierarchyUndo(root.gameObject, "Platform Setup");
 
-                                // Ensure GamePlatform exists, set footprint, build sockets
                                 var gp = root.GetComponent<GamePlatform>();
                                 if (!gp) gp = Undo.AddComponent<GamePlatform>(root.gameObject);
 
                                 var so = new SerializedObject(gp);
                                 so.FindProperty("footprint").vector2IntValue = new Vector2Int(_wCells, _lCells);
                                 so.ApplyModifiedProperties();
-                                gp.BuildSockets();
 
-                                // Spawn railings & register them by nearest sockets (position-based)
-                                SpawnRailingsAndRegisterByPosition(root, gp, _wCells, _lCells, _railY, _inset, _straightPrefab, _cornerPrefab);
+                                gp.BuildSockets();
+                                gp.RefreshSocketStatuses();
+
+                                EnsureNavMeshSurface(root);
+
+                                SpawnRailingsAndRegister(root, gp, _wCells, _lCells, _railY, _inset,
+                                    _postPrefab, _railPrefab, _railForwardAxis);
+
+                                BuildAndSaveNavMeshForPrefab(gp, root);
 
                                 EditorSceneManager.MarkSceneDirty(root.gameObject.scene);
                                 EditorGUIUtility.PingObject(root);
@@ -134,11 +154,13 @@ namespace Editor
                                 "Requirements:\n" +
                                 "• Open a Prefab (Prefab Mode)\n" +
                                 "• Prefab root name contains 'Platform'\n" +
-                                "• Assign Straight (2 m) and Corner (1 m) prefabs\n\n" +
+                                "• Assign Post and Rail (1 m) prefabs\n\n" +
                                 "This will:\n" +
                                 "• Ensure the prefab has a GamePlatform component\n" +
-                                "• Build perimeter sockets at 1 m spacing (clockwise from NE)\n" +
-                                "• Spawn railings and register them to the nearest socket(s)",
+                                "• Build perimeter sockets\n" +
+                                "• Ensure a NavMeshSurface on the prefab root\n" +
+                                "• Spawn posts & rails and bind them to socket indices\n" +
+                                "• Build and save a per-platform NavMeshData asset",
                                 MessageType.Warning);
                         }
                     }
@@ -161,9 +183,9 @@ namespace Editor
                         _gizmoSphereRadius = Mathf.Max(0.0f, EditorGUILayout.FloatField("Socket Sphere Radius", _gizmoSphereRadius));
 
                         EditorGUILayout.Space(4);
-                        _colFree     = EditorGUILayout.ColorField("Color • Free",     _colFree);
+                        _colFree = EditorGUILayout.ColorField("Color • Free", _colFree);
                         _colOccupied = EditorGUILayout.ColorField("Color • Occupied", _colOccupied);
-                        _colLocked   = EditorGUILayout.ColorField("Color • Locked",   _colLocked);
+                        _colLocked = EditorGUILayout.ColorField("Color • Locked", _colLocked);
                         _colDisabled = EditorGUILayout.ColorField("Color • Disabled", _colDisabled);
 
                         EditorGUILayout.Space(4);
@@ -183,9 +205,9 @@ namespace Editor
                                 _gizmosVisible = true;
                                 _gizmosShowIndices = true;
                                 _gizmoSphereRadius = 0.06f;
-                                _colFree     = new Color(0.20f, 1.00f, 0.20f, 0.90f);
+                                _colFree = new Color(0.20f, 1.00f, 0.20f, 0.90f);
                                 _colOccupied = new Color(1.00f, 0.60f, 0.20f, 0.90f);
-                                _colLocked   = new Color(0.95f, 0.25f, 0.25f, 0.90f);
+                                _colLocked = new Color(0.95f, 0.25f, 0.25f, 0.90f);
                                 _colDisabled = new Color(0.60f, 0.60f, 0.60f, 0.90f);
 
                                 GamePlatform.GizmoSettings.SetVisibility(_gizmosVisible);
@@ -197,7 +219,7 @@ namespace Editor
                         }
 
                         EditorGUILayout.HelpBox(
-                            "Shows socket index, perimeter mark, and bound module names. Colors are driven by status.",
+                            "Shows socket index and status. Colors are driven by status.",
                             MessageType.Info);
                     }
 
@@ -223,9 +245,9 @@ namespace Editor
                             if (GUILayout.Button("Rebuild NavMesh (Active Prefab)"))
                             {
                                 Undo.RegisterFullObjectHierarchyUndo(transform.gameObject, "Rebuild NavMesh (Prefab)");
-                                gp.BuildLocalNavMesh();
+                                EnsureNavMeshSurface(transform);
+                                BuildAndSaveNavMeshForPrefab(gp, transform);
                                 EditorSceneManager.MarkSceneDirty(transform.gameObject.scene);
-                                Debug.Log($"[EditorAssetManager] Rebuilt NavMesh for prefab '{transform.name}'.");
                             }
                         }
 
@@ -249,187 +271,262 @@ namespace Editor
             EditorGUILayout.EndScrollView();
         }
 
-        // -------- Core placement (position-based registration) --------
-        private static void SpawnRailingsAndRegisterByPosition(
-            Transform platformRoot, GamePlatform gp,
-            int wCells, int lCells, float yLocal, float inset,
-            GameObject straightPrefab, GameObject cornerPrefab)
+        // -------- Core placement (posts + rails) --------
+        private static void SpawnRailingsAndRegister(
+            Transform platformRoot,
+            GamePlatform gp,
+            int wCells,
+            int lCells,
+            float yLocal,
+            float inset,
+            GameObject postPrefab,
+            GameObject railPrefab,
+            RailForwardAxis railForwardAxis)
         {
-            var railings = GetOrCreate(platformRoot, "Railings");
-            ClearChildren(railings);
+            var railingsParent = GetOrCreate(platformRoot, "Railings");
+            ClearChildren(railingsParent);
 
-            float hx = wCells * 0.5f; // X half
-            float hz = lCells * 0.5f; // Z half
+            float hx = wCells * 0.5f;
+            float hz = lCells * 0.5f;
 
-            var straightAxes = ClassifyAxes(straightPrefab);
-            var cornerAxes   = ClassifyAxes(cornerPrefab);
+            gp.BuildSockets();
+            gp.RefreshSocketStatuses();
 
-            // ----- Corners -----
-            const float YAW_NE = 270f;
-            const float YAW_SE = 0f;
-            const float YAW_SW = 90f;
-            const float YAW_NW = 180f;
-
-            // Helper to place & register one corner (bind to its single nearest socket)
-            void Corner(Vector3 baseCorner, Vector3 inwardX, Vector3 inwardZ, string label, float yaw)
+            // Determine prefab forward axis (local length axis of the rail)
+            Vector3 localForward = railForwardAxis switch
             {
-                Vector3 pos = baseCorner + inwardX * inset + inwardZ * inset;
-                var go = (GameObject)PrefabUtility.InstantiatePrefab(cornerPrefab, railings);
-                go.name = label;
-                Undo.RegisterCreatedObjectUndo(go, "Instantiate Corner");
-                go.transform.localPosition = pos;
+                RailForwardAxis.PlusZ => Vector3.forward,
+                RailForwardAxis.MinusZ => Vector3.back,
+                RailForwardAxis.PlusX => Vector3.right,
+                RailForwardAxis.MinusX => Vector3.left,
+                _ => Vector3.forward
+            };
 
-                var rot = ComputeCornerLegAlignment(cornerAxes, inwardX, inwardZ);
-                go.transform.localRotation = ApplyFinalYaw(rot, yaw);
+            Quaternion RailRotationForLocalPos(Vector3 socketLocal, float halfX, float halfZ)
+            {
+                const float EPS = 0.001f;
+                Vector3 edgeDirLocal;
 
-                // Register to nearest socket
-                int idx = gp.FindNearestSocketIndexLocal(pos);
-                gp.RegisterModuleOnSockets(go, true, new[] { idx });
+                if (Mathf.Abs(socketLocal.z - halfZ) < EPS) // north
+                    edgeDirLocal = Vector3.right;
+                else if (Mathf.Abs(socketLocal.z + halfZ) < EPS) // south
+                    edgeDirLocal = Vector3.right;
+                else if (Mathf.Abs(socketLocal.x - halfX) < EPS) // east
+                    edgeDirLocal = Vector3.back;
+                else // west
+                    edgeDirLocal = Vector3.back;
+
+                return Quaternion.FromToRotation(localForward, edgeDirLocal);
             }
 
-            // NE / SE / SW / NW
-            Corner(new Vector3(+hx, yLocal, +hz), Vector3.left,  Vector3.back,    "Corner_NE", YAW_NE);
-            Corner(new Vector3(+hx, yLocal, -hz), Vector3.left,  Vector3.forward, "Corner_SE", YAW_SE);
-            Corner(new Vector3(-hx, yLocal, -hz), Vector3.right, Vector3.forward, "Corner_SW", YAW_SW);
-            Corner(new Vector3(-hx, yLocal, +hz), Vector3.right, Vector3.back,    "Corner_NW", YAW_NW);
-
-            // ----- Middles (2 m), centered between corners on each edge) -----
-            float usableX = wCells - 2f * CORNER_LEN; // N/S edges
-            float usableZ = lCells - 2f * CORNER_LEN; // E/W edges
-            int countX = Mathf.Max(0, Mathf.RoundToInt(usableX / STRAIGHT_LEN));
-            int countZ = Mathf.Max(0, Mathf.RoundToInt(usableZ / STRAIGHT_LEN));
-
-            // Each straight will register to 3 nearest sockets (≈ -1, 0, +1 marks)
-            List<Vector3> centers = new();
-
-            void Straights(Vector3 center, Vector3 tangent, Vector3 inward, int count, float spacing, string tag)
+            Vector3 RailInsetOffset(Vector3 socketLocal, float halfX, float halfZ, float insetVal)
             {
-                if (count <= 0) return;
+                const float EPS = 0.001f;
 
-                float run = count * spacing;
-                float start = -run * 0.5f + spacing * 0.5f;
-
-                for (int i = 0; i < count; i++)
-                {
-                    float along = start + i * spacing;
-                    var go = (GameObject)PrefabUtility.InstantiatePrefab(straightPrefab, railings);
-                    go.name = $"Mid_{tag}_{i}";
-                    Undo.RegisterCreatedObjectUndo(go, "Instantiate Straight");
-
-                    Vector3 localCenter = center + tangent * along + inward * Mathf.Abs(inset);
-                    go.transform.localPosition = localCenter;
-                    go.transform.localRotation = ComputeStraightAlignment(straightAxes, tangent, inward);
-
-                    // gather ~3 anchor points: center, +/- 1 m along tangent (local)
-                    centers.Clear();
-                    centers.Add(localCenter);
-                    centers.Add(localCenter + tangent * 1f);
-                    centers.Add(localCenter - tangent * 1f);
-
-                    gp.RegisterModuleByLocalPositions(go, true, centers);
-                }
+                if (Mathf.Abs(socketLocal.z - halfZ) < EPS)      // north edge: inward = -Z
+                    return new Vector3(0f, 0f, -insetVal);
+                if (Mathf.Abs(socketLocal.z + halfZ) < EPS)      // south: inward = +Z
+                    return new Vector3(0f, 0f, insetVal);
+                if (Mathf.Abs(socketLocal.x - halfX) < EPS)      // east: inward = -X
+                    return new Vector3(-insetVal, 0f, 0f);
+                // west: inward = +X
+                return new Vector3(insetVal, 0f, 0f);
             }
 
-            Straights(new Vector3(0f, yLocal, +hz), Vector3.right,  Vector3.back,    countX, STRAIGHT_LEN, "N");
-            Straights(new Vector3(0f, yLocal, -hz), Vector3.right,  Vector3.forward, countX, STRAIGHT_LEN, "S");
-            Straights(new Vector3(+hx, yLocal, 0f), Vector3.forward,Vector3.left,    countZ, STRAIGHT_LEN, "E");
-            Straights(new Vector3(-hx, yLocal, 0f), Vector3.forward,Vector3.right,   countZ, STRAIGHT_LEN, "W");
+            PlatformRailing CreateRailingComponent(
+                GameObject go,
+                GamePlatform platform,
+                PlatformRailing.RailingType type,
+                int[] socketIndices)
+            {
+                var pr = go.GetComponent<PlatformRailing>();
+                if (!pr) pr = Undo.AddComponent<PlatformRailing>(go);
 
-            EditorGUIUtility.PingObject(railings);
+                pr.type = type;
+                pr.platform = platform;
+                pr.SetSocketIndices(socketIndices);
+
+                pr.EnsureRegistered();
+                return pr;
+            }
+
+            // ---- RAILS: one per socket ----
+            var sockets = gp.Sockets;
+            for (int sIdx = 0; sIdx < sockets.Count; sIdx++)
+            {
+                var s = sockets[sIdx];
+                Vector3 sockLocal = s.LocalPos;
+
+                var go = (GameObject)PrefabUtility.InstantiatePrefab(railPrefab, railingsParent);
+                Undo.RegisterCreatedObjectUndo(go, "Instantiate Rail");
+
+                go.name = $"Rail_{sIdx}";
+
+                var t = go.transform;
+                t.localPosition = new Vector3(sockLocal.x, yLocal, sockLocal.z) +
+                                  RailInsetOffset(sockLocal, hx, hz, inset);
+                t.localRotation = RailRotationForLocalPos(sockLocal, hx, hz);
+
+                gp.RegisterModuleOnSockets(go, occupiesSockets: true, new[] { sIdx });
+
+                CreateRailingComponent(go, gp, PlatformRailing.RailingType.Rail, new[] { sIdx });
+            }
+
+            // ---- POSTS: corner + intermediate posts; bind to nearest 1–2 sockets ----
+            List<int> tmpSockets = new();
+
+            // Corner + edge post positions (same layout as old code, but we compute neighbors via nearest sockets)
+            // North edge posts: z=+hz, x=-hx..+hx
+            for (int i = 0; i <= wCells; i++)
+            {
+                float x = -hx + i;
+                float z = +hz;
+
+                bool isWestCorner = (i == 0);
+                bool isEastCorner = (i == wCells);
+
+                if (isWestCorner) { x += inset; z -= inset; }
+                else if (isEastCorner) { x -= inset; z -= inset; }
+                else { z -= inset; }
+
+                var go = (GameObject)PrefabUtility.InstantiatePrefab(postPrefab, railingsParent);
+                Undo.RegisterCreatedObjectUndo(go, "Instantiate Post (North)");
+                go.name = $"Post_N_{i}";
+
+                var t = go.transform;
+                t.localPosition = new Vector3(x, yLocal, z);
+
+                // Bind to up to 2 nearest sockets
+                tmpSockets.Clear();
+                gp.FindNearestSocketIndicesLocal(t.localPosition, maxCount: 2, maxDistance: 1.5f, result: tmpSockets);
+                CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, tmpSockets.ToArray());
+            }
+
+            // South edge posts: z=-hz
+            for (int i = 0; i <= wCells; i++)
+            {
+                float x = -hx + i;
+                float z = -hz;
+
+                bool isWestCorner = (i == 0);
+                bool isEastCorner = (i == wCells);
+
+                if (isWestCorner) { x += inset; z += inset; }
+                else if (isEastCorner) { x -= inset; z += inset; }
+                else { z += inset; }
+
+                var go = (GameObject)PrefabUtility.InstantiatePrefab(postPrefab, railingsParent);
+                Undo.RegisterCreatedObjectUndo(go, "Instantiate Post (South)");
+                go.name = $"Post_S_{i}";
+
+                var t = go.transform;
+                t.localPosition = new Vector3(x, yLocal, z);
+
+                tmpSockets.Clear();
+                gp.FindNearestSocketIndicesLocal(t.localPosition, maxCount: 2, maxDistance: 1.5f, result: tmpSockets);
+                CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, tmpSockets.ToArray());
+            }
+
+            // East edge intermediate posts (skip corners)
+            for (int i = 1; i < lCells; i++)
+            {
+                float x = +hx;
+                float z = +hz - i;
+
+                x -= inset;
+
+                var go = (GameObject)PrefabUtility.InstantiatePrefab(postPrefab, railingsParent);
+                Undo.RegisterCreatedObjectUndo(go, "Instantiate Post (East)");
+                go.name = $"Post_E_{i}";
+
+                var t = go.transform;
+                t.localPosition = new Vector3(x, yLocal, z);
+
+                tmpSockets.Clear();
+                gp.FindNearestSocketIndicesLocal(t.localPosition, maxCount: 2, maxDistance: 1.5f, result: tmpSockets);
+                CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, tmpSockets.ToArray());
+            }
+
+            // West edge intermediate posts (skip corners)
+            for (int i = 1; i < lCells; i++)
+            {
+                float x = -hx;
+                float z = +hz - i;
+
+                x += inset;
+
+                var go = (GameObject)PrefabUtility.InstantiatePrefab(postPrefab, railingsParent);
+                Undo.RegisterCreatedObjectUndo(go, "Instantiate Post (West)");
+                go.name = $"Post_W_{i}";
+
+                var t = go.transform;
+                t.localPosition = new Vector3(x, yLocal, z);
+
+                tmpSockets.Clear();
+                gp.FindNearestSocketIndicesLocal(t.localPosition, maxCount: 2, maxDistance: 1.5f, result: tmpSockets);
+                CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, tmpSockets.ToArray());
+            }
+
+            EditorGUIUtility.PingObject(railingsParent);
             Debug.Log($"[EditorAssetManager] Platform setup finished on '{platformRoot.name}' ({wCells}×{lCells}), inset={inset:F2} m.");
         }
 
-        // -------- Orientation logic --------
-        private struct AxisInfo
-        {
-            public Vector3 lengthAxis;
-            public Vector3 thicknessAxis;
-        }
+        // -------- NavMesh helpers --------
 
-        private static AxisInfo ClassifyAxes(GameObject prefab)
+        private static void EnsureNavMeshSurface(Transform root)
         {
-            var filters = prefab.GetComponentsInChildren<MeshFilter>(true);
-            if (filters == null || filters.Length == 0)
-                return new AxisInfo { lengthAxis = Vector3.right, thicknessAxis = Vector3.forward };
+            if (!root) return;
 
-            var bounds = new Bounds(Vector3.zero, Vector3.zero);
-            bool init = false;
-            foreach (var mf in filters)
+            var surface = root.GetComponent<NavMeshSurface>();
+            if (!surface)
             {
-                var mesh = mf.sharedMesh;
-                if (!mesh) continue;
-                var b = mesh.bounds;
-                if (!init) { bounds = b; init = true; }
-                else { bounds.Encapsulate(b); }
+                surface = Undo.AddComponent<NavMeshSurface>(root.gameObject);
             }
 
-            float ex = Mathf.Abs(bounds.size.x);
-            float ez = Mathf.Abs(bounds.size.z);
-
-            if (ex >= ez)
-                return new AxisInfo { lengthAxis = Vector3.right, thicknessAxis = Vector3.forward };
-            else
-                return new AxisInfo { lengthAxis = Vector3.forward, thicknessAxis = Vector3.right };
+            surface.collectObjects = CollectObjects.Children;
         }
 
-        private static Quaternion ComputeStraightAlignment(AxisInfo axes, Vector3 tangent, Vector3 inward)
+        private static void BuildAndSaveNavMeshForPrefab(GamePlatform gp, Transform root)
         {
-            float best = float.NegativeInfinity;
-            Quaternion bestRot = Quaternion.identity;
-            float[] yaws = { 0f, 90f, 180f, 270f };
+            if (!gp || !root) return;
 
-            foreach (var yaw in yaws)
+            var surface = gp.GetComponent<NavMeshSurface>();
+            if (!surface)
             {
-                var rot = Quaternion.Euler(0f, yaw, 0f);
-                var len = rot * axes.lengthAxis;    len.y = 0f; if (len != Vector3.zero) len.Normalize();
-                var thk = rot * axes.thicknessAxis; thk.y = 0f; if (thk != Vector3.zero) thk.Normalize();
-
-                float s = Mathf.Abs(Vector3.Dot(len, tangent));
-                float o = Mathf.Abs(Vector3.Dot(thk, inward));
-                float score = s * s + o * o;
-                if (score > best) { best = score; bestRot = rot; }
+                surface = Undo.AddComponent<NavMeshSurface>(root.gameObject);
+                surface.collectObjects = CollectObjects.Children;
             }
-            return bestRot;
-        }
 
-        private static Quaternion ComputeCornerLegAlignment(AxisInfo axes, Vector3 inwardX, Vector3 inwardZ)
-        {
-            float best = float.NegativeInfinity;
-            Quaternion bestRot = Quaternion.identity;
-            float[] yaws = { 0f, 90f, 180f, 270f };
+            surface.BuildNavMesh();
 
-            Vector3 a1 = axes.lengthAxis;
-            Vector3 a2 = (a1 == Vector3.right) ? Vector3.forward : Vector3.right;
+            var data = surface.navMeshData;
+            if (data == null) return;
 
-            foreach (var yaw in yaws)
+            string existingPath = AssetDatabase.GetAssetPath(data);
+            if (!string.IsNullOrEmpty(existingPath))
             {
-                var rot = Quaternion.Euler(0f, yaw, 0f);
-                Vector3 v1 = rot * a1; v1.y = 0f; if (v1 != Vector3.zero) v1.Normalize();
-                Vector3 v2 = rot * a2; v2.y = 0f; if (v2 != Vector3.zero) v2.Normalize();
-
-                float s1 = Mathf.Abs(Vector3.Dot(v1, inwardX)) + Mathf.Abs(Vector3.Dot(v2, inwardZ));
-                float s2 = Mathf.Abs(Vector3.Dot(v1, inwardZ)) + Mathf.Abs(Vector3.Dot(v2, inwardX));
-                float orthPenalty = Mathf.Abs(Vector3.Dot(v1, v2));
-                float score = Mathf.Max(s1, s2) - orthPenalty * 0.25f;
-
-                if (score > best) { best = score; bestRot = rot; }
+                Debug.Log($"[EditorAssetManager] Rebuilt existing NavMeshData at {existingPath}", surface);
+                return;
             }
-            return bestRot;
-        }
 
-        private static Quaternion ApplyFinalYaw(Quaternion current, float yawDeg)
-        {
-            yawDeg %= 360f; if (yawDeg < 0f) yawDeg += 360f;
-            Vector3 f = current * Vector3.forward; f.y = 0f; if (f != Vector3.zero) f.Normalize();
-            float currentYaw = Mathf.Atan2(f.x, f.z) * Mathf.Rad2Deg;
-            float delta = yawDeg - currentYaw;
-            return Quaternion.Euler(0f, delta, 0f) * current;
+            string prefabPath = AssetDatabase.GetAssetPath(root.gameObject);
+            string folder = string.IsNullOrEmpty(prefabPath)
+                ? "Assets"
+                : Path.GetDirectoryName(prefabPath);
+
+            string fileName = $"{root.name}_NavMesh.asset";
+            string targetPath = AssetDatabase.GenerateUniqueAssetPath(Path.Combine(folder, fileName));
+
+            AssetDatabase.CreateAsset(data, targetPath);
+            AssetDatabase.SaveAssets();
+            EditorUtility.SetDirty(surface);
+            Debug.Log($"[EditorAssetManager] Saved NavMeshData asset: {targetPath}", surface);
         }
 
         // -------- Utilities --------
         private static (bool inPrefabMode, Transform root) GetActivePrefabRoot()
         {
-            var stage = PrefabStageUtility.GetCurrentPrefabStage();
+            var stage = UnityEditor.SceneManagement.PrefabStageUtility.GetCurrentPrefabStage();
             if (stage != null && stage.prefabContentsRoot != null)
                 return (true, stage.prefabContentsRoot.transform);
             return (false, null);
