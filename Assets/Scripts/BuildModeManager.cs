@@ -212,6 +212,10 @@ namespace WaterTown.Building
             foreach (var col in _ghostPlatform.GetComponentsInChildren<Collider>(true))
                 col.enabled = false;
 
+            // Force initial material update by resetting validity state
+            _lastValidityState = true; // Force update on first frame
+            _isValidPlacement = false; // Start as invalid
+
             UpdateGhostPosition();
         }
 
@@ -293,6 +297,12 @@ namespace WaterTown.Building
 
             _isValidPlacement = areaFree && meetsAdjacency;
 
+            // Debug logging to help diagnose placement issues
+            if (!areaFree)
+                Debug.Log($"[BuildModeManager] Placement invalid: Area not free (occupied cells detected)");
+            if (!meetsAdjacency)
+                Debug.Log($"[BuildModeManager] Placement invalid: Adjacency requirement not met");
+
             // Register ghost as preview platform:
             // - Does NOT mark cells as Occupied (players can still place here)
             // - DOES participate in adjacency calculations (enables railing preview)
@@ -305,8 +315,16 @@ namespace WaterTown.Building
         {
             if (cells == null || cells.Count == 0) return false;
 
-            // If there are no existing platforms, first platform is always valid
-            if (GamePlatform.AllPlatforms.Count == 0) return true;
+            // If there are no existing platforms (excluding ghost), first platform is always valid
+            // Ghost platforms are included in AllPlatforms, so we need to check if there are REAL platforms
+            int realPlatformCount = 0;
+            foreach (var platform in GamePlatform.AllPlatforms)
+            {
+                if (platform != _ghostPlatformComponent && platform != null)
+                    realPlatformCount++;
+            }
+            
+            if (realPlatformCount == 0) return true;
 
             // Check if any cell is adjacent (shares an edge) with an occupied cell
             // Reuse cached list to avoid allocations
@@ -328,7 +346,8 @@ namespace WaterTown.Building
         private void UpdateGhostVisuals()
         {
             // Only update materials when validity state changes (performance optimization)
-            if (_ghostRenderers.Count == 0 || _isValidPlacement == _lastValidityState) return;
+            if (_ghostRenderers.Count == 0) return;
+            if (_isValidPlacement == _lastValidityState) return;
             _lastValidityState = _isValidPlacement;
 
             Material targetMaterial = _isValidPlacement ? previewValidMaterial : previewInvalidMaterial;
@@ -365,7 +384,17 @@ namespace WaterTown.Building
 
         private void OnPlacePerformed(InputAction.CallbackContext context)
         {
-            if (_ghostPlatform == null || !_isValidPlacement) return;
+            if (_ghostPlatform == null)
+            {
+                Debug.Log("[BuildModeManager] Cannot place: No ghost platform.");
+                return;
+            }
+            
+            if (!_isValidPlacement)
+            {
+                Debug.Log("[BuildModeManager] Cannot place: Invalid placement.");
+                return;
+            }
 
             PlacePlatform();
         }

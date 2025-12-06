@@ -598,17 +598,15 @@ namespace WaterTown.Town
         /// assuming its footprint is aligned to the 1x1 world grid AND
         /// that rotation is in 90° steps (0, 90, 180, 270).
         /// This is the single source of truth for runtime footprint.
-        /// Ensures platform position is grid-aligned using WorldGrid.
         /// </summary>
         public void ComputeCellsForPlatform(GamePlatform platform, int level, List<Vector2Int> outputCells)
         {
             outputCells.Clear();
             if (!platform || !grid) return;
 
-            // Snap platform position to grid to ensure perfect alignment
+            // Use platform's world position to find center cell on the desired level
             Vector3 worldPosition = platform.transform.position;
-            Vector3 snappedPosition = grid.SnapWorldPositionToGrid(worldPosition, level);
-            var centerCell = grid.WorldToCellOnLevel(snappedPosition, new Vector3Int(0, 0, level));
+            var centerCell = grid.WorldToCellOnLevel(worldPosition, new Vector3Int(0, 0, level));
             int centerX = centerCell.x;
             int centerY = centerCell.y;
 
