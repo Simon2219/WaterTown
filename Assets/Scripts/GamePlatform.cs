@@ -318,31 +318,6 @@ namespace WaterTown.Platforms
         /// Gets the socket index range (start, end inclusive) for a given edge.
         /// Useful for iterating sockets on a specific edge.
         /// </summary>
-        /// <summary>
-        /// Converts a world-space direction to the local edge that faces that direction,
-        /// accounting for this platform's rotation.
-        /// </summary>
-        public Edge WorldDirectionToLocalEdge(Vector3 worldDirection)
-        {
-            // Convert world direction to local space
-            Vector3 localDirection = transform.InverseTransformDirection(worldDirection);
-            
-            // Determine which edge based on local direction
-            float absX = Mathf.Abs(localDirection.x);
-            float absZ = Mathf.Abs(localDirection.z);
-            
-            if (absZ > absX)
-            {
-                // North or South
-                return localDirection.z > 0 ? Edge.North : Edge.South;
-            }
-            else
-            {
-                // East or West
-                return localDirection.x > 0 ? Edge.East : Edge.West;
-            }
-        }
-
         public void GetSocketIndexRangeForEdge(Edge edge, out int startIndex, out int endIndex)
         {
             if (!_socketsBuilt) BuildSockets();
@@ -1210,6 +1185,7 @@ namespace WaterTown.Platforms
             if (_isNewObject)
             {
                 // New object - destroy it
+                // BuildModeManager will trigger adjacency update after this returns
                 Debug.Log($"[GamePlatform] Cancelled placement of new '{name}' - destroying");
                 Destroy(gameObject);
             }

@@ -285,6 +285,10 @@ namespace WaterTown.Building
             _currentPickup.OnPlacementCancelled();
             _currentPickup = null;
             _selectedBlueprint = null;
+            
+            // Force adjacency update to restore railings on existing platforms
+            // This ensures any connections created during preview are cleared
+            townManager.TriggerAdjacencyUpdate();
         }
         
         #endregion

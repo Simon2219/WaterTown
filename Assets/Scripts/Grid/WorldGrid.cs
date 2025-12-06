@@ -227,6 +227,16 @@ namespace Grid
         }
 
         /// <summary>
+        /// Converts a world position to a 2D grid cell coordinate (X, Y only).
+        /// Used for socket matching - sockets at the same grid cell should connect.
+        /// </summary>
+        public Vector2Int WorldToCell2D(Vector3 worldPos, int level)
+        {
+            Vector3Int cell3D = WorldToCellOnLevel(worldPos, new Vector3Int(0, 0, level));
+            return new Vector2Int(cell3D.x, cell3D.y);
+        }
+
+        /// <summary>
         /// Snaps a world position to the nearest grid-aligned position for a platform with given footprint.
         /// Handles even vs odd footprints correctly:
         /// - Even footprints (4x4): snap to cell edges (whole meters like 44.0)

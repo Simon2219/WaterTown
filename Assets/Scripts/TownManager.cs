@@ -423,37 +423,48 @@ namespace WaterTown.Town
             var bSocketIndices = new HashSet<int>();
             var connectionPositions = new List<Vector3>();
 
-            foreach (var (cellA, cellB) in adjacentCellPairs)
+            // NEW APPROACH: Match sockets by grid cell position
+            // Since everything is grid-aligned, sockets that should connect occupy the same grid cell!
+            
+            // Build socket position maps for both platforms
+            var aSocketsByGridCell = new Dictionary<Vector2Int, int>(); // gridCell -> socketIndex
+            var bSocketsByGridCell = new Dictionary<Vector2Int, int>();
+            
+            for (int i = 0; i < a.SocketCount; i++)
             {
-                // Find the edge between these two cells in world space
-                int deltaX = cellB.x - cellA.x;
-                int deltaY = cellB.y - cellA.y;
+                Vector3 worldPos = a.GetSocketWorldPosition(i);
+                Vector2Int gridCell = grid.WorldToCell2D(worldPos, entryA.level);
                 
-                // Determine world-space direction from A to B
-                Vector3 worldDirectionAtoB = Vector3.zero;
-                if (deltaX == 1 && deltaY == 0) worldDirectionAtoB = Vector3.right;      // +X
-                else if (deltaX == -1 && deltaY == 0) worldDirectionAtoB = Vector3.left; // -X
-                else if (deltaX == 0 && deltaY == 1) worldDirectionAtoB = Vector3.forward;  // +Z
-                else if (deltaX == 0 && deltaY == -1) worldDirectionAtoB = Vector3.back;    // -Z
+                // Store first socket at each grid position (handles duplicates)
+                if (!aSocketsByGridCell.ContainsKey(gridCell))
+                    aSocketsByGridCell[gridCell] = i;
+            }
+            
+            for (int i = 0; i < b.SocketCount; i++)
+            {
+                Vector3 worldPos = b.GetSocketWorldPosition(i);
+                Vector2Int gridCell = grid.WorldToCell2D(worldPos, entryB.level);
                 
-                // Convert world direction to local edges for each platform (accounts for rotation)
-                GamePlatform.Edge edgeA = a.WorldDirectionToLocalEdge(worldDirectionAtoB);
-                GamePlatform.Edge edgeB = b.WorldDirectionToLocalEdge(-worldDirectionAtoB);
+                if (!bSocketsByGridCell.ContainsKey(gridCell))
+                    bSocketsByGridCell[gridCell] = i;
+            }
+            
+            // Find matching sockets (same grid cell = connection point)
+            foreach (var kvp in aSocketsByGridCell)
+            {
+                Vector2Int gridCell = kvp.Key;
+                int socketA = kvp.Value;
                 
-                // Find sockets on these edges that are closest to the cell boundary
-                Vector3 cellACenter = grid.GetCellCenter(new Vector3Int(cellA.x, cellA.y, entryA.level));
-                Vector3 cellBCenter = grid.GetCellCenter(new Vector3Int(cellB.x, cellB.y, entryB.level));
-                Vector3 edgeCenter = (cellACenter + cellBCenter) * 0.5f;
-                
-                // Find nearest socket on platform A's edge
-                int socketA = FindNearestSocketOnEdge(a, edgeA, edgeCenter);
-                if (socketA >= 0) aSocketIndices.Add(socketA);
-                
-                // Find nearest socket on platform B's edge  
-                int socketB = FindNearestSocketOnEdge(b, edgeB, edgeCenter);
-                if (socketB >= 0) bSocketIndices.Add(socketB);
-                
-                connectionPositions.Add(edgeCenter);
+                if (bSocketsByGridCell.TryGetValue(gridCell, out int socketB))
+                {
+                    // These sockets are at the same grid position - they should connect!
+                    aSocketIndices.Add(socketA);
+                    bSocketIndices.Add(socketB);
+                    
+                    // Use socket world position for NavMesh link
+                    Vector3 worldPos = a.GetSocketWorldPosition(socketA);
+                    connectionPositions.Add(worldPos);
+                }
             }
 
             if (aSocketIndices.Count == 0 && bSocketIndices.Count == 0)
@@ -503,29 +514,6 @@ namespace WaterTown.Town
             }
         }
 
-        /// <summary>
-        /// Find the socket index on a platform's edge that is closest to a world position.
-        /// </summary>
-        private int FindNearestSocketOnEdge(GamePlatform platform, GamePlatform.Edge edge, Vector3 worldPosition)
-        {
-            platform.GetSocketIndexRangeForEdge(edge, out int startIndex, out int endIndex);
-            
-            float bestDistance = float.MaxValue;
-            int bestSocketIndex = -1;
-            
-            for (int socketIndex = startIndex; socketIndex <= endIndex && socketIndex < platform.SocketCount; socketIndex++)
-            {
-                Vector3 socketWorldPosition = platform.GetSocketWorldPosition(socketIndex);
-                float distanceSquared = Vector3.SqrMagnitude(socketWorldPosition - worldPosition);
-                if (distanceSquared < bestDistance)
-                {
-                    bestDistance = distanceSquared;
-                    bestSocketIndex = socketIndex;
-                }
-            }
-            
-            return bestSocketIndex;
-        }
 
         /// <summary>
         /// Recomputes connections for ALL platforms (runtime),
@@ -543,19 +531,15 @@ namespace WaterTown.Town
             _isRecomputingAdjacency = true;
 
             _tmpPlatforms.Clear();
-            GamePlatform pickedUpPlatform = null;
             
             foreach (var gp in GamePlatform.AllPlatforms)
             {
                 if (!gp) continue;
                 if (!gp.isActiveAndEnabled) continue;
                 
-                if (gp.IsPickedUp)
-                {
-                    // Track picked-up platform for preview (but don't add to main list yet)
-                    pickedUpPlatform = gp;
-                    continue;
-                }
+                // Skip picked-up platforms entirely - they should NOT participate in adjacency
+                // This prevents railings from flickering during placement preview
+                if (gp.IsPickedUp) continue;
                 
                 _tmpPlatforms.Add(gp);
             }
@@ -585,33 +569,6 @@ namespace WaterTown.Town
                     
                     // Check adjacency using grid cells
                     ConnectIfAdjacentByGridCells(platformA, entryA, platformB, entryB);
-                }
-            }
-
-            // Handle picked-up platform railing preview (doesn't occupy cells, but shows connections)
-            if (pickedUpPlatform != null)
-            {
-                // Compute cells for preview (temporary, not registered)
-                _tmpCells2D.Clear();
-                ComputeCellsForPlatform(pickedUpPlatform, defaultLevel, _tmpCells2D);
-                
-                if (_tmpCells2D.Count > 0)
-                {
-                    // Create temporary entry for preview
-                    var previewEntry = new PlatformEntry 
-                    { 
-                        platform = pickedUpPlatform, 
-                        level = defaultLevel, 
-                        marksOccupied = false 
-                    };
-                    previewEntry.cells2D.AddRange(_tmpCells2D);
-                    
-                    // Check connections with all placed platforms
-                    foreach (var placedPlatform in _tmpPlatforms)
-                    {
-                        if (!_entries.TryGetValue(placedPlatform, out var placedEntry)) continue;
-                        ConnectIfAdjacentByGridCells(pickedUpPlatform, previewEntry, placedPlatform, placedEntry);
-                    }
                 }
             }
 
