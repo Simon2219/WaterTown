@@ -423,47 +423,50 @@ namespace WaterTown.Town
             var bSocketIndices = new HashSet<int>();
             var connectionPositions = new List<Vector3>();
 
-            // NEW APPROACH: Match sockets by grid cell position
-            // Since everything is grid-aligned, sockets that should connect occupy the same grid cell!
+            // Match sockets by EXACT world position
+            // Sockets are at cell edges (e.g., x=42.5, z=46.0), so we need precise matching
             
-            // Build socket position maps for both platforms
-            var aSocketsByGridCell = new Dictionary<Vector2Int, int>(); // gridCell -> socketIndex
-            var bSocketsByGridCell = new Dictionary<Vector2Int, int>();
+            Debug.Log($"[TownManager] Connecting '{a.name}' (sockets: {a.SocketCount}) and '{b.name}' (sockets: {b.SocketCount})");
             
-            for (int i = 0; i < a.SocketCount; i++)
-            {
-                Vector3 worldPos = a.GetSocketWorldPosition(i);
-                Vector2Int gridCell = grid.WorldToCell2D(worldPos, entryA.level);
-                
-                // Store first socket at each grid position (handles duplicates)
-                if (!aSocketsByGridCell.ContainsKey(gridCell))
-                    aSocketsByGridCell[gridCell] = i;
-            }
-            
+            // Build socket position map for platform B (for fast lookup)
+            var bSocketsByPosition = new Dictionary<Vector3, int>();
             for (int i = 0; i < b.SocketCount; i++)
             {
                 Vector3 worldPos = b.GetSocketWorldPosition(i);
-                Vector2Int gridCell = grid.WorldToCell2D(worldPos, entryB.level);
+                // Round to avoid floating point precision issues
+                Vector3 rounded = new Vector3(
+                    Mathf.Round(worldPos.x * 2f) / 2f, // Round to 0.5m
+                    Mathf.Round(worldPos.y * 2f) / 2f,
+                    Mathf.Round(worldPos.z * 2f) / 2f
+                );
                 
-                if (!bSocketsByGridCell.ContainsKey(gridCell))
-                    bSocketsByGridCell[gridCell] = i;
+                if (!bSocketsByPosition.ContainsKey(rounded))
+                {
+                    bSocketsByPosition[rounded] = i;
+                    Debug.Log($"  B Socket[{i}]: worldPos={worldPos}, rounded={rounded}");
+                }
             }
             
-            // Find matching sockets (same grid cell = connection point)
-            foreach (var kvp in aSocketsByGridCell)
+            // Check each socket on platform A for a match on platform B
+            for (int i = 0; i < a.SocketCount; i++)
             {
-                Vector2Int gridCell = kvp.Key;
-                int socketA = kvp.Value;
+                Vector3 worldPos = a.GetSocketWorldPosition(i);
+                Vector3 rounded = new Vector3(
+                    Mathf.Round(worldPos.x * 2f) / 2f,
+                    Mathf.Round(worldPos.y * 2f) / 2f,
+                    Mathf.Round(worldPos.z * 2f) / 2f
+                );
                 
-                if (bSocketsByGridCell.TryGetValue(gridCell, out int socketB))
+                Debug.Log($"  A Socket[{i}]: worldPos={worldPos}, rounded={rounded}");
+                
+                if (bSocketsByPosition.TryGetValue(rounded, out int matchingSocketB))
                 {
-                    // These sockets are at the same grid position - they should connect!
-                    aSocketIndices.Add(socketA);
-                    bSocketIndices.Add(socketB);
-                    
-                    // Use socket world position for NavMesh link
-                    Vector3 worldPos = a.GetSocketWorldPosition(socketA);
+                    // Exact match - these sockets should connect!
+                    aSocketIndices.Add(i);
+                    bSocketIndices.Add(matchingSocketB);
                     connectionPositions.Add(worldPos);
+                    
+                    Debug.Log($"    -> MATCHED: A Socket[{i}] connects to B Socket[{matchingSocketB}] at {rounded}");
                 }
             }
 
@@ -531,15 +534,19 @@ namespace WaterTown.Town
             _isRecomputingAdjacency = true;
 
             _tmpPlatforms.Clear();
+            GamePlatform pickedUpPlatform = null;
             
             foreach (var gp in GamePlatform.AllPlatforms)
             {
                 if (!gp) continue;
                 if (!gp.isActiveAndEnabled) continue;
                 
-                // Skip picked-up platforms entirely - they should NOT participate in adjacency
-                // This prevents railings from flickering during placement preview
-                if (gp.IsPickedUp) continue;
+                if (gp.IsPickedUp)
+                {
+                    // Track picked-up platform for preview
+                    pickedUpPlatform = gp;
+                    continue;
+                }
                 
                 _tmpPlatforms.Add(gp);
             }
@@ -569,6 +576,38 @@ namespace WaterTown.Town
                     
                     // Check adjacency using grid cells
                     ConnectIfAdjacentByGridCells(platformA, entryA, platformB, entryB);
+                }
+            }
+
+            // Handle picked-up platform for railing PREVIEW ONLY
+            // Does NOT mark cells as occupied, but updates socket statuses for visual feedback
+            if (pickedUpPlatform != null)
+            {
+                Debug.Log($"[TownManager] Processing picked-up platform '{pickedUpPlatform.name}' for preview");
+                
+                // Compute cells for preview (doesn't register in grid)
+                _tmpCells2D.Clear();
+                ComputeCellsForPlatform(pickedUpPlatform, defaultLevel, _tmpCells2D);
+                
+                if (_tmpCells2D.Count > 0)
+                {
+                    // Create temporary entry for preview (NOT registered, marksOccupied = false)
+                    var previewEntry = new PlatformEntry
+                    {
+                        platform = pickedUpPlatform,
+                        level = defaultLevel,
+                        marksOccupied = false // IMPORTANT: Does not occupy cells in grid
+                    };
+                    previewEntry.cells2D.AddRange(_tmpCells2D);
+                    
+                    // Check connections with all placed platforms for preview
+                    foreach (var placedPlatform in _tmpPlatforms)
+                    {
+                        if (!_entries.TryGetValue(placedPlatform, out var placedEntry)) continue;
+                        
+                        // This updates socket statuses on BOTH platforms for preview
+                        ConnectIfAdjacentByGridCells(pickedUpPlatform, previewEntry, placedPlatform, placedEntry);
+                    }
                 }
             }
 
