@@ -46,8 +46,10 @@ namespace WaterTown.Building
         private float _currentRotation = 0f;
         private Vector3 _currentPlacementPosition;
         private bool _isValidPlacement = false;
+        private bool _lastValidityState = false; // Cache to avoid unnecessary material updates
         private List<Vector2Int> _ghostCells = new List<Vector2Int>();
         private List<Renderer> _ghostRenderers = new List<Renderer>();
+        private List<Vector3Int> _cachedNeighbors = new List<Vector3Int>(); // Reusable list for adjacency checks
         
         #endregion
 
@@ -307,13 +309,13 @@ namespace WaterTown.Building
             if (GamePlatform.AllPlatforms.Count == 0) return true;
 
             // Check if any cell is adjacent (shares an edge) with an occupied cell
+            // Reuse cached list to avoid allocations
             foreach (var cell in cells)
             {
                 Vector3Int gridCell = new Vector3Int(cell.x, cell.y, level);
-                var neighbors = new List<Vector3Int>();
-                grid.GetNeighbors4(gridCell, neighbors);
+                grid.GetNeighbors4(gridCell, _cachedNeighbors);
 
-                foreach (var neighbor in neighbors)
+                foreach (var neighbor in _cachedNeighbors)
                 {
                     if (grid.CellHasAnyFlag(neighbor, WorldGrid.CellFlag.Occupied))
                         return true; // Found an adjacent occupied cell
@@ -325,7 +327,9 @@ namespace WaterTown.Building
 
         private void UpdateGhostVisuals()
         {
-            if (_ghostRenderers.Count == 0) return;
+            // Only update materials when validity state changes (performance optimization)
+            if (_ghostRenderers.Count == 0 || _isValidPlacement == _lastValidityState) return;
+            _lastValidityState = _isValidPlacement;
 
             Material targetMaterial = _isValidPlacement ? previewValidMaterial : previewInvalidMaterial;
 

@@ -31,8 +31,9 @@ namespace WaterTown.Platforms
         
         // ---------- Footprint & NavMesh ----------
         [Header("Footprint (cells @ 1m)")]
-        [SerializeField] private Vector2Int footprint = new Vector2Int(4, 4);
-        public Vector2Int Footprint => footprint;
+        [Tooltip("Platform footprint in grid cells. X = width, Y = length.")]
+        [SerializeField] private Vector2Int footprintSize = new Vector2Int(4, 4);
+        public Vector2Int Footprint => footprintSize;
 
         private NavMeshSurface _navSurface;
 
@@ -146,8 +147,8 @@ namespace WaterTown.Platforms
             // Invalidate world position cache when rebuilding sockets
             _worldPositionsCacheValid = false;
 
-            int footprintWidth = Mathf.Max(1, footprint.x);
-            int footprintLength = Mathf.Max(1, footprint.y);
+            int footprintWidth = Mathf.Max(1, footprintSize.x);
+            int footprintLength = Mathf.Max(1, footprintSize.y);
             float halfWidth = footprintWidth * 0.5f;
             float halfLength = footprintLength * 0.5f;
 
@@ -262,8 +263,8 @@ namespace WaterTown.Platforms
         {
             if (!_socketsBuilt) BuildSockets();
 
-            int footprintWidth = Mathf.Max(1, footprint.x);
-            int footprintLength = Mathf.Max(1, footprint.y);
+            int footprintWidth = Mathf.Max(1, footprintSize.x);
+            int footprintLength = Mathf.Max(1, footprintSize.y);
 
             switch (edge)
             {
@@ -492,12 +493,14 @@ namespace WaterTown.Platforms
         internal bool IsSocketConnected(int socketIndex) => _connectedSockets.Contains(socketIndex);
 
         /// <summary>
-        /// Compute visibility for a single PlatformRailing (rail or post)
-        /// based purely on its socket indices and _connectedSockets.
+        /// Compute visibility for a single PlatformRailing (rail or post).
+        /// Rails: Hidden when ALL their socket indices are Connected.
+        /// Posts: Hidden when ALL rails connected to the same sockets are hidden.
         /// </summary>
         internal void UpdateRailingVisibility(PlatformRailing railing)
         {
             if (!railing) return;
+            
             var indices = railing.SocketIndices ?? System.Array.Empty<int>();
             if (indices.Length == 0)
             {
@@ -505,20 +508,71 @@ namespace WaterTown.Platforms
                 return;
             }
 
-            bool any = false;
-            bool allConnected = true;
-            foreach (int idx in indices)
+            // For rails: hide if all sockets are connected
+            if (railing.type == PlatformRailing.RailingType.Rail)
             {
-                any = true;
-                if (!_connectedSockets.Contains(idx))
+                bool allSocketsConnected = true;
+                foreach (int socketIndex in indices)
                 {
-                    allConnected = false;
-                    break;
+                    if (!_connectedSockets.Contains(socketIndex))
+                    {
+                        allSocketsConnected = false;
+                        break;
+                    }
                 }
+                railing.SetHidden(allSocketsConnected && indices.Length > 0);
+                return;
             }
 
-            bool hide = any && allConnected;
-            railing.SetHidden(hide);
+            // For posts: hide if all rails on the same sockets are hidden
+            if (railing.type == PlatformRailing.RailingType.Post)
+            {
+                bool hasVisibleRail = false;
+                
+                // Check all sockets this post is bound to
+                foreach (int socketIndex in indices)
+                {
+                    // Check if there's any visible rail on this socket
+                    if (_socketToRailings.TryGetValue(socketIndex, out var railingsOnSocket))
+                    {
+                        foreach (var rail in railingsOnSocket)
+                        {
+                            if (rail == null) continue;
+                            if (rail.type != PlatformRailing.RailingType.Rail) continue;
+                            
+                            // Check if this rail is visible (not all its sockets are connected)
+                            var railIndices = rail.SocketIndices ?? System.Array.Empty<int>();
+                            bool railIsHidden = true;
+                            if (railIndices.Length > 0)
+                            {
+                                foreach (int railSocketIndex in railIndices)
+                                {
+                                    if (!_connectedSockets.Contains(railSocketIndex))
+                                    {
+                                        railIsHidden = false;
+                                        break;
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                railIsHidden = false;
+                            }
+                            
+                            if (!railIsHidden)
+                            {
+                                hasVisibleRail = true;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (hasVisibleRail) break;
+                }
+                
+                // Hide post if no visible rails are connected to its sockets
+                railing.SetHidden(!hasVisibleRail && indices.Length > 0);
+            }
         }
 
         internal void RefreshAllRailingsVisibility()
@@ -585,30 +639,36 @@ namespace WaterTown.Platforms
 
         /// <summary>
         /// Toggle modules & railings on these sockets and flip sockets to Connected/Linkable.
+        /// Updates all railings to ensure posts correctly reflect rail visibility changes.
         /// </summary>
         public void ApplyConnectionVisuals(IEnumerable<int> socketIndices, bool connected)
         {
-            var set = new HashSet<int>(socketIndices);
-            var toToggleModules = new HashSet<GameObject>();
-            var affectedRailings = new HashSet<PlatformRailing>();
+            var socketSet = new HashSet<int>(socketIndices);
+            var modulesToToggle = new HashSet<GameObject>();
 
-            foreach (var sIdx in set)
+            // Update connection state and collect affected modules
+            foreach (int socketIndex in socketSet)
             {
-                if (connected) _connectedSockets.Add(sIdx);
-                else _connectedSockets.Remove(sIdx);
+                if (connected)
+                    _connectedSockets.Add(socketIndex);
+                else
+                    _connectedSockets.Remove(socketIndex);
 
-                if (_socketToModules.TryGetValue(sIdx, out var mods))
-                    foreach (var go in mods) toToggleModules.Add(go);
-
-                if (_socketToRailings.TryGetValue(sIdx, out var rails))
-                    foreach (var r in rails) affectedRailings.Add(r);
+                // Collect modules on these sockets
+                if (_socketToModules.TryGetValue(socketIndex, out var modules))
+                {
+                    foreach (var module in modules)
+                        modulesToToggle.Add(module);
+                }
             }
 
-            foreach (var go in toToggleModules)
-                SetModuleHidden(go, connected);
+            // Apply module visibility changes
+            foreach (var module in modulesToToggle)
+                SetModuleHidden(module, connected);
 
-            foreach (var r in affectedRailings)
-                UpdateRailingVisibility(r);
+            // Update all railings to ensure posts correctly reflect rail visibility
+            // This ensures cascading updates work correctly (rails -> posts)
+            RefreshAllRailingsVisibility();
 
             RefreshSocketStatuses();
             ConnectionsChanged?.Invoke(this);
@@ -809,8 +869,8 @@ namespace WaterTown.Platforms
 
             if (!_socketsBuilt) BuildSockets();
 
-            int footprintWidth = Mathf.Max(1, footprint.x);
-            int footprintLength = Mathf.Max(1, footprint.y);
+            int footprintWidth = Mathf.Max(1, footprintSize.x);
+            int footprintLength = Mathf.Max(1, footprintSize.y);
 
             for (int i = 0; i < sockets.Count; i++)
             {

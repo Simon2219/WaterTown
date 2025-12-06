@@ -226,6 +226,34 @@ namespace Grid
             );
         }
 
+        /// <summary>
+        /// Snaps a world position to the nearest grid-aligned position on the specified level.
+        /// Useful for ensuring platforms and objects are perfectly grid-aligned.
+        /// </summary>
+        public Vector3 SnapWorldPositionToGrid(Vector3 worldPosition, int level)
+        {
+            Vector3Int cell = WorldToCellOnLevel(worldPosition, new Vector3Int(0, 0, level));
+            return GetCellCenter(cell);
+        }
+
+        /// <summary>
+        /// Snaps a world position to the nearest grid cell center, inferring level from Y coordinate.
+        /// </summary>
+        public Vector3 SnapWorldPositionToGrid(Vector3 worldPosition)
+        {
+            Vector3Int cell = WorldToCell(worldPosition);
+            return GetCellCenter(cell);
+        }
+
+        /// <summary>
+        /// Checks if a world position is grid-aligned (within tolerance) on the specified level.
+        /// </summary>
+        public bool IsWorldPositionGridAligned(Vector3 worldPosition, int level, float tolerance = 0.01f)
+        {
+            Vector3 snapped = SnapWorldPositionToGrid(worldPosition, level);
+            return Vector3.SqrMagnitude(worldPosition - snapped) < tolerance * tolerance;
+        }
+
         /// <summary>World-space axis-aligned bounds of a cell (thin in Y).</summary>
         public Bounds GetCellBounds(Vector3Int cell)
         {
@@ -549,6 +577,36 @@ namespace Grid
                 if (dx == 0 && dy == 0) continue;
                 var n = new Vector3Int(cell.x + dx, cell.y + dy, cell.z);
                 if (CellInBounds(n)) into.Add(n);
+            }
+        }
+
+        /// <summary>
+        /// Gets the world position of the edge center between two adjacent cells.
+        /// Returns the midpoint between the centers of cellA and cellB.
+        /// </summary>
+        public Vector3 GetEdgeCenterBetweenCells(Vector3Int cellA, Vector3Int cellB)
+        {
+            Vector3 centerA = GetCellCenter(cellA);
+            Vector3 centerB = GetCellCenter(cellB);
+            return (centerA + centerB) * 0.5f;
+        }
+
+        /// <summary>
+        /// Gets all edge-adjacent cells (4-directional neighbors) that are occupied by the specified flag.
+        /// Useful for finding connected platforms.
+        /// </summary>
+        public void GetOccupiedNeighbors(Vector3Int cell, CellFlag flag, List<Vector3Int> occupiedNeighbors)
+        {
+            occupiedNeighbors.Clear();
+            List<Vector3Int> neighbors = new List<Vector3Int>();
+            GetNeighbors4(cell, neighbors);
+            
+            foreach (var neighbor in neighbors)
+            {
+                if (CellHasAnyFlag(neighbor, flag))
+                {
+                    occupiedNeighbors.Add(neighbor);
+                }
             }
         }
         

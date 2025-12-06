@@ -66,11 +66,11 @@ public class CameraMovementController : MonoBehaviour
     //────────────────────────────────────────────
     // Private Variables
     //────────────────────────────────────────────
-    private PlayerInput playerInput; //Reference for Input Actions
-    private Vector2 moveInput;
+    private PlayerInput playerInputComponent; // Reference for Input Actions
+    private Vector2 currentMoveInput;
     
-    private float verticalVelocity; // used by SmoothDamp
-    private Vector3 horizontalVelocity; // used by SmoothDamp
+    private float verticalVelocitySmoothing; // Used by SmoothDamp for vertical movement
+    private Vector3 horizontalVelocitySmoothing; // Used by SmoothDamp for horizontal movement
 
     
     
@@ -79,11 +79,12 @@ public class CameraMovementController : MonoBehaviour
     
     private void Awake()
     {
-        playerInput = GetComponent<PlayerInput>();
+        playerInputComponent = GetComponent<PlayerInput>();
 
         if (moveAction == null)
         {
-            Debug.LogError("No Move Action assigned. RETURN");
+            Debug.LogError("[CameraMovementController] No Move Action assigned. Component disabled.", this);
+            enabled = false;
             return;
         }
         
@@ -134,7 +135,7 @@ public class CameraMovementController : MonoBehaviour
     
     private void OnMove(InputAction.CallbackContext context)
     {
-        moveInput = context.ReadValue<Vector2>();
+        currentMoveInput = context.ReadValue<Vector2>();
     }
     
     
@@ -160,17 +161,17 @@ public class CameraMovementController : MonoBehaviour
             Vector3 camRight = Vector3.ProjectOnPlane(cinemachineCamera.transform.right, Vector3.up).normalized;
 
         // Calculate the desired movement direction relative to the camera.
-        Vector3 relativeMovement = (camForward * moveInput.y + camRight * moveInput.x) * effectiveSpeed;
+        Vector3 relativeMovement = (camForward * currentMoveInput.y + camRight * currentMoveInput.x) * effectiveSpeed;
         
         // Determine the current horizontal position (ignoring vertical).
-        Vector3 currentCameraPos = new Vector3(currentPos.x, 0f, currentPos.z);
-        Vector3 targetCameraPos = currentCameraPos + relativeMovement * Time.deltaTime;
+        Vector3 currentHorizontalPosition = new Vector3(currentPos.x, 0f, currentPos.z);
+        Vector3 targetHorizontalPosition = currentHorizontalPosition + relativeMovement * Time.deltaTime;
         
         // Smoothly damp towards the target position.
-        Vector3 newCameraPos = Vector3.SmoothDamp(currentCameraPos, targetCameraPos, ref horizontalVelocity, movementSmoothTime);
+        Vector3 smoothedHorizontalPosition = Vector3.SmoothDamp(currentHorizontalPosition, targetHorizontalPosition, ref horizontalVelocitySmoothing, movementSmoothTime);
         
         // Update the Focus Object's position (preserving the original Y value).
-        transform.position = new Vector3(newCameraPos.x, currentPos.y, newCameraPos.z);
+        transform.position = new Vector3(smoothedHorizontalPosition.x, currentPos.y, smoothedHorizontalPosition.z);
     }
 
 
@@ -186,9 +187,9 @@ public class CameraMovementController : MonoBehaviour
         // Cast a ray downward from the adjusted ray origin.
         if (Physics.Raycast(rayOrigin, Vector3.down, out RaycastHit hit, raycastDistance, collisionLayers))
         {
-            float targetY = hit.point.y + heightOffset;
-            float newY = Mathf.SmoothDamp(currentPos.y, targetY, ref verticalVelocity, heightSmoothTime);
-            transform.position = new Vector3(currentPos.x, newY, currentPos.z);
+            float targetHeight = hit.point.y + heightOffset;
+            float smoothedHeight = Mathf.SmoothDamp(currentPos.y, targetHeight, ref verticalVelocitySmoothing, heightSmoothTime);
+            transform.position = new Vector3(currentPos.x, smoothedHeight, currentPos.z);
         }
     }
 }

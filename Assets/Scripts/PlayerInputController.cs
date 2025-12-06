@@ -1,17 +1,15 @@
 using UnityEngine;
+using UnityEngine.Events;
 using UnityEngine.InputSystem;
 
 namespace WaterTown.Building.UI
 {
     /// <summary>
-    /// Lives on the Player object.
-    /// Manages which action maps are enabled for gameplay vs build mode:
+    /// Manages input action maps for gameplay vs build mode.
     /// • Global: always on (ToggleBuildUI)
-    /// • Player: gameplay actions (Select/Context/OpenMenu) – ON in gameplay, OFF in build mode
-    /// • BuildMode: rotate/place/cancel – OFF in gameplay, ON in build mode
+    /// • Player: gameplay actions – ON in gameplay, OFF in build mode
+    /// • BuildMode: build actions – OFF in gameplay, ON in build mode
     /// • Camera: always on (camera movement in both modes)
-    ///
-    /// Also routes Global/ToggleBuildUI to GameUIController.
     /// </summary>
     public class PlayerInputController : MonoBehaviour
     {
@@ -24,14 +22,22 @@ namespace WaterTown.Building.UI
         [SerializeField] private string playerMapName   = "Player";
         [SerializeField] private string buildModeMapName = "BuildMode";
         [SerializeField] private string cameraMapName   = "Camera";
-        [SerializeField] private string uiMapName       = "UI";   // used by EventSystem, not toggled here
 
         [Header("Global Actions")]
-        [Tooltip("Name of the action in Global that toggles the build UI (e.g., ToggleBuildUI).")]
+        [Tooltip("Name of the action in Global that toggles the build UI.")]
         [SerializeField] private string toggleBuildUIActionName = "ToggleBuildUI";
 
-        [Header("Central UI")]
+        [Header("References")]
         [SerializeField] private GameUIController gameUI;
+
+        [Header("Events")]
+        [Tooltip("Invoked when entering build mode.")]
+        public UnityEvent OnBuildModeEntered = new UnityEvent();
+        
+        [Tooltip("Invoked when exiting build mode.")]
+        public UnityEvent OnBuildModeExited = new UnityEvent();
+        
+        public bool IsInBuildMode { get; private set; }
 
         // runtime maps/actions
         private InputActionMap _mapGlobal;
@@ -42,36 +48,61 @@ namespace WaterTown.Building.UI
 
         private void Awake()
         {
-            if (baseControls == null)
+            if (!ValidateReferences())
             {
-                Debug.LogError("[PlayerInputController] baseControls is not assigned.", this);
-                enabled = false;
-                return;
-            }
-            if (gameUI == null)
-            {
-                Debug.LogError("[PlayerInputController] GameUIController reference is missing.", this);
                 enabled = false;
                 return;
             }
 
+            if (!InitializeInputMaps())
+            {
+                enabled = false;
+                return;
+            }
+        }
+
+        private bool ValidateReferences()
+        {
+            if (baseControls == null)
+            {
+                Debug.LogError("[PlayerInputController] baseControls InputActionAsset is not assigned.", this);
+                return false;
+            }
+            
+            if (gameUI == null)
+            {
+                Debug.LogError("[PlayerInputController] GameUIController reference is missing.", this);
+                return false;
+            }
+
+            return true;
+        }
+
+        private bool InitializeInputMaps()
+        {
             _mapGlobal    = baseControls.FindActionMap(globalMapName,    throwIfNotFound: false);
             _mapPlayer    = baseControls.FindActionMap(playerMapName,    throwIfNotFound: false);
             _mapBuildMode = baseControls.FindActionMap(buildModeMapName, throwIfNotFound: false);
             _mapCamera    = baseControls.FindActionMap(cameraMapName,    throwIfNotFound: false);
 
-            if (_mapGlobal == null)    { Debug.LogError($"[PlayerInputController] Global map '{globalMapName}' not found.", this);    enabled = false; return; }
-            if (_mapPlayer == null)    { Debug.LogError($"[PlayerInputController] Player map '{playerMapName}' not found.", this);    enabled = false; return; }
-            if (_mapBuildMode == null) { Debug.LogError($"[PlayerInputController] BuildMode map '{buildModeMapName}' not found.", this); enabled = false; return; }
-            if (_mapCamera == null)    { Debug.LogError($"[PlayerInputController] Camera map '{cameraMapName}' not found.", this);    enabled = false; return; }
+            // Validate all maps exist
+            bool allValid = true;
+            if (_mapGlobal == null)    { Debug.LogError($"[PlayerInputController] Action map '{globalMapName}' not found.", this);    allValid = false; }
+            if (_mapPlayer == null)    { Debug.LogError($"[PlayerInputController] Action map '{playerMapName}' not found.", this);    allValid = false; }
+            if (_mapBuildMode == null) { Debug.LogError($"[PlayerInputController] Action map '{buildModeMapName}' not found.", this); allValid = false; }
+            if (_mapCamera == null)    { Debug.LogError($"[PlayerInputController] Action map '{cameraMapName}' not found.", this);    allValid = false; }
 
+            if (!allValid) return false;
+
+            // Find toggle action
             _actToggleBuildUI = _mapGlobal.FindAction(toggleBuildUIActionName, throwIfNotFound: false);
             if (_actToggleBuildUI == null)
             {
-                Debug.LogError($"[PlayerInputController] Action '{toggleBuildUIActionName}' not found in Global map.", this);
-                enabled = false;
-                return;
+                Debug.LogError($"[PlayerInputController] Action '{toggleBuildUIActionName}' not found in '{globalMapName}' map.", this);
+                return false;
             }
+
+            return true;
         }
 
         private void OnEnable()
@@ -108,15 +139,42 @@ namespace WaterTown.Building.UI
 
             if (enteringBuildMode)
             {
-                // Gameplay → BuildMode
-                _mapPlayer.Disable();      // E no longer triggers OpenMenu
-                _mapBuildMode.Enable();    // E now triggers RotateCW
+                EnterBuildMode();
             }
             else
             {
-                // BuildMode → Gameplay
-                _mapBuildMode.Disable();   // E no longer triggers RotateCW
-                _mapPlayer.Enable();       // E is back to OpenMenu
+                ExitBuildMode();
+            }
+        }
+
+        private void EnterBuildMode()
+        {
+            _mapPlayer?.Disable();
+            _mapBuildMode?.Enable();
+            IsInBuildMode = true;
+            OnBuildModeEntered?.Invoke();
+        }
+
+        private void ExitBuildMode()
+        {
+            _mapBuildMode?.Disable();
+            _mapPlayer?.Enable();
+            IsInBuildMode = false;
+            OnBuildModeExited?.Invoke();
+        }
+
+        /// <summary>
+        /// Public API to programmatically enter build mode.
+        /// </summary>
+        public void SetBuildMode(bool buildModeActive)
+        {
+            if (buildModeActive && !IsInBuildMode)
+            {
+                EnterBuildMode();
+            }
+            else if (!buildModeActive && IsInBuildMode)
+            {
+                ExitBuildMode();
             }
         }
     }

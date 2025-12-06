@@ -3,6 +3,7 @@ using Grid;
 using Unity.AI.Navigation;
 using UnityEngine;
 using UnityEngine.AI;
+using UnityEngine.Events;
 using WaterTown.Platforms;
 
 namespace WaterTown.Town
@@ -27,6 +28,17 @@ namespace WaterTown.Town
         [Header("NavMesh Link Settings")]
         [Tooltip("Width of NavMesh links created between connected platforms (meters).")]
         [SerializeField] private float navLinkWidth = 0.6f;
+
+        [Header("Events")]
+        [Tooltip("Invoked when a platform is successfully placed and registered.")]
+        public UnityEvent OnPlatformPlaced = new UnityEvent();
+        
+        [Tooltip("Invoked when a platform is removed/unregistered.")]
+        public UnityEvent OnPlatformRemoved = new UnityEvent();
+        
+        // Cached reference to last placed/removed platform for event handlers
+        public GamePlatform LastPlacedPlatform { get; private set; }
+        public GamePlatform LastRemovedPlatform { get; private set; }
 
         // --- Platform occupancy bookkeeping ---
 
@@ -252,6 +264,10 @@ namespace WaterTown.Town
                 // Build NavMesh for newly placed permanent platforms
                 // (Skip for preview platforms where markOccupiedInGrid = false)
                 platform.BuildLocalNavMesh();
+                
+                // Invoke UnityEvent for designer-facing hooks
+                LastPlacedPlatform = platform;
+                OnPlatformPlaced?.Invoke();
             }
 
             // Mark adjacency for batched recomputation
@@ -306,6 +322,10 @@ namespace WaterTown.Town
 
             // Clear connections on this platform
             platform.EditorResetAllConnections();
+
+            // Invoke UnityEvent for designer-facing hooks
+            LastRemovedPlatform = platform;
+            OnPlatformRemoved?.Invoke();
 
             // Mark adjacency for batched recomputation
             MarkAdjacencyDirty();
@@ -578,15 +598,17 @@ namespace WaterTown.Town
         /// assuming its footprint is aligned to the 1x1 world grid AND
         /// that rotation is in 90° steps (0, 90, 180, 270).
         /// This is the single source of truth for runtime footprint.
+        /// Ensures platform position is grid-aligned using WorldGrid.
         /// </summary>
         public void ComputeCellsForPlatform(GamePlatform platform, int level, List<Vector2Int> outputCells)
         {
             outputCells.Clear();
             if (!platform || !grid) return;
 
-            // Use platform's world position to find a "center" cell on the desired level
-            Vector3 worldCenter = platform.transform.position;
-            var centerCell = grid.WorldToCellOnLevel(worldCenter, new Vector3Int(0, 0, level));
+            // Snap platform position to grid to ensure perfect alignment
+            Vector3 worldPosition = platform.transform.position;
+            Vector3 snappedPosition = grid.SnapWorldPositionToGrid(worldPosition, level);
+            var centerCell = grid.WorldToCellOnLevel(snappedPosition, new Vector3Int(0, 0, level));
             int centerX = centerCell.x;
             int centerY = centerCell.y;
 
