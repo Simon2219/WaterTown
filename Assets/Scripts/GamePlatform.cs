@@ -4,6 +4,8 @@ using Unity.AI.Navigation;
 using UnityEngine;
 using UnityEngine.AI;
 using WaterTown.Interfaces;
+using WaterTown.Town;
+using Grid;
 
 namespace WaterTown.Platforms
 {
@@ -25,6 +27,37 @@ namespace WaterTown.Platforms
 
         /// <summary>Fired whenever this platform's pose changes (position/rotation/scale).</summary>
         public event System.Action<GamePlatform> PoseChanged;
+        
+        #endregion
+
+        #region Core System References
+        
+        // ---------- Cached System References ----------
+        // These are backbone systems, validated once at startup
+        
+        private static TownManager _townManager;
+        private static WorldGrid _worldGrid;
+        private static bool _systemReferencesValidated = false;
+        
+        private static void EnsureSystemReferences()
+        {
+            if (_systemReferencesValidated) return;
+            
+            _townManager = FindFirstObjectByType<TownManager>();
+            _worldGrid = FindFirstObjectByType<WorldGrid>();
+            
+            if (_townManager == null)
+            {
+                Debug.LogError("[GamePlatform] TownManager not found in scene! GamePlatform requires TownManager to function.");
+            }
+            
+            if (_worldGrid == null)
+            {
+                Debug.LogError("[GamePlatform] WorldGrid not found in scene! GamePlatform requires WorldGrid to function.");
+            }
+            
+            _systemReferencesValidated = true;
+        }
         
         #endregion
 
@@ -749,6 +782,9 @@ namespace WaterTown.Platforms
 
         private void Awake()
         {
+            // Ensure backbone system references are cached (only searches once across all platforms)
+            EnsureSystemReferences();
+            
             if (!_navSurface) _navSurface = GetComponent<NavMeshSurface>();
             InitializePlatform();
         }
@@ -1103,12 +1139,8 @@ namespace WaterTown.Platforms
             // This will trigger adjacency recomputation so neighboring platforms update their railings
             if (!isNewObject)
             {
-                var townManager = FindFirstObjectByType<WaterTown.TownManager>();
-                if (townManager != null)
-                {
-                    townManager.UnregisterPlatform(this);
-                    Debug.Log($"[GamePlatform] Picked up existing '{name}' - neighbors will update railings");
-                }
+                _townManager.UnregisterPlatform(this);
+                Debug.Log($"[GamePlatform] Picked up existing '{name}' - neighbors will update railings");
             }
         }
 
@@ -1131,17 +1163,13 @@ namespace WaterTown.Platforms
             EnsureChildrenRailingsRegistered();
             
             // Register with TownManager (triggers adjacency recomputation and NavMesh build)
-            var townManager = FindFirstObjectByType<WaterTown.TownManager>();
-            if (townManager != null)
-            {
-                var cells = new List<Vector2Int>();
-                townManager.ComputeCellsForPlatform(this, 0, cells);
-                // This will:
-                // 1. Mark cells as occupied in WorldGrid
-                // 2. Build NavMesh on this platform
-                // 3. Mark adjacency dirty (triggers railing updates and NavMesh links in LateUpdate)
-                townManager.RegisterPlatform(this, cells, 0, markOccupiedInGrid: true);
-            }
+            var cells = new List<Vector2Int>();
+            _townManager.ComputeCellsForPlatform(this, 0, cells);
+            // This will:
+            // 1. Mark cells as occupied in WorldGrid
+            // 2. Build NavMesh on this platform
+            // 3. Mark adjacency dirty (triggers railing updates and NavMesh links in LateUpdate)
+            _townManager.RegisterPlatform(this, cells, 0, markOccupiedInGrid: true);
             
             Debug.Log($"[GamePlatform] Placed '{name}' at {transform.position}");
         }
@@ -1174,13 +1202,9 @@ namespace WaterTown.Platforms
                 
                 // Re-register with TownManager at original position
                 // This triggers adjacency recomputation so railings/NavMesh links update
-                var townManager = FindFirstObjectByType<WaterTown.TownManager>();
-                if (townManager != null)
-                {
-                    var cells = new List<Vector2Int>();
-                    townManager.ComputeCellsForPlatform(this, 0, cells);
-                    townManager.RegisterPlatform(this, cells, 0, markOccupiedInGrid: true);
-                }
+                var cells = new List<Vector2Int>();
+                _townManager.ComputeCellsForPlatform(this, 0, cells);
+                _townManager.RegisterPlatform(this, cells, 0, markOccupiedInGrid: true);
                 
                 Debug.Log($"[GamePlatform] Cancelled movement of '{name}' - restored to original position");
             }
@@ -1223,17 +1247,14 @@ namespace WaterTown.Platforms
         {
             if (!IsPickedUp) return true; // Not being placed
             
-            var townManager = FindFirstObjectByType<WaterTown.TownManager>();
-            if (townManager == null) return false;
-            
             // Compute cells this platform would occupy
             var cells = new List<Vector2Int>();
-            townManager.ComputeCellsForPlatform(this, 0, cells);
+            _townManager.ComputeCellsForPlatform(this, 0, cells);
             
             if (cells.Count == 0) return false;
             
-            // Check if area is free (excluding this platform's InstanceID)
-            return townManager.IsAreaFree(cells, 0);
+            // Check if area is free
+            return _townManager.IsAreaFree(cells, 0);
         }
         
         #endregion
