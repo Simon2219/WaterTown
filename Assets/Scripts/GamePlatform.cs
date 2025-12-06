@@ -76,9 +76,13 @@ namespace WaterTown.Platforms
         private Material[] _originalMaterials;
         private readonly List<Renderer> _allRenderers = new List<Renderer>();
         
-        [Header("Pickup Materials")]
+        [Header("Pickup Materials (Optional - will auto-create if not assigned)")]
         [SerializeField] private Material pickupValidMaterial;
         [SerializeField] private Material pickupInvalidMaterial;
+        
+        // Auto-generated materials for testing
+        private static Material _autoValidMaterial;
+        private static Material _autoInvalidMaterial;
         
         #endregion
 
@@ -1149,15 +1153,15 @@ namespace WaterTown.Platforms
             foreach (var col in GetComponentsInChildren<Collider>(true))
                 col.enabled = false;
             
-            // Cache renderers and store original materials
+            // Cache renderers and store original materials from all renderers
             _allRenderers.Clear();
             _allRenderers.AddRange(GetComponentsInChildren<Renderer>(true));
             
-            if (_originalMaterials == null || _originalMaterials.Length == 0)
+            // Store all original materials (we'll restore them per-renderer later)
+            // Just use the first renderer as reference for now
+            if (_allRenderers.Count > 0 && _allRenderers[0] != null)
             {
-                // Store first renderer's materials as reference
-                if (_allRenderers.Count > 0 && _allRenderers[0] != null)
-                    _originalMaterials = _allRenderers[0].sharedMaterials;
+                _originalMaterials = _allRenderers[0].sharedMaterials;
             }
             
             // If this is an existing object being moved, unregister from TownManager
@@ -1237,7 +1241,10 @@ namespace WaterTown.Platforms
 
         public void UpdateValidityVisuals(bool isValid)
         {
-            Material targetMaterial = isValid ? pickupValidMaterial : pickupInvalidMaterial;
+            // Use assigned materials if available, otherwise create auto-generated ones
+            Material targetMaterial = isValid 
+                ? (pickupValidMaterial != null ? pickupValidMaterial : GetAutoValidMaterial())
+                : (pickupInvalidMaterial != null ? pickupInvalidMaterial : GetAutoInvalidMaterial());
             
             if (targetMaterial != null)
             {
@@ -1252,6 +1259,64 @@ namespace WaterTown.Platforms
                     }
                 }
             }
+        }
+        
+        /// <summary>
+        /// Creates or returns the auto-generated green translucent material for valid placement.
+        /// AUTO-GENERATED for testing purposes - assign custom materials in inspector for production.
+        /// </summary>
+        private static Material GetAutoValidMaterial()
+        {
+            if (_autoValidMaterial == null)
+            {
+                _autoValidMaterial = new Material(Shader.Find("Standard"));
+                _autoValidMaterial.name = "Auto_ValidPlacement (Testing)";
+                _autoValidMaterial.color = new Color(0f, 1f, 0f, 0.6f); // Bright green, 60% transparent
+                
+                // Enable transparency (Standard shader transparent mode)
+                _autoValidMaterial.SetFloat("_Mode", 3); // Transparent mode
+                _autoValidMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                _autoValidMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                _autoValidMaterial.SetInt("_ZWrite", 0);
+                _autoValidMaterial.DisableKeyword("_ALPHATEST_ON");
+                _autoValidMaterial.EnableKeyword("_ALPHABLEND_ON");
+                _autoValidMaterial.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+                _autoValidMaterial.renderQueue = 3000;
+                
+                // Make it emissive so it's more visible
+                _autoValidMaterial.EnableKeyword("_EMISSION");
+                _autoValidMaterial.SetColor("_EmissionColor", new Color(0f, 0.3f, 0f, 1f));
+            }
+            return _autoValidMaterial;
+        }
+        
+        /// <summary>
+        /// Creates or returns the auto-generated red translucent material for invalid placement.
+        /// AUTO-GENERATED for testing purposes - assign custom materials in inspector for production.
+        /// </summary>
+        private static Material GetAutoInvalidMaterial()
+        {
+            if (_autoInvalidMaterial == null)
+            {
+                _autoInvalidMaterial = new Material(Shader.Find("Standard"));
+                _autoInvalidMaterial.name = "Auto_InvalidPlacement (Testing)";
+                _autoInvalidMaterial.color = new Color(1f, 0f, 0f, 0.6f); // Bright red, 60% transparent
+                
+                // Enable transparency (Standard shader transparent mode)
+                _autoInvalidMaterial.SetFloat("_Mode", 3); // Transparent mode
+                _autoInvalidMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                _autoInvalidMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                _autoInvalidMaterial.SetInt("_ZWrite", 0);
+                _autoInvalidMaterial.DisableKeyword("_ALPHATEST_ON");
+                _autoInvalidMaterial.EnableKeyword("_ALPHABLEND_ON");
+                _autoInvalidMaterial.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+                _autoInvalidMaterial.renderQueue = 3000;
+                
+                // Make it emissive so it's more visible
+                _autoInvalidMaterial.EnableKeyword("_EMISSION");
+                _autoInvalidMaterial.SetColor("_EmissionColor", new Color(0.3f, 0f, 0f, 1f));
+            }
+            return _autoInvalidMaterial;
         }
 
         private void RestoreOriginalMaterials()
