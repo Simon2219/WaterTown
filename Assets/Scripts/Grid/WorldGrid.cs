@@ -17,6 +17,8 @@ namespace Grid
     [DisallowMultipleComponent]
     public class WorldGrid : MonoBehaviour
     {
+        #region Configuration & Data Structures
+        
         [Header("Settings Asset (optional but recommended)")]
         [Tooltip("If assigned, the grid reads all configuration from this asset.")]
         public GridSettings settings;
@@ -73,7 +75,11 @@ namespace Grid
             Occupied  = 1 << 2,
             // Extend as needed: Preview = 1<<3, ServiceZone = 1<<4, etc.
         }
+        
+        #endregion
 
+        #region Lifecycle & Initialization
+        
         // ---------- Lifecycle ----------
 
         private void Awake()
@@ -132,7 +138,11 @@ namespace Grid
                 StructureChanged?.Invoke();
             }
         }
+        
+        #endregion
 
+        #region Coordinate Transforms & Bounds
+        
         // ---------- Bounds & transforms ----------
 
         /// <summary>True if (x,y,level) lies inside the grid.</summary>
@@ -216,6 +226,77 @@ namespace Grid
             );
         }
 
+        /// <summary>
+        /// Converts a world position to a 2D grid cell coordinate (X, Y only).
+        /// Used for socket matching - sockets at the same grid cell should connect.
+        /// </summary>
+        public Vector2Int WorldToCell2D(Vector3 worldPos, int level)
+        {
+            Vector3Int cell3D = WorldToCellOnLevel(worldPos, new Vector3Int(0, 0, level));
+            return new Vector2Int(cell3D.x, cell3D.y);
+        }
+
+        /// <summary>
+        /// Snaps a world position to the nearest grid-aligned position for a platform with given footprint.
+        /// Handles even vs odd footprints correctly:
+        /// - Even footprints (4x4): snap to cell edges (whole meters like 44.0)
+        /// - Odd footprints (3x3): snap to cell centers (half meters like 44.5)
+        /// </summary>
+        public Vector3 SnapToGridForPlatform(Vector3 worldPosition, Vector2Int footprint, int level)
+        {
+            bool evenWidth = (footprint.x % 2) == 0;
+            bool evenHeight = (footprint.y % 2) == 0;
+            
+            float levelY = GetLevelWorldY(level);
+            
+            // For even dimensions, snap to cell edges (whole meters)
+            // For odd dimensions, snap to cell centers (half meters)
+            float snappedX;
+            float snappedZ;
+            
+            if (evenWidth)
+            {
+                // Snap to whole meters (cell edges)
+                snappedX = worldOrigin.x + Mathf.Round((worldPosition.x - worldOrigin.x) / cellSize) * cellSize;
+            }
+            else
+            {
+                // Snap to cell centers (half meters)
+                snappedX = worldOrigin.x + (Mathf.Floor((worldPosition.x - worldOrigin.x) / cellSize) + 0.5f) * cellSize;
+            }
+            
+            if (evenHeight)
+            {
+                // Snap to whole meters (cell edges)
+                snappedZ = worldOrigin.z + Mathf.Round((worldPosition.z - worldOrigin.z) / cellSize) * cellSize;
+            }
+            else
+            {
+                // Snap to cell centers (half meters)
+                snappedZ = worldOrigin.z + (Mathf.Floor((worldPosition.z - worldOrigin.z) / cellSize) + 0.5f) * cellSize;
+            }
+            
+            return new Vector3(snappedX, levelY, snappedZ);
+        }
+
+        /// <summary>
+        /// Snaps a world position to the nearest grid cell center on the specified level.
+        /// </summary>
+        public Vector3 SnapWorldPositionToGrid(Vector3 worldPosition, int level)
+        {
+            Vector3Int cell = WorldToCellOnLevel(worldPosition, new Vector3Int(0, 0, level));
+            return GetCellCenter(cell);
+        }
+
+        /// <summary>
+        /// Snaps a world position to the nearest grid cell center, inferring level from Y coordinate.
+        /// </summary>
+        public Vector3 SnapWorldPositionToGrid(Vector3 worldPosition)
+        {
+            Vector3Int cell = WorldToCell(worldPosition);
+            return GetCellCenter(cell);
+        }
+
         /// <summary>World-space axis-aligned bounds of a cell (thin in Y).</summary>
         public Bounds GetCellBounds(Vector3Int cell)
         {
@@ -275,7 +356,11 @@ namespace Grid
             );
             return true;
         }
+        
+        #endregion
 
+        #region Raycast Helpers
+        
         // ---------- Raycast helper ----------
 
         /// <summary>
@@ -296,7 +381,11 @@ namespace Grid
             cell = default; hitPoint = default;
             return false;
         }
+        
+        #endregion
 
+        #region Cell Data Access & Flags
+        
         // ---------- Single-cell data & flags ----------
 
         /// <summary>Read cell data if in bounds.</summary>
@@ -363,7 +452,11 @@ namespace Grid
         {
             return CellInBounds(cell) && (_cells[cell.x, cell.y, cell.z].flags & flags) != 0;
         }
+        
+        #endregion
 
+        #region Area Operations
+        
         // ---------- Area helpers (two corners, inclusive, level = a.z) ----------
 
         private void ClampAreaInclusive(Vector3Int a, Vector3Int b, out Vector3Int min, out Vector3Int max)
@@ -502,7 +595,11 @@ namespace Grid
                 if ((_cells[x, y, min.z].flags & flags) != 0) count++;
             return count;
         }
+        
+        #endregion
 
+        #region Neighbor Queries
+        
         // ---------- Neighbors (pathing/adjacency) ----------
 
         public void GetNeighbors4(Vector3Int cell, List<Vector3Int> into)
@@ -525,5 +622,37 @@ namespace Grid
                 if (CellInBounds(n)) into.Add(n);
             }
         }
+
+        /// <summary>
+        /// Gets the world position of the edge center between two adjacent cells.
+        /// Returns the midpoint between the centers of cellA and cellB.
+        /// </summary>
+        public Vector3 GetEdgeCenterBetweenCells(Vector3Int cellA, Vector3Int cellB)
+        {
+            Vector3 centerA = GetCellCenter(cellA);
+            Vector3 centerB = GetCellCenter(cellB);
+            return (centerA + centerB) * 0.5f;
+        }
+
+        /// <summary>
+        /// Gets all edge-adjacent cells (4-directional neighbors) that are occupied by the specified flag.
+        /// Useful for finding connected platforms.
+        /// </summary>
+        public void GetOccupiedNeighbors(Vector3Int cell, CellFlag flag, List<Vector3Int> occupiedNeighbors)
+        {
+            occupiedNeighbors.Clear();
+            List<Vector3Int> neighbors = new List<Vector3Int>();
+            GetNeighbors4(cell, neighbors);
+            
+            foreach (var neighbor in neighbors)
+            {
+                if (CellHasAnyFlag(neighbor, flag))
+                {
+                    occupiedNeighbors.Add(neighbor);
+                }
+            }
+        }
+        
+        #endregion
     }
 }

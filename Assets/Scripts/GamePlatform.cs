@@ -3,13 +3,18 @@ using System.Collections.Generic;
 using Unity.AI.Navigation;
 using UnityEngine;
 using UnityEngine.AI;
+using WaterTown.Interfaces;
+using WaterTown.Town;
+using Grid;
 
 namespace WaterTown.Platforms
 {
     [DisallowMultipleComponent]
     [RequireComponent(typeof(NavMeshSurface))]
-    public class GamePlatform : MonoBehaviour
+    public class GamePlatform : MonoBehaviour, IPickupable
     {
+        #region Global Registry & Events
+        
         // ---------- Global registry & events ----------
         public static event System.Action<GamePlatform> PlatformRegistered;
         public static event System.Action<GamePlatform> PlatformUnregistered;
@@ -17,16 +22,77 @@ namespace WaterTown.Platforms
         private static readonly HashSet<GamePlatform> _allPlatforms = new();
         public static IReadOnlyCollection<GamePlatform> AllPlatforms => _allPlatforms;
 
-        /// <summary>Fired whenever this platform’s connection/railing state changes.</summary>
+        /// <summary>Fired whenever this platform's connection/railing state changes.</summary>
         public event System.Action<GamePlatform> ConnectionsChanged;
 
-        /// <summary>Fired whenever this platform’s pose changes (position/rotation/scale).</summary>
+        /// <summary>Fired whenever this platform's pose changes (position/rotation/scale).</summary>
         public event System.Action<GamePlatform> PoseChanged;
+        
+        #endregion
 
+        #region Core System References
+        
+        // ---------- Cached System References ----------
+        // These are backbone systems, validated once at startup
+        
+        private static TownManager _townManager;
+        private static WorldGrid _worldGrid;
+        private static bool _systemReferencesValidated = false;
+        
+        private static void EnsureSystemReferences()
+        {
+            if (_systemReferencesValidated) return;
+            
+            _townManager = FindFirstObjectByType<TownManager>();
+            _worldGrid = FindFirstObjectByType<WorldGrid>();
+            
+            if (_townManager == null)
+            {
+                Debug.LogError("[GamePlatform] TownManager not found in scene! GamePlatform requires TownManager to function.");
+            }
+            
+            if (_worldGrid == null)
+            {
+                Debug.LogError("[GamePlatform] WorldGrid not found in scene! GamePlatform requires WorldGrid to function.");
+            }
+            
+            _systemReferencesValidated = true;
+        }
+        
+        #endregion
+
+        #region IPickupable Implementation
+        
+        // ---------- Pickup/Placement State ----------
+        
+        public bool IsPickedUp { get; set; }
+        public bool CanBePlaced => ValidatePlacement();
+        public Transform Transform => transform;
+        public GameObject GameObject => gameObject;
+        
+        private Vector3 _originalPosition;
+        private Quaternion _originalRotation;
+        private bool _isNewObject;
+        private Material[] _originalMaterials;
+        private readonly List<Renderer> _allRenderers = new List<Renderer>();
+        
+        [Header("Pickup Materials (Optional - will auto-create if not assigned)")]
+        [SerializeField] private Material pickupValidMaterial;
+        [SerializeField] private Material pickupInvalidMaterial;
+        
+        // Auto-generated materials for testing
+        private static Material _autoValidMaterial;
+        private static Material _autoInvalidMaterial;
+        
+        #endregion
+
+        #region Footprint & NavMesh
+        
         // ---------- Footprint & NavMesh ----------
         [Header("Footprint (cells @ 1m)")]
-        [SerializeField] private Vector2Int footprint = new Vector2Int(4, 4);
-        public Vector2Int Footprint => footprint;
+        [Tooltip("Platform footprint in grid cells. X = width, Y = length.")]
+        [SerializeField] private Vector2Int footprintSize = new Vector2Int(4, 4);
+        public Vector2Int Footprint => footprintSize;
 
         private NavMeshSurface _navSurface;
 
@@ -51,7 +117,11 @@ namespace WaterTown.Platforms
         private Vector3 _lastPos;
         private Quaternion _lastRot;
         private Vector3 _lastScale;
+        
+        #endregion
 
+        #region Edge & Socket System
+        
         // ---------- Edge enum (for compatibility with PlatformModule) ----------
 
         public enum Edge { North, East, South, West }
@@ -60,7 +130,7 @@ namespace WaterTown.Platforms
         public int EdgeLengthMeters(Edge edge)
         {
             // X = width (north/south edges); Y = length (east/west edges)
-            return (edge == Edge.North || edge == Edge.South) ? footprint.x : footprint.y;
+            return (edge == Edge.North || edge == Edge.South) ? footprintSize.x : footprintSize.y;
         }
 
         // ---------- Sockets (grid-based, direction-agnostic) ----------
@@ -97,6 +167,10 @@ namespace WaterTown.Platforms
         [Header("Sockets (perimeter, 1m spacing)")]
         [SerializeField] private List<SocketInfo> sockets = new();
         private bool _socketsBuilt;
+        
+        // Cache for socket world positions (invalidated on transform change)
+        private Vector3[] _cachedWorldPositions;
+        private bool _worldPositionsCacheValid;
 
         /// <summary>Set of socket indices that are currently part of a connection.</summary>
         private readonly HashSet<int> _connectedSockets = new();
@@ -128,79 +202,152 @@ namespace WaterTown.Platforms
 
             sockets.Clear();
             _socketsBuilt = false;
+            
+            // Invalidate world position cache when rebuilding sockets
+            _worldPositionsCacheValid = false;
 
-            int w = Mathf.Max(1, footprint.x);
-            int l = Mathf.Max(1, footprint.y);
-            float hx = w * 0.5f;
-            float hz = l * 0.5f;
+            int footprintWidth = Mathf.Max(1, footprintSize.x);
+            int footprintLength = Mathf.Max(1, footprintSize.y);
+            float halfWidth = footprintWidth * 0.5f;
+            float halfLength = footprintLength * 0.5f;
 
-            int idx = 0;
+            int socketIndex = 0;
 
-            // North edge (local z ≈ +hz), segments along x
-            for (int m = 0; m < w; m++)
+            // North edge (local z ≈ +halfLength), segments along x
+            for (int segmentIndex = 0; segmentIndex < footprintWidth; segmentIndex++)
             {
-                float x = -hx + 0.5f + m;
-                Vector3 lp = new Vector3(x, 0f, +hz);
-                var si = new SocketInfo();
-                si.Initialize(idx, lp, prev.TryGetValue(lp, out var old) ? old : SocketStatus.Linkable);
-                sockets.Add(si);
-                idx++;
+                float localX = -halfWidth + 0.5f + segmentIndex;
+                Vector3 localPosition = new Vector3(localX, 0f, +halfLength);
+                var socketInfo = new SocketInfo();
+                socketInfo.Initialize(socketIndex, localPosition, prev.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
+                sockets.Add(socketInfo);
+                socketIndex++;
             }
 
-            // South edge (local z ≈ -hz)
-            for (int m = 0; m < w; m++)
+            // South edge (local z ≈ -halfLength)
+            for (int segmentIndex = 0; segmentIndex < footprintWidth; segmentIndex++)
             {
-                float x = -hx + 0.5f + m;
-                Vector3 lp = new Vector3(x, 0f, -hz);
-                var si = new SocketInfo();
-                si.Initialize(idx, lp, prev.TryGetValue(lp, out var old) ? old : SocketStatus.Linkable);
-                sockets.Add(si);
-                idx++;
+                float localX = -halfWidth + 0.5f + segmentIndex;
+                Vector3 localPosition = new Vector3(localX, 0f, -halfLength);
+                var socketInfo = new SocketInfo();
+                socketInfo.Initialize(socketIndex, localPosition, prev.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
+                sockets.Add(socketInfo);
+                socketIndex++;
             }
 
-            // East edge (local x ≈ +hx), along z
-            for (int m = 0; m < l; m++)
+            // East edge (local x ≈ +halfWidth), along z
+            for (int segmentIndex = 0; segmentIndex < footprintLength; segmentIndex++)
             {
-                float z = +hz - 0.5f - m;
-                Vector3 lp = new Vector3(+hx, 0f, z);
-                var si = new SocketInfo();
-                si.Initialize(idx, lp, prev.TryGetValue(lp, out var old) ? old : SocketStatus.Linkable);
-                sockets.Add(si);
-                idx++;
+                float localZ = +halfLength - 0.5f - segmentIndex;
+                Vector3 localPosition = new Vector3(+halfWidth, 0f, localZ);
+                var socketInfo = new SocketInfo();
+                socketInfo.Initialize(socketIndex, localPosition, prev.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
+                sockets.Add(socketInfo);
+                socketIndex++;
             }
 
-            // West edge (local x ≈ -hx)
-            for (int m = 0; m < l; m++)
+            // West edge (local x ≈ -halfWidth)
+            for (int segmentIndex = 0; segmentIndex < footprintLength; segmentIndex++)
             {
-                float z = +hz - 0.5f - m;
-                Vector3 lp = new Vector3(-hx, 0f, z);
-                var si = new SocketInfo();
-                si.Initialize(idx, lp, prev.TryGetValue(lp, out var old) ? old : SocketStatus.Linkable);
-                sockets.Add(si);
-                idx++;
+                float localZ = +halfLength - 0.5f - segmentIndex;
+                Vector3 localPosition = new Vector3(-halfWidth, 0f, localZ);
+                var socketInfo = new SocketInfo();
+                socketInfo.Initialize(socketIndex, localPosition, prev.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
+                sockets.Add(socketInfo);
+                socketIndex++;
             }
 
             _socketsBuilt = true;
+            
+            // Ensure cache is rebuilt on next access
+            _worldPositionsCacheValid = false;
         }
 
         public SocketInfo GetSocket(int index)
         {
             if (!_socketsBuilt) BuildSockets();
+            if (index < 0 || index >= sockets.Count)
+            {
+                Debug.LogWarning($"[GamePlatform] GetSocket: index {index} out of range (0..{sockets.Count - 1}).", this);
+                return default;
+            }
             return sockets[index];
         }
 
         public Vector3 GetSocketWorldPosition(int index)
         {
             if (!_socketsBuilt) BuildSockets();
-            return transform.TransformPoint(sockets[index].LocalPos);
+            
+            // Bounds check
+            if (index < 0 || index >= sockets.Count)
+            {
+                Debug.LogWarning($"[GamePlatform] GetSocketWorldPosition: index {index} out of range (0..{sockets.Count - 1}). Returning transform position.", this);
+                return transform.position;
+            }
+            
+            // Check if cache is valid
+            if (!_worldPositionsCacheValid || _cachedWorldPositions == null || _cachedWorldPositions.Length != sockets.Count)
+            {
+                // Rebuild cache
+                if (_cachedWorldPositions == null || _cachedWorldPositions.Length != sockets.Count)
+                    _cachedWorldPositions = new Vector3[sockets.Count];
+                
+                for (int i = 0; i < sockets.Count; i++)
+                    _cachedWorldPositions[i] = transform.TransformPoint(sockets[i].LocalPos);
+                
+                _worldPositionsCacheValid = true;
+            }
+            
+            return _cachedWorldPositions[index];
         }
 
         public void SetSocketStatus(int index, SocketStatus status)
         {
             if (!_socketsBuilt) BuildSockets();
+            if (index < 0 || index >= sockets.Count)
+            {
+                Debug.LogWarning($"[GamePlatform] SetSocketStatus: index {index} out of range (0..{sockets.Count - 1}).", this);
+                return;
+            }
             var s = sockets[index];
             s.SetStatus(status);
             sockets[index] = s;
+        }
+
+        /// <summary>
+        /// Gets the socket index range (start, end inclusive) for a given edge.
+        /// Useful for iterating sockets on a specific edge.
+        /// </summary>
+        public void GetSocketIndexRangeForEdge(Edge edge, out int startIndex, out int endIndex)
+        {
+            if (!_socketsBuilt) BuildSockets();
+
+            int footprintWidth = Mathf.Max(1, footprintSize.x);
+            int footprintLength = Mathf.Max(1, footprintSize.y);
+
+            switch (edge)
+            {
+                case Edge.North:
+                    startIndex = 0;
+                    endIndex = footprintWidth - 1;
+                    break;
+
+                case Edge.South:
+                    startIndex = footprintWidth;
+                    endIndex = 2 * footprintWidth - 1;
+                    break;
+
+                case Edge.East:
+                    startIndex = 2 * footprintWidth;
+                    endIndex = 2 * footprintWidth + footprintLength - 1;
+                    break;
+
+                case Edge.West:
+                default:
+                    startIndex = 2 * footprintWidth + footprintLength;
+                    endIndex = 2 * footprintWidth + 2 * footprintLength - 1;
+                    break;
+            }
         }
 
         /// <summary>
@@ -211,27 +358,27 @@ namespace WaterTown.Platforms
         {
             if (!_socketsBuilt) BuildSockets();
 
-            int w = Mathf.Max(1, footprint.x);
-            int l = Mathf.Max(1, footprint.y);
+            int width = Mathf.Max(1, footprintSize.x);
+            int length = Mathf.Max(1, footprintSize.y);
 
             switch (edge)
             {
                 case Edge.North:
-                    mark = Mathf.Clamp(mark, 0, w - 1);
+                    mark = Mathf.Clamp(mark, 0, width - 1);
                     return mark;
 
                 case Edge.South:
-                    mark = Mathf.Clamp(mark, 0, w - 1);
-                    return w + mark;
+                    mark = Mathf.Clamp(mark, 0, width - 1);
+                    return width + mark;
 
                 case Edge.East:
-                    mark = Mathf.Clamp(mark, 0, l - 1);
-                    return 2 * w + mark;
+                    mark = Mathf.Clamp(mark, 0, length - 1);
+                    return 2 * width + mark;
 
                 case Edge.West:
                 default:
-                    mark = Mathf.Clamp(mark, 0, l - 1);
-                    return 2 * w + l + mark;
+                    mark = Mathf.Clamp(mark, 0, length - 1);
+                    return 2 * width + length + mark;
             }
         }
 
@@ -291,7 +438,11 @@ namespace WaterTown.Platforms
             Vector3 local = transform.InverseTransformPoint(worldPos);
             return FindNearestSocketIndexLocal(local);
         }
+        
+        #endregion
 
+        #region Module Registry
+        
         // ---------- Module registry ----------
 
         [System.Serializable]
@@ -346,7 +497,11 @@ namespace WaterTown.Platforms
             }
             _moduleRegs.Remove(moduleGo);
         }
+        
+        #endregion
 
+        #region Railing Registry
+        
         // ---------- Railing registry ----------
 
         private readonly Dictionary<int, List<PlatformRailing>> _socketToRailings = new();
@@ -397,12 +552,14 @@ namespace WaterTown.Platforms
         internal bool IsSocketConnected(int socketIndex) => _connectedSockets.Contains(socketIndex);
 
         /// <summary>
-        /// Compute visibility for a single PlatformRailing (rail or post)
-        /// based purely on its socket indices and _connectedSockets.
+        /// Compute visibility for a single PlatformRailing (rail or post).
+        /// Rails: Hidden when ALL their socket indices are Connected.
+        /// Posts: Hidden when ALL rails connected to the same sockets are hidden.
         /// </summary>
         internal void UpdateRailingVisibility(PlatformRailing railing)
         {
             if (!railing) return;
+            
             var indices = railing.SocketIndices ?? System.Array.Empty<int>();
             if (indices.Length == 0)
             {
@@ -410,20 +567,71 @@ namespace WaterTown.Platforms
                 return;
             }
 
-            bool any = false;
-            bool allConnected = true;
-            foreach (int idx in indices)
+            // For rails: hide if all sockets are connected
+            if (railing.type == PlatformRailing.RailingType.Rail)
             {
-                any = true;
-                if (!_connectedSockets.Contains(idx))
+                bool allSocketsConnected = true;
+                foreach (int socketIndex in indices)
                 {
-                    allConnected = false;
-                    break;
+                    if (!_connectedSockets.Contains(socketIndex))
+                    {
+                        allSocketsConnected = false;
+                        break;
+                    }
                 }
+                railing.SetHidden(allSocketsConnected && indices.Length > 0);
+                return;
             }
 
-            bool hide = any && allConnected;
-            railing.SetHidden(hide);
+            // For posts: hide if all rails on the same sockets are hidden
+            if (railing.type == PlatformRailing.RailingType.Post)
+            {
+                bool hasVisibleRail = false;
+                
+                // Check all sockets this post is bound to
+                foreach (int socketIndex in indices)
+                {
+                    // Check if there's any visible rail on this socket
+                    if (_socketToRailings.TryGetValue(socketIndex, out var railingsOnSocket))
+                    {
+                        foreach (var rail in railingsOnSocket)
+                        {
+                            if (rail == null) continue;
+                            if (rail.type != PlatformRailing.RailingType.Rail) continue;
+                            
+                            // Check if this rail is visible (not all its sockets are connected)
+                            var railIndices = rail.SocketIndices ?? System.Array.Empty<int>();
+                            bool railIsHidden = true;
+                            if (railIndices.Length > 0)
+                            {
+                                foreach (int railSocketIndex in railIndices)
+                                {
+                                    if (!_connectedSockets.Contains(railSocketIndex))
+                                    {
+                                        railIsHidden = false;
+                                        break;
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                railIsHidden = false;
+                            }
+                            
+                            if (!railIsHidden)
+                            {
+                                hasVisibleRail = true;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (hasVisibleRail) break;
+                }
+                
+                // Hide post if no visible rails are connected to its sockets
+                railing.SetHidden(!hasVisibleRail && indices.Length > 0);
+            }
         }
 
         internal void RefreshAllRailingsVisibility()
@@ -433,7 +641,7 @@ namespace WaterTown.Platforms
                 UpdateRailingVisibility(r);
         }
 
-        /// <summary>Recompute every socket’s status from current modules + connection state.</summary>
+        /// <summary>Recompute every socket's status from current modules + connection state.</summary>
         public void RefreshSocketStatuses()
         {
             if (!_socketsBuilt) BuildSockets();
@@ -471,7 +679,11 @@ namespace WaterTown.Platforms
                 sockets[i] = s;
             }
         }
+        
+        #endregion
 
+        #region Connection Management
+        
         public void SetModuleHidden(GameObject moduleGo, bool hidden)
         {
             if (!moduleGo) return;
@@ -486,30 +698,36 @@ namespace WaterTown.Platforms
 
         /// <summary>
         /// Toggle modules & railings on these sockets and flip sockets to Connected/Linkable.
+        /// Updates all railings to ensure posts correctly reflect rail visibility changes.
         /// </summary>
         public void ApplyConnectionVisuals(IEnumerable<int> socketIndices, bool connected)
         {
-            var set = new HashSet<int>(socketIndices);
-            var toToggleModules = new HashSet<GameObject>();
-            var affectedRailings = new HashSet<PlatformRailing>();
+            var socketSet = new HashSet<int>(socketIndices);
+            var modulesToToggle = new HashSet<GameObject>();
 
-            foreach (var sIdx in set)
+            // Update connection state and collect affected modules
+            foreach (int socketIndex in socketSet)
             {
-                if (connected) _connectedSockets.Add(sIdx);
-                else _connectedSockets.Remove(sIdx);
+                if (connected)
+                    _connectedSockets.Add(socketIndex);
+                else
+                    _connectedSockets.Remove(socketIndex);
 
-                if (_socketToModules.TryGetValue(sIdx, out var mods))
-                    foreach (var go in mods) toToggleModules.Add(go);
-
-                if (_socketToRailings.TryGetValue(sIdx, out var rails))
-                    foreach (var r in rails) affectedRailings.Add(r);
+                // Collect modules on these sockets
+                if (_socketToModules.TryGetValue(socketIndex, out var modules))
+                {
+                    foreach (var module in modules)
+                        modulesToToggle.Add(module);
+                }
             }
 
-            foreach (var go in toToggleModules)
-                SetModuleHidden(go, connected);
+            // Apply module visibility changes
+            foreach (var module in modulesToToggle)
+                SetModuleHidden(module, connected);
 
-            foreach (var r in affectedRailings)
-                UpdateRailingVisibility(r);
+            // Update all railings to ensure posts correctly reflect rail visibility
+            // This ensures cascading updates work correctly (rails -> posts)
+            RefreshAllRailingsVisibility();
 
             RefreshSocketStatuses();
             ConnectionsChanged?.Invoke(this);
@@ -559,11 +777,18 @@ namespace WaterTown.Platforms
             QueueRebuild();
             ConnectionsChanged?.Invoke(this);
         }
+        
+        #endregion
 
+        #region Lifecycle & Initialization
+        
         // ---------- Lifecycle ----------
 
         private void Awake()
         {
+            // Ensure backbone system references are cached (only searches once across all platforms)
+            EnsureSystemReferences();
+            
             if (!_navSurface) _navSurface = GetComponent<NavMeshSurface>();
             InitializePlatform();
         }
@@ -592,6 +817,9 @@ namespace WaterTown.Platforms
                 _lastPos = transform.position;
                 _lastRot = transform.rotation;
                 _lastScale = transform.localScale;
+
+                // Invalidate world position cache on transform change
+                _worldPositionsCacheValid = false;
 
                 PoseChanged?.Invoke(this);
             }
@@ -645,7 +873,11 @@ namespace WaterTown.Platforms
                 NavSurface.BuildNavMesh();
             _pendingRebuild = null;
         }
+        
+        #endregion
 
+        #region Gizmos (Editor Visualization)
+        
         // ---------- Gizmos ----------
 
         public static class GizmoSettings
@@ -688,8 +920,8 @@ namespace WaterTown.Platforms
 
             // Platform footprint outline
             Gizmos.color = new Color(0f, 0.6f, 1f, 0.25f);
-            float hx = footprint.x * 0.5f;
-            float hz = footprint.y * 0.5f;
+            float hx = footprintSize.x * 0.5f;
+            float hz = footprintSize.y * 0.5f;
             var p = transform.position; var r = transform.right; var f = transform.forward;
             Vector3 a = p + (-r * hx) + (-f * hz);
             Vector3 b = p + (r * hx) + (-f * hz);
@@ -699,8 +931,8 @@ namespace WaterTown.Platforms
 
             if (!_socketsBuilt) BuildSockets();
 
-            int w = Mathf.Max(1, footprint.x);
-            int l = Mathf.Max(1, footprint.y);
+            int footprintWidth = Mathf.Max(1, footprintSize.x);
+            int footprintLength = Mathf.Max(1, footprintSize.y);
 
             for (int i = 0; i < sockets.Count; i++)
             {
@@ -724,10 +956,10 @@ namespace WaterTown.Platforms
                     // Reconstruct pseudo edge+mark only for labeling (for debug)
                     Edge edge;
                     int mark;
-                    if (i < w)                { edge = Edge.North; mark = i; }
-                    else if (i < 2 * w)       { edge = Edge.South; mark = i - w; }
-                    else if (i < 2 * w + l)   { edge = Edge.East;  mark = i - 2 * w; }
-                    else                      { edge = Edge.West;  mark = i - (2 * w + l); }
+                    if (i < footprintWidth)                { edge = Edge.North; mark = i; }
+                    else if (i < 2 * footprintWidth)       { edge = Edge.South; mark = i - footprintWidth; }
+                    else if (i < 2 * footprintWidth + footprintLength)   { edge = Edge.East;  mark = i - 2 * footprintWidth; }
+                    else                      { edge = Edge.West;  mark = i - (2 * footprintWidth + footprintLength); }
 
                     string label = $"#{i} [{edge}:{mark}] {s.Status}";
                     UnityEditor.Handles.Label(wp + Vector3.up * 0.05f, label);
@@ -735,21 +967,30 @@ namespace WaterTown.Platforms
             }
         }
 #endif
+        
+        #endregion
 
-        // ---------- Link creation & adjacency (socket-position based) ----------
+        #region NavMesh Link Creation & Adjacency (Deprecated)
+        
+        // ---------- Link creation & adjacency ----------
 
         /// <summary>
-        /// Check if two platforms are adjacent on the same level by matching perimeter socket
-        /// positions in world space. If yes, mark those sockets as connected and create a NavMeshLink.
+        /// [DEPRECATED: Use TownManager's grid-based adjacency checking instead]
+        /// Check if two platforms are adjacent by matching socket positions.
+        /// This method uses distance-based calculations which should be replaced with grid cell adjacency.
+        /// Kept for backward compatibility with editor tools.
         /// </summary>
-        public static bool ConnectIfAdjacent(GamePlatform a, GamePlatform b)
+        [System.Obsolete("Use TownManager's grid-based adjacency checking instead. This method uses distance calculations.")]
+        public static bool ConnectIfAdjacent(GamePlatform a, GamePlatform b, 
+            float socketMatchingDistance = 0.25f, 
+            float heightTolerance = 0.1f, 
+            float navLinkWidth = 0.6f)
         {
             if (!a || !b || a == b) return false;
             if (!a._socketsBuilt) a.BuildSockets();
             if (!b._socketsBuilt) b.BuildSockets();
 
             var pairs = new List<(int aIdx, int bIdx)>();
-            float maxDist = 0.25f; // distance threshold for matching sockets
 
             var aSockets = a.Sockets;
             var bSockets = b.Sockets;
@@ -762,11 +1003,11 @@ namespace WaterTown.Platforms
                     Vector3 wb = b.GetSocketWorldPosition(j);
 
                     // Require same approximate height (same deck level)
-                    if (Mathf.Abs(wa.y - wb.y) > 0.1f) continue;
+                    if (Mathf.Abs(wa.y - wb.y) > heightTolerance) continue;
 
                     Vector3 diff = wb - wa;
                     diff.y = 0f;
-                    if (diff.sqrMagnitude <= maxDist * maxDist)
+                    if (diff.sqrMagnitude <= socketMatchingDistance * socketMatchingDistance)
                         pairs.Add((i, j));
                 }
             }
@@ -794,12 +1035,12 @@ namespace WaterTown.Platforms
 
             Vector3 centerA = sumA / pairs.Count;
             Vector3 centerB = sumB / pairs.Count;
-            CreateSimpleNavLink(a, centerA, centerB);
+            CreateSimpleNavLink(a, centerA, centerB, navLinkWidth);
 
             return true;
         }
 
-        private static void CreateSimpleNavLink(GamePlatform owner, Vector3 aPos, Vector3 bPos)
+        private static void CreateSimpleNavLink(GamePlatform owner, Vector3 aPos, Vector3 bPos, float linkWidth)
         {
             var parent = GetOrCreate(owner.transform, "Links");
             var go = new GameObject("Link_" + owner.name);
@@ -812,9 +1053,32 @@ namespace WaterTown.Platforms
             link.startPoint = go.transform.InverseTransformPoint(aPos);
             link.endPoint   = go.transform.InverseTransformPoint(bPos);
             link.bidirectional = true;
-            link.width = 0.6f;
+            link.width = linkWidth;
             link.area = 0;
             link.agentTypeID = owner.NavSurface ? owner.NavSurface.agentTypeID : 0;
+        }
+
+        /// <summary>
+        /// Creates a NavMesh link between two world positions. Link is attached to platform A.
+        /// </summary>
+        public static void CreateNavLinkBetween(GamePlatform platformA, Vector3 posA, GamePlatform platformB, Vector3 posB, float linkWidth)
+        {
+            if (!platformA || !platformB) return;
+            
+            var parent = GetOrCreate(platformA.transform, "Links");
+            var go = new GameObject($"Link_{platformA.name}_to_{platformB.name}");
+            go.transform.SetParent(parent, false);
+
+            Vector3 center = 0.5f * (posA + posB);
+            go.transform.position = center;
+
+            var link = go.AddComponent<NavMeshLink>();
+            link.startPoint = go.transform.InverseTransformPoint(posA);
+            link.endPoint   = go.transform.InverseTransformPoint(posB);
+            link.bidirectional = true;
+            link.width = linkWidth;
+            link.area = 0;
+            link.agentTypeID = platformA.NavSurface ? platformA.NavSurface.agentTypeID : 0;
         }
 
         private static Transform GetOrCreate(Transform parent, string name)
@@ -844,5 +1108,231 @@ namespace WaterTown.Platforms
             foreach (var r in railings)
                 r.EnsureRegistered();
         }
+        
+        #endregion
+
+        #region IPickupable Interface Methods
+        
+        // ---------- IPickupable Implementation ----------
+
+        public void OnPickedUp(bool isNewObject)
+        {
+            IsPickedUp = true;
+            _isNewObject = isNewObject;
+            
+            // Store original transform for cancellation
+            _originalPosition = transform.position;
+            _originalRotation = transform.rotation;
+            
+            // Disable colliders so we can raycast through the platform
+            foreach (var col in GetComponentsInChildren<Collider>(true))
+                col.enabled = false;
+            
+            // Cache renderers and store original materials from all renderers
+            _allRenderers.Clear();
+            _allRenderers.AddRange(GetComponentsInChildren<Renderer>(true));
+            
+            // Store all original materials (we'll restore them per-renderer later)
+            // Just use the first renderer as reference for now
+            if (_allRenderers.Count > 0 && _allRenderers[0] != null)
+            {
+                _originalMaterials = _allRenderers[0].sharedMaterials;
+            }
+            
+            // If this is an existing object being moved, unregister from TownManager
+            // This will trigger adjacency recomputation so neighboring platforms update their railings
+            if (!isNewObject)
+            {
+                _townManager.UnregisterPlatform(this);
+            }
+        }
+
+        public void OnPlaced()
+        {
+            IsPickedUp = false;
+            
+            // Restore colliders
+            foreach (var col in GetComponentsInChildren<Collider>(true))
+                col.enabled = true;
+            
+            // Restore original materials
+            RestoreOriginalMaterials();
+            
+            // Ensure sockets are built for adjacency detection
+            BuildSockets();
+            
+            // Ensure child modules and railings are registered
+            EnsureChildrenModulesRegistered();
+            EnsureChildrenRailingsRegistered();
+            
+            // Register with TownManager (triggers adjacency recomputation and NavMesh build)
+            var cells = new List<Vector2Int>();
+            _townManager.ComputeCellsForPlatform(this, 0, cells);
+            // This will:
+            // 1. Mark cells as occupied in WorldGrid
+            // 2. Build NavMesh on this platform
+            // 3. Mark adjacency dirty (triggers railing updates and NavMesh links in LateUpdate)
+            _townManager.RegisterPlatform(this, cells, 0, markOccupiedInGrid: true);
+        }
+
+        public void OnPlacementCancelled()
+        {
+            IsPickedUp = false;
+            
+            if (_isNewObject)
+            {
+                // New object - destroy it
+                // BuildModeManager will trigger adjacency update after this returns
+                Destroy(gameObject);
+            }
+            else
+            {
+                // Existing object - restore original position
+                transform.position = _originalPosition;
+                transform.rotation = _originalRotation;
+                
+                // Re-enable colliders
+                foreach (var col in GetComponentsInChildren<Collider>(true))
+                    col.enabled = true;
+                
+                // Restore original materials
+                RestoreOriginalMaterials();
+                
+                // Rebuild sockets at original position
+                BuildSockets();
+                
+                // Re-register with TownManager at original position
+                // This triggers adjacency recomputation so railings/NavMesh links update
+                var cells = new List<Vector2Int>();
+                _townManager.ComputeCellsForPlatform(this, 0, cells);
+                _townManager.RegisterPlatform(this, cells, 0, markOccupiedInGrid: true);
+            }
+        }
+
+        public void UpdateValidityVisuals(bool isValid)
+        {
+            // Use assigned materials if available, otherwise create auto-generated ones
+            Material targetMaterial = isValid 
+                ? (pickupValidMaterial != null ? pickupValidMaterial : GetAutoValidMaterial())
+                : (pickupInvalidMaterial != null ? pickupInvalidMaterial : GetAutoInvalidMaterial());
+            
+            if (targetMaterial != null)
+            {
+                foreach (var renderer in _allRenderers)
+                {
+                    if (renderer != null)
+                    {
+                        var materials = renderer.sharedMaterials;
+                        for (int i = 0; i < materials.Length; i++)
+                            materials[i] = targetMaterial;
+                        renderer.sharedMaterials = materials;
+                    }
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Creates or returns the auto-generated green translucent material for valid placement.
+        /// AUTO-GENERATED for testing purposes - assign custom materials in inspector for production.
+        /// </summary>
+        private static Material GetAutoValidMaterial()
+        {
+            if (_autoValidMaterial == null)
+            {
+                // Try URP shader first, fallback to Universal Render Pipeline/Lit, then Standard
+                Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+                if (shader == null) shader = Shader.Find("Standard");
+                
+                _autoValidMaterial = new Material(shader);
+                _autoValidMaterial.name = "Auto_ValidPlacement (Testing)";
+                
+                // Set base color with transparency
+                _autoValidMaterial.SetColor("_BaseColor", new Color(0f, 1f, 0f, 0.6f)); // URP
+                _autoValidMaterial.SetColor("_Color", new Color(0f, 1f, 0f, 0.6f));     // Standard fallback
+                
+                // Enable transparency for URP
+                _autoValidMaterial.SetFloat("_Surface", 1); // Transparent
+                _autoValidMaterial.SetFloat("_Blend", 0);   // Alpha blend
+                _autoValidMaterial.SetFloat("_AlphaClip", 0);
+                _autoValidMaterial.SetFloat("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                _autoValidMaterial.SetFloat("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                _autoValidMaterial.SetFloat("_ZWrite", 0);
+                
+                // Set render queue for transparency
+                _autoValidMaterial.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+                
+                // Enable keywords for transparency
+                _autoValidMaterial.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                _autoValidMaterial.EnableKeyword("_ALPHAPREMULTIPLY_ON");
+            }
+            return _autoValidMaterial;
+        }
+        
+        /// <summary>
+        /// Creates or returns the auto-generated red translucent material for invalid placement.
+        /// AUTO-GENERATED for testing purposes - assign custom materials in inspector for production.
+        /// </summary>
+        private static Material GetAutoInvalidMaterial()
+        {
+            if (_autoInvalidMaterial == null)
+            {
+                // Try URP shader first, fallback to Universal Render Pipeline/Lit, then Standard
+                Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+                if (shader == null) shader = Shader.Find("Standard");
+                
+                _autoInvalidMaterial = new Material(shader);
+                _autoInvalidMaterial.name = "Auto_InvalidPlacement (Testing)";
+                
+                // Set base color with transparency
+                _autoInvalidMaterial.SetColor("_BaseColor", new Color(1f, 0f, 0f, 0.6f)); // URP
+                _autoInvalidMaterial.SetColor("_Color", new Color(1f, 0f, 0f, 0.6f));     // Standard fallback
+                
+                // Enable transparency for URP
+                _autoInvalidMaterial.SetFloat("_Surface", 1); // Transparent
+                _autoInvalidMaterial.SetFloat("_Blend", 0);   // Alpha blend
+                _autoInvalidMaterial.SetFloat("_AlphaClip", 0);
+                _autoInvalidMaterial.SetFloat("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                _autoInvalidMaterial.SetFloat("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                _autoInvalidMaterial.SetFloat("_ZWrite", 0);
+                
+                // Set render queue for transparency
+                _autoInvalidMaterial.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+                
+                // Enable keywords for transparency
+                _autoInvalidMaterial.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                _autoInvalidMaterial.EnableKeyword("_ALPHAPREMULTIPLY_ON");
+            }
+            return _autoInvalidMaterial;
+        }
+
+        private void RestoreOriginalMaterials()
+        {
+            if (_originalMaterials != null && _originalMaterials.Length > 0)
+            {
+                foreach (var renderer in _allRenderers)
+                {
+                    if (renderer != null)
+                    {
+                        renderer.sharedMaterials = _originalMaterials;
+                    }
+                }
+            }
+        }
+
+        private bool ValidatePlacement()
+        {
+            if (!IsPickedUp) return true; // Not being placed
+            
+            // Compute cells this platform would occupy
+            var cells = new List<Vector2Int>();
+            _townManager.ComputeCellsForPlatform(this, 0, cells);
+            
+            if (cells.Count == 0) return false;
+            
+            // Check if area is free
+            return _townManager.IsAreaFree(cells, 0);
+        }
+        
+        #endregion
     }
 }

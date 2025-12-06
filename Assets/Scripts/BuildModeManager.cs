@@ -1,375 +1,339 @@
 using System.Collections.Generic;
+using Grid;
 using UnityEngine;
 using UnityEngine.InputSystem;
-using Unity.AI.Navigation;
+using WaterTown.Building.UI;
+using WaterTown.Interfaces;
 using WaterTown.Platforms;
 using WaterTown.Town;
 
 namespace WaterTown.Building
 {
     /// <summary>
-    /// Handles: active blueprint selection, ghost preview, snapping, rotation, validation, and placement.
-    /// IMPORTANT:
-    /// - The ghost is a REAL GamePlatform instance.
-    /// - On placement we REUSE the ghost object as the final placed platform
-    ///   (so all socket / railing / connection state is preserved).
-    /// - After placement we spawn a NEW ghost for multi-place.
+    /// Manages build mode: spawning/moving pickupable objects, validating placement, and handling placement/cancellation.
+    /// Unified system for both building NEW platforms and moving EXISTING ones using IPickupable interface.
     /// </summary>
+    [DisallowMultipleComponent]
     public class BuildModeManager : MonoBehaviour
     {
-        [Header("Wiring")]
+        #region Configuration & Dependencies
+        
+        [Header("References")]
+        [SerializeField] private TownManager townManager;
+        [SerializeField] private WorldGrid grid;
+        [SerializeField] private GameUIController gameUI;
         [SerializeField] private Camera mainCamera;
-        [SerializeField] private TownManager town;
-        [SerializeField] private WaterTown.Building.UI.GameUIController gameUI;
 
-        [Header("Input (quick bindings)")]
-        [Tooltip("Rotate clockwise (e.g., R). If null, uses Keyboard.current.rKey.")]
-        [SerializeField] private InputActionReference rotateCW;
-        [Tooltip("Rotate counter-clockwise (e.g., Q). If null, uses Keyboard.current.qKey.")]
-        [SerializeField] private InputActionReference rotateCCW;
-        [Tooltip("Place action (e.g., Left Mouse). If null, uses Mouse.current.leftButton.")]
+        [Header("Input Actions")]
         [SerializeField] private InputActionReference placeAction;
-        [Tooltip("Cancel action (e.g., Escape).")]
         [SerializeField] private InputActionReference cancelAction;
+        [SerializeField] private InputActionReference rotateCWAction;
+        [SerializeField] private InputActionReference rotateCCWAction;
 
-        [Header("Ghost Visuals")]
-        [Tooltip("Fallback when blueprint has no specific preview material for VALID placement.")]
-        [SerializeField] private Material ghostValidMat;
-        [Tooltip("Fallback when blueprint has no specific preview material for INVALID placement.")]
-        [SerializeField] private Material ghostInvalidMat;
-        [Tooltip("Optional extra tint alpha for all renderers (only used if material supports _Color).")]
-        [Range(0f, 1f)] public float ghostAlpha = 0.6f;
+        [Header("Placement Settings")]
+        [SerializeField] private int placementLevel = 0;
+        [SerializeField] private LayerMask raycastLayers;
+        [SerializeField] private float rotationStep = 90f;
 
-        // --- runtime ---
-        private PlatformBlueprint _activeBlueprint;
+        // Runtime state - unified pickup system
+        private PlatformBlueprint _selectedBlueprint;
+        private IPickupable _currentPickup;
+        private float _currentRotation = 0f;
+        
+        // Reusable lists (avoid allocations)
+        private readonly List<Vector2Int> _tempCellList = new List<Vector2Int>();
+        
+        #endregion
 
-        /// <summary>
-        /// Current ghost – this is a REAL runtime prefab with GamePlatform, PlatformModule, PlatformRailing, etc.
-        /// On placement we REUSE this as the final placed platform.
-        /// </summary>
-        private GameObject _ghostGO;
-        private GamePlatform _ghostPlatform;
-
-        private readonly List<Renderer> _ghostRenderers = new();
-        private int _rotationSteps; // 0..3 (90° steps)
-        private readonly List<Vector2Int> _tmpCells = new();
+        #region Unity Lifecycle
+        
+        private void Awake()
+        {
+            if (!townManager) townManager = FindFirstObjectByType<TownManager>();
+            if (!grid) grid = FindFirstObjectByType<WorldGrid>();
+            if (!mainCamera) mainCamera = Camera.main;
+        }
 
         private void OnEnable()
         {
-            if (!mainCamera) mainCamera = Camera.main;
-            if (!town || !town.Grid)
+            if (townManager == null || grid == null || mainCamera == null)
             {
-                Debug.LogError("[BuildModeManager] Missing TownManager or WorldGrid reference.", this);
-                enabled = false;
-                return;
-            }
-            if (!gameUI)
-            {
-                Debug.LogError("[BuildModeManager] Missing GameUIController reference.", this);
+                Debug.LogError("[BuildModeManager] Missing critical references. Disabling component.", this);
                 enabled = false;
                 return;
             }
 
-            gameUI.OnBlueprintSelected += OnBlueprintSelected;
+            if (gameUI != null)
+                gameUI.OnBlueprintSelected += OnBlueprintSelected;
 
-            rotateCW?.action.Enable();
-            rotateCCW?.action.Enable();
-            placeAction?.action.Enable();
-            cancelAction?.action.Enable();
+            if (placeAction?.action != null)
+            {
+                placeAction.action.Enable();
+                placeAction.action.performed += OnPlacePerformed;
+            }
+
+            if (cancelAction?.action != null)
+            {
+                cancelAction.action.Enable();
+                cancelAction.action.performed += OnCancelPerformed;
+            }
+
+            if (rotateCWAction?.action != null)
+            {
+                rotateCWAction.action.Enable();
+                rotateCWAction.action.performed += OnRotateCWPerformed;
+            }
+
+            if (rotateCCWAction?.action != null)
+            {
+                rotateCCWAction.action.Enable();
+                rotateCCWAction.action.performed += OnRotateCCWPerformed;
+            }
         }
 
         private void OnDisable()
         {
-            gameUI.OnBlueprintSelected -= OnBlueprintSelected;
+            if (gameUI != null)
+                gameUI.OnBlueprintSelected -= OnBlueprintSelected;
 
-            rotateCW?.action.Disable();
-            rotateCCW?.action.Disable();
-            placeAction?.action.Disable();
-            cancelAction?.action.Disable();
+            if (placeAction?.action != null)
+            {
+                placeAction.action.performed -= OnPlacePerformed;
+                placeAction.action.Disable();
+            }
 
-            DestroyGhost();
-        }
+            if (cancelAction?.action != null)
+            {
+                cancelAction.action.performed -= OnCancelPerformed;
+                cancelAction.action.Disable();
+            }
 
-        private void OnBlueprintSelected(PlatformBlueprint bp)
-        {
-            _activeBlueprint = bp;
-            _rotationSteps = 0;
-            RebuildGhost();
+            if (rotateCWAction?.action != null)
+            {
+                rotateCWAction.action.performed -= OnRotateCWPerformed;
+                rotateCWAction.action.Disable();
+            }
+
+            if (rotateCCWAction?.action != null)
+            {
+                rotateCCWAction.action.performed -= OnRotateCCWPerformed;
+                rotateCCWAction.action.Disable();
+            }
+
+            if (_currentPickup != null)
+            {
+                CancelPlacement();
+            }
         }
 
         private void Update()
         {
-            if (_activeBlueprint == null || _ghostGO == null) return;
+            if (_currentPickup == null) return;
 
-            HandleRotationInput();
-            UpdateGhostAndMaybePlace();
-            HandleCancel();
+            UpdatePickupPosition();
+
+            bool isValid = _currentPickup.CanBePlaced;
+            _currentPickup.UpdateValidityVisuals(isValid);
+            
+            // Trigger railing preview update each frame while placing
+            // This ensures railings show/hide based on adjacency to other platforms
+            townManager.TriggerAdjacencyUpdate();
         }
+        
+        #endregion
 
-        // ---------- Input ----------
-
-        private void HandleRotationInput()
+        #region Blueprint Selection
+        
+        private void OnBlueprintSelected(PlatformBlueprint blueprint)
         {
-            bool cw = rotateCW
-                ? rotateCW.action.WasPressedThisFrame()
-                : (Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame);
-
-            bool ccw = rotateCCW
-                ? rotateCCW.action.WasPressedThisFrame()
-                : (Keyboard.current != null && Keyboard.current.qKey.wasPressedThisFrame);
-
-            if (!cw && !ccw) return;
-
-            int step = Mathf.Max(1, (int)_activeBlueprint.RotStep); // enum -> int (90, 45, ...)
-            int logicalSteps = Mathf.Max(1, step / 90);             // we only support 90° grid steps
-
-            if (cw)  _rotationSteps = (_rotationSteps + logicalSteps) & 3;     // 0..3
-            if (ccw) _rotationSteps = (_rotationSteps + 4 - logicalSteps) & 3; // 0..3
-        }
-
-        private void HandleCancel()
-        {
-            bool cancel = cancelAction
-                ? cancelAction.action.WasPressedThisFrame()
-                : (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame);
-
-            if (!cancel) return;
-
-            _activeBlueprint = null;
-            DestroyGhost();
-        }
-
-        // ---------- Ghost handling ----------
-
-        private void RebuildGhost()
-        {
-            DestroyGhost();
-            if (_activeBlueprint == null) return;
-
-            // Prefer dedicated preview prefab, fall back to runtime prefab
-            GameObject prefabForGhost =
-                _activeBlueprint.PreviewPrefab != null
-                    ? _activeBlueprint.PreviewPrefab
-                    : _activeBlueprint.RuntimePrefab;
-
-            if (!prefabForGhost)
+            if (blueprint == null)
             {
-                Debug.LogWarning($"[BuildModeManager] Blueprint '{_activeBlueprint.name}' has no prefab assigned.", _activeBlueprint);
+                Debug.LogWarning("[BuildModeManager] Received null blueprint.");
                 return;
             }
 
-            // Important: we need a REAL GamePlatform here, otherwise sockets/railings won't react.
-            if (!prefabForGhost.GetComponentInChildren<GamePlatform>(true))
-            {
-                if (_activeBlueprint.RuntimePrefab != null &&
-                    _activeBlueprint.RuntimePrefab.GetComponentInChildren<GamePlatform>(true))
-                {
-                    prefabForGhost = _activeBlueprint.RuntimePrefab;
-                }
-                else
-                {
-                    Debug.LogError($"[BuildModeManager] Prefab for '{_activeBlueprint.DisplayName}' has no GamePlatform component.", _activeBlueprint);
-                }
-            }
+            _selectedBlueprint = blueprint;
+            _currentRotation = 0f;
 
-            _ghostGO = Instantiate(prefabForGhost);
-            _ghostGO.name = $"{_activeBlueprint.DisplayName}_Ghost";
-
-            _ghostPlatform = _ghostGO.GetComponent<GamePlatform>();
-            if (!_ghostPlatform)
-            {
-                Debug.LogError($"[BuildModeManager] Ghost for '{_activeBlueprint.DisplayName}' has no GamePlatform; cannot preview connections.", _ghostGO);
-            }
-
-            _ghostRenderers.Clear();
-            _ghostGO.GetComponentsInChildren(true, _ghostRenderers);
-
-            // Make sure the ghost participates in adjacency but does NOT mark grid cells as occupied.
-            if (town && town.Grid && _ghostPlatform)
-            {
-                town.RegisterPreviewPlatform(_ghostPlatform, level: 0);
-            }
-
-            // initial state until validity computed
-            ApplyGhostMaterial(isValid: false);
+            SpawnPlatformForPlacement(blueprint);
         }
+        
+        #endregion
 
-        private void DestroyGhost()
+        #region Pickup/Placement Logic
+        
+        /// <summary>
+        /// Spawns a new platform for placement (build mode).
+        /// </summary>
+        private void SpawnPlatformForPlacement(PlatformBlueprint blueprint)
         {
-            if (_ghostPlatform && town && town.Grid)
+            if (blueprint.RuntimePrefab == null)
             {
-                // Remove preview occupancy & adjacency
-                town.UnregisterPlatform(_ghostPlatform);
-            }
-
-            if (_ghostGO)
-            {
-                Destroy(_ghostGO);
-            }
-
-            _ghostGO = null;
-            _ghostPlatform = null;
-            _ghostRenderers.Clear();
-        }
-
-        private void UpdateGhostAndMaybePlace()
-        {
-            if (!town || !town.Grid) return;
-            if (_ghostGO == null || _ghostPlatform == null) return;
-
-            var grid = town.Grid;
-
-            // Ray to grid level 0 (pure plane math; ignores meshes so the ghost can't interfere)
-            Vector2 mousePos =
-                Mouse.current != null
-                    ? Mouse.current.position.ReadValue()
-                    : (Vector2)Input.mousePosition;
-
-            var ray = mainCamera.ScreenPointToRay(mousePos);
-            Vector3Int levelRef = new Vector3Int(0, 0, 0);
-
-            if (!grid.RaycastToCell(ray, levelRef, out var _ /*cell*/, out var hit))
+                Debug.LogWarning($"[BuildModeManager] Blueprint '{blueprint.DisplayName}' has no runtime prefab.");
                 return;
+            }
 
-            // Stable center-aligned snapping (rotation-aware only via _rotationSteps)
-            ComputePlacement(hit, out var worldCenter, out var worldRot);
-
-            // position/rotate ghost
-            _ghostGO.transform.SetPositionAndRotation(worldCenter, worldRot);
-
-            // Compute footprint cells using the SAME logic as TownManager uses for occupancy
-            _tmpCells.Clear();
-            town.ComputeCellsForPlatform(_ghostPlatform, level: 0, _tmpCells);
-
-            bool isValid = _tmpCells.Count > 0 && town.IsAreaFree(_tmpCells, level: 0);
-
-            ApplyGhostMaterial(isValid);
-
-            // confirm place
-            bool place =
-                placeAction
-                    ? placeAction.action.WasPressedThisFrame()
-                    : (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame);
-
-            if (place && isValid)
+            // Cancel any existing pickup
+            if (_currentPickup != null)
             {
-                PlaceNow(worldCenter, worldRot, _tmpCells);
+                CancelPlacement();
+            }
+
+            // Instantiate at origin (will be moved to mouse in Update)
+            GameObject spawnedPlatform = Instantiate(blueprint.RuntimePrefab, Vector3.zero, Quaternion.identity);
+            spawnedPlatform.name = $"{blueprint.DisplayName} (Placing)";
+
+            // Get IPickupable component
+            var pickupable = spawnedPlatform.GetComponent<IPickupable>();
+            if (pickupable == null)
+            {
+                Debug.LogError($"[BuildModeManager] Spawned platform '{spawnedPlatform.name}' doesn't have IPickupable component!");
+                Destroy(spawnedPlatform);
+                return;
+            }
+
+            _currentPickup = pickupable;
+            _currentPickup.OnPickedUp(isNewObject: true);
+        }
+
+        /// <summary>
+        /// Picks up an existing platform for moving/rotating.
+        /// </summary>
+        public void PickupExistingPlatform(IPickupable pickupable)
+        {
+            if (pickupable == null) return;
+
+            if (_currentPickup != null)
+            {
+                CancelPlacement();
+            }
+
+            _currentPickup = pickupable;
+            _currentPickup.OnPickedUp(isNewObject: false);
+            _currentRotation = pickupable.Transform.eulerAngles.y;
+        }
+
+        /// <summary>
+        /// Updates the pickup's position to follow the mouse on the grid.
+        /// </summary>
+        private void UpdatePickupPosition()
+        {
+            if (_currentPickup == null || mainCamera == null) return;
+
+            // Use new Input System for mouse position
+            Vector2 mousePosition = Mouse.current != null ? Mouse.current.position.ReadValue() : Vector2.zero;
+            Ray ray = mainCamera.ScreenPointToRay(mousePosition);
+            Vector3Int levelRef = new Vector3Int(0, 0, placementLevel);
+
+            if (grid.RaycastToCell(ray, levelRef, out Vector3Int hoveredCell, out Vector3 hitPoint))
+            {
+                // Get footprint
+                Vector2Int footprint = Vector2Int.one;
+                if (_currentPickup is GamePlatform platform)
+                {
+                    footprint = platform.Footprint;
+                }
+
+                // Account for rotation
+                int rotationSteps = Mathf.RoundToInt(_currentRotation / 90f) & 3;
+                bool isRotated90Or270 = (rotationSteps % 2) == 1;
+                Vector2Int effectiveFootprint = isRotated90Or270
+                    ? new Vector2Int(footprint.y, footprint.x)
+                    : footprint;
+
+                // Snap to grid
+                Vector3 snappedPosition = grid.SnapToGridForPlatform(hitPoint, effectiveFootprint, placementLevel);
+                Quaternion rotation = Quaternion.Euler(0f, _currentRotation, 0f);
+
+                _currentPickup.Transform.SetPositionAndRotation(snappedPosition, rotation);
             }
         }
 
         /// <summary>
-        /// Stable grid snapping: snap the platform's CENTER to the nearest grid cell center,
-        /// then TownManager.ComputeCellsForPlatform uses the transform+rotation to get footprint.
+        /// Confirms placement of the current pickup.
         /// </summary>
-        private void ComputePlacement(
-            Vector3 hitWorldOnGridPlane,
-            out Vector3 worldCenter,
-            out Quaternion worldRot)
+        private void PlacePickup()
         {
-            var grid = town.Grid;
+            if (_currentPickup == null) return;
 
-            float cs = grid.cellSize;
-            Vector3 origin = grid.worldOrigin;
-
-            // Convert world to continuous grid coords (u,v), then snap center to nearest cell center
-            float u = (hitWorldOnGridPlane.x - origin.x) / cs;   // continuous column
-            float v = (hitWorldOnGridPlane.z - origin.z) / cs;   // continuous row
-
-            int cx = Mathf.RoundToInt(u);
-            int cy = Mathf.RoundToInt(v);
-
-            // World center from snapped (cx,cy)
-            float cxWorld = origin.x + cx * cs;
-            float czWorld = origin.z + cy * cs;
-            float cyWorld = grid.GetLevelWorldY(0);
-            worldCenter = new Vector3(cxWorld, cyWorld, czWorld);
-
-            // Rotation
-            int steps = _rotationSteps & 3;         // 0..3
-            worldRot = Quaternion.Euler(0f, steps * 90f, 0f);
+            if (!_currentPickup.CanBePlaced)
+            {
+                Debug.LogWarning("[BuildModeManager] Cannot place platform at current position.");
+                return;
+            }
+            
+            _currentPickup.OnPlaced();
+            _currentPickup = null;
+            _selectedBlueprint = null;
         }
 
         /// <summary>
-        /// PLACE the platform:
-        /// - Reuses the current ghost as the final placed platform
-        /// - Registers it with the TownManager (now marking cells as Occupied)
-        /// - Keeps all socket / connection / railing state as-is (global adjacency will recompute)
-        /// - Spawns a NEW ghost for multi-place.
+        /// Cancels placement of the current pickup.
         /// </summary>
-        private void PlaceNow(Vector3 worldCenter, Quaternion worldRot, List<Vector2Int> cells)
+        private void CancelPlacement()
         {
-            if (_activeBlueprint == null)
+            if (_currentPickup == null) return;
+            
+            _currentPickup.OnPlacementCancelled();
+            _currentPickup = null;
+            _selectedBlueprint = null;
+            
+            // Force adjacency update to restore railings on existing platforms
+            // This ensures any connections created during preview are cleared
+            townManager.TriggerAdjacencyUpdate();
+        }
+        
+        #endregion
+
+        #region Input Handlers
+        
+        private void OnPlacePerformed(InputAction.CallbackContext context)
+        {
+            if (_currentPickup != null)
             {
-                Debug.LogWarning("[BuildModeManager] Cannot place: no active blueprint.", this);
-                return;
+                PlacePickup();
             }
-            if (_ghostGO == null || _ghostPlatform == null)
-            {
-                Debug.LogWarning("[BuildModeManager] Cannot place: ghost is missing or has no GamePlatform.", this);
-                return;
-            }
-
-            // Reuse ghost as final placed platform
-            var placedGO = _ghostGO;
-            var gp = _ghostPlatform;
-
-            // Detach ghost from BuildModeManager control
-            _ghostGO = null;
-            _ghostPlatform = null;
-            _ghostRenderers.Clear();
-
-            placedGO.name = _activeBlueprint.DisplayName;
-            placedGO.transform.SetPositionAndRotation(worldCenter, worldRot);
-
-            // Register this platform in the grid / TownManager as a REAL placed platform
-            town.RegisterPlatform(gp, cells, level: 0, markOccupiedInGrid: true);
-
-            // Let the platform build its local NavMesh if needed
-            gp.QueueRebuild();
-
-            // For multi-place: create a NEW ghost at the next frame using the same blueprint.
-            RebuildGhost();
         }
 
-        private void ApplyGhostMaterial(bool isValid)
+        private void OnCancelPerformed(InputAction.CallbackContext context)
         {
-            if (!_ghostGO) return;
-
-            // Prefer blueprint-defined preview materials, fallback to generic ones
-            Material validMat =
-                (_activeBlueprint != null && _activeBlueprint.PreviewValidMaterial != null)
-                    ? _activeBlueprint.PreviewValidMaterial
-                    : ghostValidMat;
-
-            Material invalidMat =
-                (_activeBlueprint != null && _activeBlueprint.PreviewInvalidMaterial != null)
-                    ? _activeBlueprint.PreviewInvalidMaterial
-                    : ghostInvalidMat;
-
-            var mat = isValid ? validMat : invalidMat;
-            if (!mat) return;
-
-            if (_ghostRenderers.Count == 0)
-                _ghostGO.GetComponentsInChildren(true, _ghostRenderers);
-
-            for (int i = 0; i < _ghostRenderers.Count; i++)
+            if (_currentPickup != null)
             {
-                var r = _ghostRenderers[i];
-                if (!r) continue;
-
-                var mats = r.sharedMaterials;
-                for (int m = 0; m < mats.Length; m++)
-                    mats[m] = mat;
-                r.sharedMaterials = mats;
-
-                // Optional alpha tweak if the material supports _Color.
-                if (ghostAlpha < 0.999f && mat.HasProperty("_Color"))
-                {
-                    var c = mat.color;
-                    c.a = ghostAlpha;
-                    mat.color = c;
-                }
+                CancelPlacement();
             }
+            
+            // Also clear UI selection
+            if (gameUI != null)
+                gameUI.ClearSelection();
         }
+
+        private void OnRotateCWPerformed(InputAction.CallbackContext context)
+        {
+            if (_currentPickup == null) return;
+
+            _currentRotation += rotationStep;
+            if (_currentRotation >= 360f) _currentRotation -= 360f;
+
+            _currentPickup.Transform.rotation = Quaternion.Euler(0f, _currentRotation, 0f);
+        }
+
+        private void OnRotateCCWPerformed(InputAction.CallbackContext context)
+        {
+            if (_currentPickup == null) return;
+
+            _currentRotation -= rotationStep;
+            if (_currentRotation < 0f) _currentRotation += 360f;
+
+            _currentPickup.Transform.rotation = Quaternion.Euler(0f, _currentRotation, 0f);
+        }
+        
+        #endregion
+
+        #region Public API
+        
+        public bool HasActivePickup => _currentPickup != null;
+        public IPickupable CurrentPickup => _currentPickup;
+        
+        #endregion
     }
 }

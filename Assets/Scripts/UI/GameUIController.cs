@@ -1,45 +1,55 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Events;
 using UnityEngine.UI;
 using WaterTown.Platforms;
 
 namespace WaterTown.Building.UI
 {
     /// <summary>
-    /// Central UI controller (lives on the root "UI" GameObject).
-    /// Owns the Build toolbar: populates icons, handles selection, exposes Show/Hide/Toggle.
+    /// Central UI controller for the build toolbar.
+    /// Manages blueprint selection, UI visibility, and toolbar population.
     /// </summary>
     public class GameUIController : MonoBehaviour
     {
-        [Header("Build Bar (wiring)")]
+        [Header("Build Bar")]
         [SerializeField] private Animator barAnimator;
         [SerializeField] private CanvasGroup barCanvasGroup;
         [SerializeField] private string showTrigger = "Show";
         [SerializeField] private string hideTrigger = "Hide";
 
         [Header("Toolbar Content")]
-        [SerializeField] private RectTransform content;
+        [SerializeField] private RectTransform toolbarContent;
         [SerializeField] private GameObject platformIconPrefab;
-        [SerializeField] private List<PlatformBlueprint> blueprints = new();
+        [SerializeField] private List<PlatformBlueprint> availableBlueprints = new();
 
-        [Header("Selection visuals")]
-        [Tooltip("We try this child for the icon first. If not found, we fall back to root Image.")]
+        [Header("Selection Visuals")]
+        [Tooltip("Child name for icon image. Falls back to root Image if not found.")]
         [SerializeField] private string iconChildName = "Icon";
 
-        [Tooltip("Child name used as selection overlay. If missing, we auto-create it.")]
+        [Tooltip("Child name for selection overlay. Auto-created if missing.")]
         [SerializeField] private string selectedFrameChildName = "SelectedFrame";
 
-        [Tooltip("Color for the auto-created selection overlay.")]
+        [Tooltip("Color for auto-created selection overlay.")]
         [SerializeField] private Color selectedOverlayColor = new Color(1f, 1f, 1f, 0.18f);
 
         [Header("Behavior")]
-        [Tooltip("If true, clears the current selection when the bar hides.")]
+        [Tooltip("Clear selection when build bar is hidden.")]
         [SerializeField] private bool clearSelectionOnHide = true;
 
+        [Header("Events")]
+        [Tooltip("Invoked when build bar is shown.")]
+        public UnityEvent OnBuildBarShown = new UnityEvent();
+        
+        [Tooltip("Invoked when build bar is hidden.")]
+        public UnityEvent OnBuildBarHidden = new UnityEvent();
+
+        // C# event for BuildModeManager (internal, performance-critical)
         public event Action<PlatformBlueprint> OnBlueprintSelected;
 
         public bool IsBuildBarVisible { get; private set; }
+        public PlatformBlueprint SelectedBlueprint => GetSelectedBlueprint();
 
         // runtime caches
         private readonly List<Button> _buttons = new();
@@ -69,10 +79,11 @@ namespace WaterTown.Building.UI
 
             if (barCanvasGroup)
             {
-                // Let clicks through immediately; visuals animate separately
                 barCanvasGroup.interactable = true;
                 barCanvasGroup.blocksRaycasts = true;
             }
+
+            OnBuildBarShown?.Invoke();
         }
 
         public void HideBuildBar()
@@ -82,7 +93,6 @@ namespace WaterTown.Building.UI
 
             if (barAnimator) barAnimator.SetTrigger(hideTrigger);
 
-            // Gate clicks right away so gameplay can receive input during slide-out
             if (barCanvasGroup)
             {
                 barCanvasGroup.interactable = false;
@@ -91,6 +101,8 @@ namespace WaterTown.Building.UI
 
             if (clearSelectionOnHide)
                 ClearSelection();
+
+            OnBuildBarHidden?.Invoke();
         }
 
         public void ToggleBuildBar()
@@ -99,15 +111,15 @@ namespace WaterTown.Building.UI
             else ShowBuildBar();
         }
 
-        public void SetBlueprints(IEnumerable<PlatformBlueprint> list)
+        public void SetBlueprints(IEnumerable<PlatformBlueprint> blueprintList)
         {
-            blueprints = new List<PlatformBlueprint>(list ?? Array.Empty<PlatformBlueprint>());
+            availableBlueprints = new List<PlatformBlueprint>(blueprintList ?? Array.Empty<PlatformBlueprint>());
             PopulateToolbar();
         }
 
         public PlatformBlueprint GetSelectedBlueprint()
         {
-            return (_selectedIndex >= 0 && _selectedIndex < blueprints.Count) ? blueprints[_selectedIndex] : null;
+            return (_selectedIndex >= 0 && _selectedIndex < availableBlueprints.Count) ? availableBlueprints[_selectedIndex] : null;
         }
 
         public void ClearSelection()
@@ -124,17 +136,17 @@ namespace WaterTown.Building.UI
 
         private void PopulateToolbar()
         {
-            if (!content || !platformIconPrefab) return;
+            if (!toolbarContent || !platformIconPrefab) return;
 
-            ClearChildren(content);
+            ClearToolbarChildren();
             _buttons.Clear();
             _selectedFrames.Clear();
             _selectedIndex = -1;
 
-            for (int i = 0; i < blueprints.Count; i++)
+            for (int i = 0; i < availableBlueprints.Count; i++)
             {
-                var bp = blueprints[i];
-                var go = Instantiate(platformIconPrefab, content);
+                var bp = availableBlueprints[i];
+                var go = Instantiate(platformIconPrefab, toolbarContent);
 
                 // Naming rule: Blueprint.DisplayName if present, else keep prefab's name
                 var desiredName = (bp && !string.IsNullOrWhiteSpace(bp.DisplayName))
@@ -185,7 +197,7 @@ namespace WaterTown.Building.UI
             if (curr) curr.SetActive(true);
 
             // Fire event
-            var bp = (index >= 0 && index < blueprints.Count) ? blueprints[index] : null;
+            var bp = (index >= 0 && index < availableBlueprints.Count) ? availableBlueprints[index] : null;
             OnBlueprintSelected?.Invoke(bp);
         }
 
@@ -237,11 +249,11 @@ namespace WaterTown.Building.UI
             return go;
         }
 
-        private static void ClearChildren(RectTransform parent)
+        private void ClearToolbarChildren()
         {
-            if (!parent) return;
-            for (int i = parent.childCount - 1; i >= 0; i--)
-                GameObject.Destroy(parent.GetChild(i).gameObject);
+            if (!toolbarContent) return;
+            for (int i = toolbarContent.childCount - 1; i >= 0; i--)
+                Destroy(toolbarContent.GetChild(i).gameObject);
         }
     }
 }

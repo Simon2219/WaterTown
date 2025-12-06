@@ -95,84 +95,141 @@ namespace WaterTown.Platforms
                 _platform.RegisterModuleOnSockets(gameObject, occupiesSockets: true, _boundSocketIndices);
         }
 
-        private List<int> ComputeSocketIndices(GamePlatform gp)
+        private List<int> ComputeSocketIndices(GamePlatform platform)
         {
-            var result = new List<int>();
-            if (!gp) return result;
+            var socketIndices = new List<int>();
+            if (!platform) return socketIndices;
 
-            // Corner modules no longer have dedicated corner sockets; this path will simply do nothing.
+            // DEPRECATED: Corner modules no longer have dedicated corner sockets.
+            // This feature is not supported in the current socket system.
             if (isCornerModule)
             {
-                int nearest = NearestCornerIndex(gp);
-                if (nearest >= 0) result.Add(nearest);
-                return result;
+                Debug.LogWarning($"[PlatformModule] '{name}': isCornerModule is deprecated. " +
+                                 "Corner sockets no longer exist. Set isCornerModule to false and use attachEdge instead.", this);
+                int nearestCornerIndex = FindNearestCornerSocketIndex(platform);
+                if (nearestCornerIndex >= 0) socketIndices.Add(nearestCornerIndex);
+                return socketIndices;
             }
 
             // Choose edge (override or nearest)
-            Vector3 lp = gp.transform.InverseTransformPoint(transform.position);
-            float hx = gp.Footprint.x * 0.5f;
-            float hz = gp.Footprint.y * 0.5f;
+            Vector3 localPosition = platform.transform.InverseTransformPoint(transform.position);
+            float halfWidth = platform.Footprint.x * 0.5f;
+            float halfLength = platform.Footprint.y * 0.5f;
 
-            float dN = Mathf.Abs(lp.z - (+hz));
-            float dS = Mathf.Abs(lp.z - (-hz));
-            float dE = Mathf.Abs(lp.x - (+hx));
-            float dW = Mathf.Abs(lp.x - (-hx));
+            float distanceToNorth = Mathf.Abs(localPosition.z - (+halfLength));
+            float distanceToSouth = Mathf.Abs(localPosition.z - (-halfLength));
+            float distanceToEast = Mathf.Abs(localPosition.x - (+halfWidth));
+            float distanceToWest = Mathf.Abs(localPosition.x - (-halfWidth));
 
-            GamePlatform.Edge edge; bool edgeIsX; float baseCoord; int len;
+            GamePlatform.Edge selectedEdge;
+            bool edgeUsesXAxis;
+            float baseCoordinate;
+            int edgeLengthInSegments;
 
             if (attachEdge != EdgeOverride.Auto)
             {
                 switch (attachEdge)
                 {
-                    case EdgeOverride.North: edge = GamePlatform.Edge.North; edgeIsX = true;  baseCoord = -hx; len = gp.Footprint.x; break;
-                    case EdgeOverride.South: edge = GamePlatform.Edge.South; edgeIsX = true;  baseCoord = -hx; len = gp.Footprint.x; break;
-                    case EdgeOverride.East:  edge = GamePlatform.Edge.East;  edgeIsX = false; baseCoord = -hz; len = gp.Footprint.y; break;
-                    default:                 edge = GamePlatform.Edge.West;  edgeIsX = false; baseCoord = -hz; len = gp.Footprint.y; break;
+                    case EdgeOverride.North: 
+                        selectedEdge = GamePlatform.Edge.North; 
+                        edgeUsesXAxis = true;  
+                        baseCoordinate = -halfWidth; 
+                        edgeLengthInSegments = platform.Footprint.x; 
+                        break;
+                    case EdgeOverride.South: 
+                        selectedEdge = GamePlatform.Edge.South; 
+                        edgeUsesXAxis = true;  
+                        baseCoordinate = -halfWidth; 
+                        edgeLengthInSegments = platform.Footprint.x; 
+                        break;
+                    case EdgeOverride.East:  
+                        selectedEdge = GamePlatform.Edge.East;  
+                        edgeUsesXAxis = false; 
+                        baseCoordinate = -halfLength; 
+                        edgeLengthInSegments = platform.Footprint.y; 
+                        break;
+                    default:                 
+                        selectedEdge = GamePlatform.Edge.West;  
+                        edgeUsesXAxis = false; 
+                        baseCoordinate = -halfLength; 
+                        edgeLengthInSegments = platform.Footprint.y; 
+                        break;
                 }
             }
             else
             {
-                if      (dN <= dS && dN <= dE && dN <= dW) { edge = GamePlatform.Edge.North; edgeIsX = true;  baseCoord = -hx; len = gp.Footprint.x; }
-                else if (dS <= dN && dS <= dE && dS <= dW) { edge = GamePlatform.Edge.South; edgeIsX = true;  baseCoord = -hx; len = gp.Footprint.x; }
-                else if (dE <= dW)                         { edge = GamePlatform.Edge.East;  edgeIsX = false; baseCoord = -hz; len = gp.Footprint.y; }
-                else                                       { edge = GamePlatform.Edge.West;  edgeIsX = false; baseCoord = -hz; len = gp.Footprint.y; }
+                // Find nearest edge by distance
+                if (distanceToNorth <= distanceToSouth && distanceToNorth <= distanceToEast && distanceToNorth <= distanceToWest) 
+                { 
+                    selectedEdge = GamePlatform.Edge.North; 
+                    edgeUsesXAxis = true;  
+                    baseCoordinate = -halfWidth; 
+                    edgeLengthInSegments = platform.Footprint.x; 
+                }
+                else if (distanceToSouth <= distanceToNorth && distanceToSouth <= distanceToEast && distanceToSouth <= distanceToWest) 
+                { 
+                    selectedEdge = GamePlatform.Edge.South; 
+                    edgeUsesXAxis = true;  
+                    baseCoordinate = -halfWidth; 
+                    edgeLengthInSegments = platform.Footprint.x; 
+                }
+                else if (distanceToEast <= distanceToWest)                         
+                { 
+                    selectedEdge = GamePlatform.Edge.East;  
+                    edgeUsesXAxis = false; 
+                    baseCoordinate = -halfLength; 
+                    edgeLengthInSegments = platform.Footprint.y; 
+                }
+                else                                       
+                { 
+                    selectedEdge = GamePlatform.Edge.West;  
+                    edgeUsesXAxis = false; 
+                    baseCoordinate = -halfLength; 
+                    edgeLengthInSegments = platform.Footprint.y; 
+                }
             }
 
-            float coord = edgeIsX ? lp.x : lp.z;
-            int lenSegments = gp.EdgeLengthMeters(edge); // same as len
+            float coordinateOnEdge = edgeUsesXAxis ? localPosition.x : localPosition.z;
+            int totalEdgeSegments = platform.EdgeLengthMeters(selectedEdge); // same as edgeLengthInSegments
 
-            // We want exactly sizeAlongMeters contiguous segment indices 0..len-1
-            float t = coord - baseCoord;  // 0..len
-            int centerMark = Mathf.Clamp(Mathf.RoundToInt(t - 0.5f), 0, Mathf.Max(0, lenSegments - 1));
+            // We want exactly sizeAlongMeters contiguous segment indices 0..totalEdgeSegments-1
+            float normalizedPosition = coordinateOnEdge - baseCoordinate;  // 0..totalEdgeSegments
+            int centerSegmentIndex = Mathf.Clamp(Mathf.RoundToInt(normalizedPosition - 0.5f), 0, Mathf.Max(0, totalEdgeSegments - 1));
 
-            int L = Mathf.Max(1, sizeAlongMeters);
-            int start = Mathf.Clamp(centerMark - L / 2, 0, Mathf.Max(0, lenSegments - L));
-            int end   = start + (L - 1); // inclusive
+            int moduleSizeInSegments = Mathf.Max(1, sizeAlongMeters);
+            int startSegmentIndex = Mathf.Clamp(centerSegmentIndex - moduleSizeInSegments / 2, 0, Mathf.Max(0, totalEdgeSegments - moduleSizeInSegments));
+            int endSegmentIndex = startSegmentIndex + (moduleSizeInSegments - 1); // inclusive
 
-            for (int m = start; m <= end; m++)
+            for (int segmentIndex = startSegmentIndex; segmentIndex <= endSegmentIndex; segmentIndex++)
             {
-                int idx = gp.GetSocketIndexByEdgeMark(edge, m);
-                if (!result.Contains(idx)) result.Add(idx);
+                int socketIndex = platform.GetSocketIndexByEdgeMark(selectedEdge, segmentIndex);
+                if (!socketIndices.Contains(socketIndex)) socketIndices.Add(socketIndex);
             }
 
-            return result;
+            return socketIndices;
         }
 
-        private int NearestCornerIndex(GamePlatform gp)
+        private int FindNearestCornerSocketIndex(GamePlatform platform)
         {
             // With new segment-only sockets, there are no true corner sockets.
             // This remains for backward compatibility; it will usually return -1.
-            int best = -1; float bestD = float.MaxValue;
-            var sockets = gp.Sockets;
-            Vector3 myPos = transform.position;
-            for (int i = 0; i < sockets.Count; i++)
+            int bestSocketIndex = -1; 
+            float bestDistance = float.MaxValue;
+            var sockets = platform.Sockets;
+            Vector3 moduleWorldPosition = transform.position;
+            
+            for (int socketIndex = 0; socketIndex < sockets.Count; socketIndex++)
             {
-                var s = sockets[i];
-                if (s.Location != GamePlatform.SocketLocation.Corner) continue;
-                float d = Vector3.Distance(myPos, gp.GetSocketWorldPosition(i));
-                if (d < bestD) { bestD = d; best = i; }
+                var socket = sockets[socketIndex];
+                if (socket.Location != GamePlatform.SocketLocation.Corner) continue;
+                float distance = Vector3.Distance(moduleWorldPosition, platform.GetSocketWorldPosition(socketIndex));
+                if (distance < bestDistance) 
+                { 
+                    bestDistance = distance; 
+                    bestSocketIndex = socketIndex; 
+                }
             }
-            return best;
+            return bestSocketIndex;
         }
 
         // ---------- Visibility ----------
@@ -207,3 +264,4 @@ namespace WaterTown.Platforms
         }
     }
 }
+
