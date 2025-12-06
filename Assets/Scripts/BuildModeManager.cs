@@ -194,8 +194,6 @@ namespace WaterTown.Building
 
             _currentPickup = pickupable;
             _currentPickup.OnPickedUp(isNewObject: true);
-
-            Debug.Log($"[BuildModeManager] Spawned '{blueprint.DisplayName}' for placement.");
         }
 
         /// <summary>
@@ -213,8 +211,6 @@ namespace WaterTown.Building
             _currentPickup = pickupable;
             _currentPickup.OnPickedUp(isNewObject: false);
             _currentRotation = pickupable.Transform.eulerAngles.y;
-
-            Debug.Log($"[BuildModeManager] Picked up existing platform '{pickupable.GameObject.name}' for moving.");
         }
 
         /// <summary>
@@ -262,11 +258,9 @@ namespace WaterTown.Building
 
             if (!_currentPickup.CanBePlaced)
             {
-                Debug.LogWarning("[BuildModeManager] Cannot place: position is invalid.");
+                Debug.LogWarning("[BuildModeManager] Cannot place platform at current position.");
                 return;
             }
-
-            Debug.Log($"[BuildModeManager] Placed '{_currentPickup.GameObject.name}' at {_currentPickup.Transform.position}");
             
             _currentPickup.OnPlaced();
             _currentPickup = null;
@@ -279,8 +273,6 @@ namespace WaterTown.Building
         private void CancelPlacement()
         {
             if (_currentPickup == null) return;
-
-            Debug.Log($"[BuildModeManager] Cancelled placement of '{_currentPickup.GameObject.name}'");
             
             _currentPickup.OnPlacementCancelled();
             _currentPickup = null;

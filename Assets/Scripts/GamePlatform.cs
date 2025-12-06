@@ -1144,7 +1144,6 @@ namespace WaterTown.Platforms
             if (!isNewObject)
             {
                 _townManager.UnregisterPlatform(this);
-                Debug.Log($"[GamePlatform] Picked up existing '{name}' - neighbors will update railings");
             }
         }
 
@@ -1174,8 +1173,6 @@ namespace WaterTown.Platforms
             // 2. Build NavMesh on this platform
             // 3. Mark adjacency dirty (triggers railing updates and NavMesh links in LateUpdate)
             _townManager.RegisterPlatform(this, cells, 0, markOccupiedInGrid: true);
-            
-            Debug.Log($"[GamePlatform] Placed '{name}' at {transform.position}");
         }
 
         public void OnPlacementCancelled()
@@ -1186,7 +1183,6 @@ namespace WaterTown.Platforms
             {
                 // New object - destroy it
                 // BuildModeManager will trigger adjacency update after this returns
-                Debug.Log($"[GamePlatform] Cancelled placement of new '{name}' - destroying");
                 Destroy(gameObject);
             }
             else
@@ -1210,8 +1206,6 @@ namespace WaterTown.Platforms
                 var cells = new List<Vector2Int>();
                 _townManager.ComputeCellsForPlatform(this, 0, cells);
                 _townManager.RegisterPlatform(this, cells, 0, markOccupiedInGrid: true);
-                
-                Debug.Log($"[GamePlatform] Cancelled movement of '{name}' - restored to original position");
             }
         }
 

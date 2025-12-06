@@ -425,26 +425,21 @@ namespace WaterTown.Town
 
             // Match sockets by EXACT world position
             // Sockets are at cell edges (e.g., x=42.5, z=46.0), so we need precise matching
-            
-            Debug.Log($"[TownManager] Connecting '{a.name}' (sockets: {a.SocketCount}) and '{b.name}' (sockets: {b.SocketCount})");
+            // Round to 0.5m to handle floating point precision issues
             
             // Build socket position map for platform B (for fast lookup)
             var bSocketsByPosition = new Dictionary<Vector3, int>();
             for (int i = 0; i < b.SocketCount; i++)
             {
                 Vector3 worldPos = b.GetSocketWorldPosition(i);
-                // Round to avoid floating point precision issues
                 Vector3 rounded = new Vector3(
-                    Mathf.Round(worldPos.x * 2f) / 2f, // Round to 0.5m
+                    Mathf.Round(worldPos.x * 2f) / 2f,
                     Mathf.Round(worldPos.y * 2f) / 2f,
                     Mathf.Round(worldPos.z * 2f) / 2f
                 );
                 
                 if (!bSocketsByPosition.ContainsKey(rounded))
-                {
                     bSocketsByPosition[rounded] = i;
-                    Debug.Log($"  B Socket[{i}]: worldPos={worldPos}, rounded={rounded}");
-                }
             }
             
             // Check each socket on platform A for a match on platform B
@@ -457,16 +452,12 @@ namespace WaterTown.Town
                     Mathf.Round(worldPos.z * 2f) / 2f
                 );
                 
-                Debug.Log($"  A Socket[{i}]: worldPos={worldPos}, rounded={rounded}");
-                
                 if (bSocketsByPosition.TryGetValue(rounded, out int matchingSocketB))
                 {
                     // Exact match - these sockets should connect!
                     aSocketIndices.Add(i);
                     bSocketIndices.Add(matchingSocketB);
                     connectionPositions.Add(worldPos);
-                    
-                    Debug.Log($"    -> MATCHED: A Socket[{i}] connects to B Socket[{matchingSocketB}] at {rounded}");
                 }
             }
 
@@ -583,8 +574,6 @@ namespace WaterTown.Town
             // Does NOT mark cells as occupied, but updates socket statuses for visual feedback
             if (pickedUpPlatform != null)
             {
-                Debug.Log($"[TownManager] Processing picked-up platform '{pickedUpPlatform.name}' for preview");
-                
                 // Compute cells for preview (doesn't register in grid)
                 _tmpCells2D.Clear();
                 ComputeCellsForPlatform(pickedUpPlatform, defaultLevel, _tmpCells2D);
