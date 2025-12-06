@@ -214,13 +214,23 @@ namespace Grid
         /// <summary>
         /// Converts a world position to a 2D grid cell coordinate (X, Y only).
         /// Used for socket matching - sockets at the same grid cell should connect.
+        /// 
+        /// IMPORTANT: Uses RoundToInt instead of FloorToInt (like WorldToCellOnLevel) because:
+        /// - Sockets are positioned at 0.5m offsets (e.g., 39.5, 39.0) for edge midpoints
+        /// - Flooring would cause corner sockets on different edges to map to same cell
+        /// - Example: (39.5, 39.0) and (39.0, 39.5) would both floor to (39, 39)
+        /// - Rounding keeps them distinct: (40, 39) and (39, 40) respectively
         /// </summary>
         public Vector2Int WorldToCell2D(Vector3 worldPos, int level)
         {
-            Vector3Int cell3D = WorldToCellOnLevel(worldPos, new Vector3Int(0, 0, level));
-            // NOTE: In grid coordinate system, cell3D.y stores World Z (depth), cell3D.z stores level
-            // This is confusing but intentional - the grid uses (x, y, level) = (worldX, worldZ, verticalLevel)
-            return new Vector2Int(cell3D.x, cell3D.y);
+            int levelClamped = Mathf.Clamp(level, 0, Mathf.Max(levels - 1, 0));
+            var local = worldPos - worldOrigin;
+            
+            // Use RoundToInt for socket matching (not FloorToInt like WorldToCellOnLevel)
+            int x = Mathf.RoundToInt(local.x / (float)cellSize);
+            int y = Mathf.RoundToInt(local.z / (float)cellSize);
+            
+            return new Vector2Int(x, y);
         }
 
         /// <summary>
