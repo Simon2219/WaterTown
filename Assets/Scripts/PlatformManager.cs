@@ -415,60 +415,60 @@ namespace WaterTown.Town
             var bSocketIndices = new HashSet<int>();
             var connectionPositions = new List<Vector3>();
 
-            // Match sockets by EXACT grid position using WorldGrid.WorldToCell2D
-            // This ensures sockets at the same grid location connect, regardless of rotation
+            // Match sockets by EXACT world position (with small tolerance for floating point errors)
+            // Sockets are at 0.5m intervals, so we can't use grid cells (which are at 1m intervals)
+            const float socketMatchDistance = 0.1f; // 10cm tolerance for floating point errors
             
-            // Build socket position map for platform B (for fast lookup)
-            var bSocketsByGridCell = new Dictionary<Vector2Int, int>();
-            var bSocketDebug = new List<(int idx, Vector3 world, Vector2Int grid)>();
+            // Build socket position map for platform B (for fast lookup by rounded position)
+            var bSocketsByRoundedPos = new Dictionary<Vector3Int, List<int>>();
             
             for (int i = 0; i < b.SocketCount; i++)
             {
                 Vector3 worldPos = b.GetSocketWorldPosition(i);
-                Vector2Int gridCell = grid.WorldToCell2D(worldPos, entryB.level);
-                bSocketDebug.Add((i, worldPos, gridCell));
+                // Round to nearest 0.5m for bucketing (sockets are at 0.5m intervals)
+                Vector3Int rounded = new Vector3Int(
+                    Mathf.RoundToInt(worldPos.x * 2f), // x2 to capture 0.5m precision
+                    Mathf.RoundToInt(worldPos.y * 2f),
+                    Mathf.RoundToInt(worldPos.z * 2f)
+                );
                 
-                if (bSocketsByGridCell.ContainsKey(gridCell))
+                if (!bSocketsByRoundedPos.TryGetValue(rounded, out var list))
                 {
-                    Debug.LogWarning($"[Socket Collision] Platform '{b.name}' has DUPLICATE grid cell {gridCell}! Socket #{bSocketsByGridCell[gridCell]} and #{i} both map to same cell.");
+                    list = new List<int>();
+                    bSocketsByRoundedPos[rounded] = list;
                 }
-                else
-                {
-                    bSocketsByGridCell[gridCell] = i;
-                }
+                list.Add(i);
             }
             
             // Check each socket on platform A for a match on platform B
-            var aSocketDebug = new List<(int idx, Vector3 world, Vector2Int grid, int? matchB)>();
-            
             for (int i = 0; i < a.SocketCount; i++)
             {
-                Vector3 worldPos = a.GetSocketWorldPosition(i);
-                Vector2Int gridCell = grid.WorldToCell2D(worldPos, entryA.level);
+                Vector3 worldPosA = a.GetSocketWorldPosition(i);
+                Vector3Int roundedA = new Vector3Int(
+                    Mathf.RoundToInt(worldPosA.x * 2f),
+                    Mathf.RoundToInt(worldPosA.y * 2f),
+                    Mathf.RoundToInt(worldPosA.z * 2f)
+                );
                 
-                if (bSocketsByGridCell.TryGetValue(gridCell, out int matchingSocketB))
+                // Check for matches in the same bucket
+                if (bSocketsByRoundedPos.TryGetValue(roundedA, out var candidatesB))
                 {
-                    // Exact match - these sockets should connect!
-                    Debug.Log($"[Socket Match] '{a.name}' Socket #{i} <-> '{b.name}' Socket #{matchingSocketB} | World: {worldPos} | Grid: {gridCell}");
-                    aSocketDebug.Add((i, worldPos, gridCell, matchingSocketB));
-                    aSocketIndices.Add(i);
-                    bSocketIndices.Add(matchingSocketB);
-                    connectionPositions.Add(worldPos);
-                }
-                else
-                {
-                    aSocketDebug.Add((i, worldPos, gridCell, null));
+                    foreach (int j in candidatesB)
+                    {
+                        Vector3 worldPosB = b.GetSocketWorldPosition(j);
+                        float distSqr = (worldPosA - worldPosB).sqrMagnitude;
+                        
+                        if (distSqr <= socketMatchDistance * socketMatchDistance)
+                        {
+                            // Exact match - these sockets should connect!
+                            aSocketIndices.Add(i);
+                            bSocketIndices.Add(j);
+                            connectionPositions.Add(worldPosA);
+                            break; // Only match each socket once
+                        }
+                    }
                 }
             }
-            
-            // Debug: Show all sockets and which ones matched
-            Debug.Log($"[Socket Debug] Platform '{a.name}' sockets:");
-            foreach (var s in aSocketDebug)
-                Debug.Log($"  Socket #{s.idx}: World {s.world} → Grid {s.grid} → {(s.matchB.HasValue ? $"MATCHED with #{s.matchB.Value}" : "NO MATCH")}");
-            
-            Debug.Log($"[Socket Debug] Platform '{b.name}' sockets:");
-            foreach (var s in bSocketDebug)
-                Debug.Log($"  Socket #{s.idx}: World {s.world} → Grid {s.grid}");
 
             if (aSocketIndices.Count == 0 && bSocketIndices.Count == 0)
                 return;
@@ -673,4 +673,5 @@ namespace WaterTown.Town
         #endregion
     }
 }
+
 
