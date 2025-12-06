@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using Grid;
 using UnityEngine;
 using UnityEngine.Events;
+using WaterTown.Core;
 using WaterTown.Platforms;
 
 namespace WaterTown.Town
@@ -65,14 +66,28 @@ namespace WaterTown.Town
         
         private void Awake()
         {
+            try
+            {
+                FindDependencies();
+            }
+            catch (Exception ex)
+            {
+                ErrorHandler.LogAndDisable(ex, this);
+            }
+        }
+        
+        /// <summary>
+        /// Finds and validates all required dependencies.
+        /// Throws InvalidOperationException if any critical dependency is missing.
+        /// </summary>
+        private void FindDependencies()
+        {
             if (!grid)
             {
                 grid = FindFirstObjectByType<WorldGrid>();
                 if (!grid)
                 {
-                    Debug.LogError("[PlatformManager] WorldGrid not found. Component disabled.", this);
-                    enabled = false;
-                    return;
+                    throw ErrorHandler.MissingDependency(typeof(WorldGrid), this);
                 }
             }
         }

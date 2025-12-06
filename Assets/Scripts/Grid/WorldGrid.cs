@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using WaterTown.Core;
 
 namespace Grid
 {
@@ -79,7 +80,46 @@ namespace Grid
 
         private void Awake()
         {
-            AllocateIfNeeded();
+            try
+            {
+                ValidateConfiguration();
+                AllocateIfNeeded();
+            }
+            catch (Exception ex)
+            {
+                ErrorHandler.LogAndDisable(ex, this);
+            }
+        }
+        
+        /// <summary>
+        /// Validates grid configuration values.
+        /// Throws InvalidOperationException if configuration is invalid.
+        /// </summary>
+        private void ValidateConfiguration()
+        {
+            if (sizeX < 1 || sizeY < 1 || levels < 1)
+            {
+                throw ErrorHandler.InvalidConfiguration(
+                    $"Grid dimensions must be at least 1 (current: {sizeX}x{sizeY}x{levels})", 
+                    this
+                );
+            }
+            
+            if (cellSize < 1)
+            {
+                throw ErrorHandler.InvalidConfiguration(
+                    $"Cell size must be at least 1 (current: {cellSize})", 
+                    this
+                );
+            }
+            
+            if (levelStep < 1)
+            {
+                throw ErrorHandler.InvalidConfiguration(
+                    $"Level step must be at least 1 (current: {levelStep})", 
+                    this
+                );
+            }
         }
 
 #if UNITY_EDITOR
@@ -307,8 +347,7 @@ namespace Grid
         {
             if (out4 == null || out4.Length < 4)
             {
-                Debug.LogError("WorldGrid.GetCellCorners: out4 must be a non-null array of length ≥ 4.");
-                return;
+                throw new ArgumentException("out4 must be a non-null array of length ≥ 4.", nameof(out4));
             }
 
             float minX = worldOrigin.x + cell.x * (float)cellSize;

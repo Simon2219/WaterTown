@@ -1,6 +1,7 @@
 using Grid;
 using UnityEngine;
 using UnityEngine.Events;
+using WaterTown.Core;
 using WaterTown.Platforms;
 
 namespace WaterTown.Town
@@ -39,26 +40,39 @@ namespace WaterTown.Town
         
         private void Awake()
         {
-            // Auto-find core systems if not wired in inspector
+            try
+            {
+                FindDependencies();
+            }
+            catch (Exception ex)
+            {
+                ErrorHandler.LogAndDisable(ex, this);
+            }
+        }
+        
+        /// <summary>
+        /// Finds and validates all required dependencies.
+        /// Throws InvalidOperationException if any critical dependency is missing.
+        /// </summary>
+        private void FindDependencies()
+        {
+            // Auto-find WorldGrid if not wired in inspector
             if (!grid)
             {
                 grid = FindFirstObjectByType<WorldGrid>();
                 if (!grid)
                 {
-                    Debug.LogError("[TownManager] WorldGrid not found. Component disabled.", this);
-                    enabled = false;
-                    return;
+                    throw ErrorHandler.MissingDependency(typeof(WorldGrid), this);
                 }
             }
 
+            // Auto-find PlatformManager if not wired in inspector
             if (!platformManager)
             {
                 platformManager = FindFirstObjectByType<PlatformManager>();
                 if (!platformManager)
                 {
-                    Debug.LogError("[TownManager] PlatformManager not found. Component disabled.", this);
-                    enabled = false;
-                    return;
+                    throw ErrorHandler.MissingDependency(typeof(PlatformManager), this);
                 }
             }
         }

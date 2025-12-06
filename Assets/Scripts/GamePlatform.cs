@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Unity.AI.Navigation;
 using UnityEngine;
 using UnityEngine.AI;
+using WaterTown.Core;
 using WaterTown.Interfaces;
 using WaterTown.Town;
 using Grid;
@@ -43,20 +44,29 @@ namespace WaterTown.Platforms
         {
             if (_systemReferencesValidated) return;
             
-            _townManager = FindFirstObjectByType<TownManager>();
-            _worldGrid = FindFirstObjectByType<WorldGrid>();
-            
-            if (_townManager == null)
+            try
             {
-                Debug.LogError("[GamePlatform] TownManager not found in scene! GamePlatform requires TownManager to function.");
+                _townManager = FindFirstObjectByType<TownManager>();
+                _worldGrid = FindFirstObjectByType<WorldGrid>();
+                
+                if (_townManager == null)
+                {
+                    throw ErrorHandler.MissingDependency(typeof(TownManager), null);
+                }
+                
+                if (_worldGrid == null)
+                {
+                    throw ErrorHandler.MissingDependency(typeof(WorldGrid), null);
+                }
+                
+                _systemReferencesValidated = true;
             }
-            
-            if (_worldGrid == null)
+            catch (Exception ex)
             {
-                Debug.LogError("[GamePlatform] WorldGrid not found in scene! GamePlatform requires WorldGrid to function.");
+                ErrorHandler.LogAndDisable(ex, null);
+                // Mark as validated to prevent spam, but systems won't work properly
+                _systemReferencesValidated = true;
             }
-            
-            _systemReferencesValidated = true;
         }
         
         #endregion

@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using Unity.Cinemachine;
 using UnityEngine.Serialization;
+using WaterTown.Core;
 
 [RequireComponent(typeof(PlayerInput))]
 public class CameraMovementController : MonoBehaviour
@@ -79,13 +80,27 @@ public class CameraMovementController : MonoBehaviour
     
     private void Awake()
     {
+        try
+        {
+            FindDependencies();
+        }
+        catch (Exception ex)
+        {
+            WaterTown.Core.ErrorHandler.LogAndDisable(ex, this);
+        }
+    }
+    
+    /// <summary>
+    /// Finds and validates all required dependencies.
+    /// Throws InvalidOperationException if any critical dependency is missing.
+    /// </summary>
+    private void FindDependencies()
+    {
         playerInputComponent = GetComponent<PlayerInput>();
 
         if (moveAction == null)
         {
-            Debug.LogError("[CameraMovementController] No Move Action assigned. Component disabled.", this);
-            enabled = false;
-            return;
+            throw WaterTown.Core.ErrorHandler.MissingDependency("Move Action (InputActionReference)", this);
         }
         
         // If no Cinemachine camera has been assigned, try to find one among the children.

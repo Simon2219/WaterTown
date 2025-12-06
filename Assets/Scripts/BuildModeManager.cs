@@ -3,6 +3,7 @@ using Grid;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using WaterTown.Building.UI;
+using WaterTown.Core;
 using WaterTown.Interfaces;
 using WaterTown.Platforms;
 using WaterTown.Town;
@@ -49,19 +50,52 @@ namespace WaterTown.Building
         
         private void Awake()
         {
-            if (!townManager) townManager = FindFirstObjectByType<TownManager>();
-            if (!grid) grid = FindFirstObjectByType<WorldGrid>();
-            if (!mainCamera) mainCamera = Camera.main;
+            try
+            {
+                FindDependencies();
+            }
+            catch (Exception ex)
+            {
+                ErrorHandler.LogAndDisable(ex, this);
+            }
+        }
+        
+        /// <summary>
+        /// Finds and validates all required dependencies.
+        /// Throws InvalidOperationException if any critical dependency is missing.
+        /// </summary>
+        private void FindDependencies()
+        {
+            if (!townManager)
+            {
+                townManager = FindFirstObjectByType<TownManager>();
+                if (!townManager)
+                {
+                    throw ErrorHandler.MissingDependency(typeof(TownManager), this);
+                }
+            }
+            
+            if (!grid)
+            {
+                grid = FindFirstObjectByType<WorldGrid>();
+                if (!grid)
+                {
+                    throw ErrorHandler.MissingDependency(typeof(WorldGrid), this);
+                }
+            }
+            
+            if (!mainCamera)
+            {
+                mainCamera = Camera.main;
+                if (!mainCamera)
+                {
+                    throw ErrorHandler.MissingDependency("Camera.main", this);
+                }
+            }
         }
 
         private void OnEnable()
         {
-            if (townManager == null || grid == null || mainCamera == null)
-            {
-                Debug.LogError("[BuildModeManager] Missing critical references. Disabling component.", this);
-                enabled = false;
-                return;
-            }
 
             if (gameUI != null)
                 gameUI.OnBlueprintSelected += OnBlueprintSelected;
