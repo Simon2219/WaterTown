@@ -259,10 +259,6 @@ namespace WaterTown.Building
             if (!_currentPickup.CanBePlaced)
             {
                 Debug.LogWarning("[BuildModeManager] Cannot place platform at current position.");
-                
-                // Trigger adjacency update to refresh railing preview
-                // This ensures railings update correctly even after failed placement attempt
-                townManager.TriggerAdjacencyUpdate();
                 return;
             }
             

@@ -552,6 +552,10 @@ namespace WaterTown.Town
             // Reset everything first so rails reappear when platforms separate
             foreach (var p in _tmpPlatforms)
                 p.EditorResetAllConnections();
+            
+            // IMPORTANT: Also reset picked-up platform so preview starts fresh each frame
+            if (pickedUpPlatform != null)
+                pickedUpPlatform.EditorResetAllConnections();
 
             // Try pairwise connections for currently touching platforms using grid cell adjacency
             int platformCount = _tmpPlatforms.Count;
