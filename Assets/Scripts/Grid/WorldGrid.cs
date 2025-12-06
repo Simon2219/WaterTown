@@ -260,7 +260,6 @@ namespace Grid
             Vector3 center = GetCellCenter(cell);
             Vector3 size = new Vector3(cellSize, 0.01f, cellSize);
             return new Bounds(center, size);
-            
         }
 
         /// <summary>Writes BL, BR, TR, TL corners of a cell to out4. Requires out4.Length ≥ 4.</summary>

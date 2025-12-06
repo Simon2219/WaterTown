@@ -71,7 +71,7 @@ namespace WaterTown.Platforms
         public int EdgeLengthMeters(Edge edge)
         {
             // X = width (north/south edges); Y = length (east/west edges)
-            return (edge == Edge.North || edge == Edge.South) ? footprint.x : footprint.y;
+            return (edge == Edge.North || edge == Edge.South) ? footprintSize.x : footprintSize.y;
         }
 
         // ---------- Sockets (grid-based, direction-agnostic) ----------
@@ -299,8 +299,8 @@ namespace WaterTown.Platforms
         {
             if (!_socketsBuilt) BuildSockets();
 
-            int width = Mathf.Max(1, footprint.x);
-            int length = Mathf.Max(1, footprint.y);
+            int width = Mathf.Max(1, footprintSize.x);
+            int length = Mathf.Max(1, footprintSize.y);
 
             switch (edge)
             {
@@ -858,8 +858,8 @@ namespace WaterTown.Platforms
 
             // Platform footprint outline
             Gizmos.color = new Color(0f, 0.6f, 1f, 0.25f);
-            float hx = footprint.x * 0.5f;
-            float hz = footprint.y * 0.5f;
+            float hx = footprintSize.x * 0.5f;
+            float hz = footprintSize.y * 0.5f;
             var p = transform.position; var r = transform.right; var f = transform.forward;
             Vector3 a = p + (-r * hx) + (-f * hz);
             Vector3 b = p + (r * hx) + (-f * hz);
