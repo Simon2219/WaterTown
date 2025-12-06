@@ -375,8 +375,6 @@ namespace WaterTown.Town
             if (!a || !b || a == b) return;
             if (entryA.level != entryB.level) return; // Must be on same level
             
-            Debug.Log($"[PlatformManager] Checking adjacency: '{a.name}' ({a.SocketCount} sockets) <-> '{b.name}' ({b.SocketCount} sockets)");
-            
             // Build sockets if needed (BuildSockets is safe to call multiple times)
             a.BuildSockets();
             b.BuildSockets();
@@ -410,12 +408,7 @@ namespace WaterTown.Town
             }
 
             if (adjacentCellPairs.Count == 0)
-            {
-                Debug.Log($"[PlatformManager] No adjacent cell pairs found between '{a.name}' and '{b.name}'");
                 return;
-            }
-            
-            Debug.Log($"[PlatformManager] Found {adjacentCellPairs.Count} adjacent cell pairs between '{a.name}' and '{b.name}'");
 
             // Find sockets on the edges where cells are adjacent
             var aSocketIndices = new HashSet<int>();
@@ -427,42 +420,58 @@ namespace WaterTown.Town
             
             // Build socket position map for platform B (for fast lookup)
             var bSocketsByGridCell = new Dictionary<Vector2Int, int>();
+            var bSocketDebug = new List<(int idx, Vector3 world, Vector2Int grid)>();
+            
             for (int i = 0; i < b.SocketCount; i++)
             {
                 Vector3 worldPos = b.GetSocketWorldPosition(i);
                 Vector2Int gridCell = grid.WorldToCell2D(worldPos, entryB.level);
+                bSocketDebug.Add((i, worldPos, gridCell));
                 
-                Debug.Log($"[PlatformManager]   Platform B '{b.name}' Socket {i} at World {worldPos} -> Grid {gridCell}");
-                
-                if (!bSocketsByGridCell.ContainsKey(gridCell))
+                if (bSocketsByGridCell.ContainsKey(gridCell))
+                {
+                    Debug.LogWarning($"[Socket Collision] Platform '{b.name}' has DUPLICATE grid cell {gridCell}! Socket #{bSocketsByGridCell[gridCell]} and #{i} both map to same cell.");
+                }
+                else
+                {
                     bSocketsByGridCell[gridCell] = i;
+                }
             }
             
             // Check each socket on platform A for a match on platform B
+            var aSocketDebug = new List<(int idx, Vector3 world, Vector2Int grid, int? matchB)>();
+            
             for (int i = 0; i < a.SocketCount; i++)
             {
                 Vector3 worldPos = a.GetSocketWorldPosition(i);
                 Vector2Int gridCell = grid.WorldToCell2D(worldPos, entryA.level);
                 
-                Debug.Log($"[PlatformManager]   Platform A '{a.name}' Socket {i} at World {worldPos} -> Grid {gridCell}");
-                
                 if (bSocketsByGridCell.TryGetValue(gridCell, out int matchingSocketB))
                 {
                     // Exact match - these sockets should connect!
-                    Debug.Log($"[PlatformManager]   ✓ MATCH! Platform A Socket {i} <-> Platform B Socket {matchingSocketB} at Grid {gridCell}");
+                    Debug.Log($"[Socket Match] '{a.name}' Socket #{i} <-> '{b.name}' Socket #{matchingSocketB} | World: {worldPos} | Grid: {gridCell}");
+                    aSocketDebug.Add((i, worldPos, gridCell, matchingSocketB));
                     aSocketIndices.Add(i);
                     bSocketIndices.Add(matchingSocketB);
                     connectionPositions.Add(worldPos);
                 }
-            }
-
-            if (aSocketIndices.Count == 0 && bSocketIndices.Count == 0)
-            {
-                Debug.LogWarning($"[PlatformManager] Platforms are adjacent but NO socket matches found! '{a.name}' <-> '{b.name}'");
-                return;
+                else
+                {
+                    aSocketDebug.Add((i, worldPos, gridCell, null));
+                }
             }
             
-            Debug.Log($"[PlatformManager] Connecting {aSocketIndices.Count} sockets on '{a.name}' with {bSocketIndices.Count} sockets on '{b.name}'");
+            // Debug: Show all sockets and which ones matched
+            Debug.Log($"[Socket Debug] Platform '{a.name}' sockets:");
+            foreach (var s in aSocketDebug)
+                Debug.Log($"  Socket #{s.idx}: World {s.world} → Grid {s.grid} → {(s.matchB.HasValue ? $"MATCHED with #{s.matchB.Value}" : "NO MATCH")}");
+            
+            Debug.Log($"[Socket Debug] Platform '{b.name}' sockets:");
+            foreach (var s in bSocketDebug)
+                Debug.Log($"  Socket #{s.idx}: World {s.world} → Grid {s.grid}");
+
+            if (aSocketIndices.Count == 0 && bSocketIndices.Count == 0)
+                return;
 
             // Apply connection visuals
             if (aSocketIndices.Count > 0)
@@ -472,8 +481,6 @@ namespace WaterTown.Town
 
             a.QueueRebuild();
             b.QueueRebuild();
-            
-            Debug.Log($"[PlatformManager] Queued rebuild for '{a.name}' and '{b.name}'");
 
             // Create NavMesh links at connection points
             if (connectionPositions.Count > 0)
@@ -529,8 +536,6 @@ namespace WaterTown.Town
             _tmpPlatforms.Clear();
             GamePlatform pickedUpPlatform = null;
             
-            Debug.Log($"[PlatformManager] RecomputeAllAdjacency START - Total platforms: {GamePlatform.AllPlatforms.Count}");
-            
             foreach (var gp in GamePlatform.AllPlatforms)
             {
                 if (!gp) continue;
@@ -540,12 +545,10 @@ namespace WaterTown.Town
                 {
                     // Track picked-up platform for preview
                     pickedUpPlatform = gp;
-                    Debug.Log($"[PlatformManager] Platform '{gp.name}' is PICKED UP (preview mode)");
                     continue;
                 }
                 
                 _tmpPlatforms.Add(gp);
-                Debug.Log($"[PlatformManager] Platform '{gp.name}' added to placed platforms list (IsPickedUp={gp.IsPickedUp})");
             }
 
             // Ensure registration is always valid
@@ -563,8 +566,6 @@ namespace WaterTown.Town
             if (pickedUpPlatform != null)
                 pickedUpPlatform.EditorResetAllConnections();
 
-            Debug.Log($"[PlatformManager] Starting pairwise adjacency checks for {_tmpPlatforms.Count} placed platforms");
-            
             // Try pairwise connections for currently touching platforms using grid cell adjacency
             int platformCount = _tmpPlatforms.Count;
             for (int platformIndexA = 0; platformIndexA < platformCount; platformIndexA++)

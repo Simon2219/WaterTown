@@ -703,45 +703,33 @@ namespace WaterTown.Platforms
         public void ApplyConnectionVisuals(IEnumerable<int> socketIndices, bool connected)
         {
             var socketSet = new HashSet<int>(socketIndices);
-            Debug.Log($"[GamePlatform] ApplyConnectionVisuals on '{name}': {socketSet.Count} sockets, connected={connected}");
-            
             var modulesToToggle = new HashSet<GameObject>();
 
             // Update connection state and collect affected modules
             foreach (int socketIndex in socketSet)
             {
                 if (connected)
-                {
                     _connectedSockets.Add(socketIndex);
-                    Debug.Log($"[GamePlatform]   Socket {socketIndex} marked as CONNECTED");
-                }
                 else
-                {
                     _connectedSockets.Remove(socketIndex);
-                    Debug.Log($"[GamePlatform]   Socket {socketIndex} marked as LINKABLE");
-                }
 
                 // Collect modules on these sockets
                 if (_socketToModules.TryGetValue(socketIndex, out var modules))
                 {
-                    Debug.Log($"[GamePlatform]   Socket {socketIndex} has {modules.Count} modules to toggle");
                     foreach (var module in modules)
                         modulesToToggle.Add(module);
                 }
             }
 
             // Apply module visibility changes
-            Debug.Log($"[GamePlatform] Toggling visibility for {modulesToToggle.Count} modules (hidden={connected})");
             foreach (var module in modulesToToggle)
                 SetModuleHidden(module, connected);
 
             // Update all railings to ensure posts correctly reflect rail visibility
             // This ensures cascading updates work correctly (rails -> posts)
-            Debug.Log($"[GamePlatform] Refreshing railing visibility for '{name}'");
             RefreshAllRailingsVisibility();
 
             RefreshSocketStatuses();
-            Debug.Log($"[GamePlatform] Total connected sockets: {_connectedSockets.Count}");
             ConnectionsChanged?.Invoke(this);
         }
 
@@ -873,7 +861,6 @@ namespace WaterTown.Platforms
         public void QueueRebuild()
         {
             if (!NavSurface) return;
-            Debug.Log($"[GamePlatform] QueueRebuild for '{name}' (debounce: {rebuildDebounceSeconds}s)");
             if (_pendingRebuild != null)
                 StopCoroutine(_pendingRebuild);
             _pendingRebuild = StartCoroutine(RebuildAfterDelay(rebuildDebounceSeconds));
@@ -1162,8 +1149,6 @@ namespace WaterTown.Platforms
 
         public void OnPlaced()
         {
-            Debug.Log($"[GamePlatform] OnPlaced() START for '{name}' at {transform.position}, IsPickedUp={IsPickedUp}");
-            
             // Restore colliders
             foreach (var col in GetComponentsInChildren<Collider>(true))
                 col.enabled = true;
@@ -1173,7 +1158,6 @@ namespace WaterTown.Platforms
             
             // Ensure sockets are built for adjacency detection
             BuildSockets();
-            Debug.Log($"[GamePlatform] Built {SocketCount} sockets for '{name}'");
             
             // Ensure child modules and railings are registered
             EnsureChildrenModulesRegistered();
@@ -1182,7 +1166,6 @@ namespace WaterTown.Platforms
             // Register with TownManager (triggers adjacency recomputation and NavMesh build)
             var cells = new List<Vector2Int>();
             _townManager.ComputeCellsForPlatform(this, 0, cells);
-            Debug.Log($"[GamePlatform] Computed {cells.Count} cells for '{name}'");
             
             // CRITICAL: Set IsPickedUp AFTER registration to avoid race condition
             // If we set it to false before registration, RecomputeAllAdjacency might run
@@ -1190,7 +1173,6 @@ namespace WaterTown.Platforms
             _townManager.RegisterPlatform(this, cells, 0, markOccupiedInGrid: true);
             
             IsPickedUp = false;
-            Debug.Log($"[GamePlatform] OnPlaced() END for '{name}', IsPickedUp={IsPickedUp}");
         }
 
         public void OnPlacementCancelled()

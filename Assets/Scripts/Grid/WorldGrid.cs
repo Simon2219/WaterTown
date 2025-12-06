@@ -218,6 +218,8 @@ namespace Grid
         public Vector2Int WorldToCell2D(Vector3 worldPos, int level)
         {
             Vector3Int cell3D = WorldToCellOnLevel(worldPos, new Vector3Int(0, 0, level));
+            // NOTE: In grid coordinate system, cell3D.y stores World Z (depth), cell3D.z stores level
+            // This is confusing but intentional - the grid uses (x, y, level) = (worldX, worldZ, verticalLevel)
             return new Vector2Int(cell3D.x, cell3D.y);
         }
 
