@@ -288,6 +288,15 @@ namespace WaterTown.Town
         }
 
         /// <summary>
+        /// Public API for external systems to trigger adjacency recomputation.
+        /// Used by BuildModeManager to update railing preview during placement.
+        /// </summary>
+        public void TriggerAdjacencyUpdate()
+        {
+            MarkAdjacencyDirty();
+        }
+
+        /// <summary>
         /// Removes platform occupancy from the grid and clears its connections.
         /// </summary>
         public void UnregisterPlatform(GamePlatform platform)
@@ -416,25 +425,22 @@ namespace WaterTown.Town
 
             foreach (var (cellA, cellB) in adjacentCellPairs)
             {
-                // Find the edge between these two cells
+                // Find the edge between these two cells in world space
                 int deltaX = cellB.x - cellA.x;
                 int deltaY = cellB.y - cellA.y;
                 
-                // Determine which edge of cellA faces cellB
-                GamePlatform.Edge edgeA = GamePlatform.Edge.North;
-                if (deltaX == 1 && deltaY == 0) edgeA = GamePlatform.Edge.East;
-                else if (deltaX == -1 && deltaY == 0) edgeA = GamePlatform.Edge.West;
-                else if (deltaX == 0 && deltaY == 1) edgeA = GamePlatform.Edge.North;
-                else if (deltaX == 0 && deltaY == -1) edgeA = GamePlatform.Edge.South;
-
-                GamePlatform.Edge edgeB = GamePlatform.Edge.North;
-                if (deltaX == 1 && deltaY == 0) edgeB = GamePlatform.Edge.West; // B is east of A, so B's west faces A
-                else if (deltaX == -1 && deltaY == 0) edgeB = GamePlatform.Edge.East;
-                else if (deltaX == 0 && deltaY == 1) edgeB = GamePlatform.Edge.South;
-                else if (deltaX == 0 && deltaY == -1) edgeB = GamePlatform.Edge.North;
-
+                // Determine world-space direction from A to B
+                Vector3 worldDirectionAtoB = Vector3.zero;
+                if (deltaX == 1 && deltaY == 0) worldDirectionAtoB = Vector3.right;      // +X
+                else if (deltaX == -1 && deltaY == 0) worldDirectionAtoB = Vector3.left; // -X
+                else if (deltaX == 0 && deltaY == 1) worldDirectionAtoB = Vector3.forward;  // +Z
+                else if (deltaX == 0 && deltaY == -1) worldDirectionAtoB = Vector3.back;    // -Z
+                
+                // Convert world direction to local edges for each platform (accounts for rotation)
+                GamePlatform.Edge edgeA = a.WorldDirectionToLocalEdge(worldDirectionAtoB);
+                GamePlatform.Edge edgeB = b.WorldDirectionToLocalEdge(-worldDirectionAtoB);
+                
                 // Find sockets on these edges that are closest to the cell boundary
-                // For simplicity, find the socket closest to the center of the shared edge
                 Vector3 cellACenter = grid.GetCellCenter(new Vector3Int(cellA.x, cellA.y, entryA.level));
                 Vector3 cellBCenter = grid.GetCellCenter(new Vector3Int(cellB.x, cellB.y, entryB.level));
                 Vector3 edgeCenter = (cellACenter + cellBCenter) * 0.5f;
@@ -537,13 +543,19 @@ namespace WaterTown.Town
             _isRecomputingAdjacency = true;
 
             _tmpPlatforms.Clear();
+            GamePlatform pickedUpPlatform = null;
+            
             foreach (var gp in GamePlatform.AllPlatforms)
             {
                 if (!gp) continue;
                 if (!gp.isActiveAndEnabled) continue;
                 
-                // Skip platforms that are currently being picked up/moved
-                if (gp.IsPickedUp) continue;
+                if (gp.IsPickedUp)
+                {
+                    // Track picked-up platform for preview (but don't add to main list yet)
+                    pickedUpPlatform = gp;
+                    continue;
+                }
                 
                 _tmpPlatforms.Add(gp);
             }
@@ -573,6 +585,33 @@ namespace WaterTown.Town
                     
                     // Check adjacency using grid cells
                     ConnectIfAdjacentByGridCells(platformA, entryA, platformB, entryB);
+                }
+            }
+
+            // Handle picked-up platform railing preview (doesn't occupy cells, but shows connections)
+            if (pickedUpPlatform != null)
+            {
+                // Compute cells for preview (temporary, not registered)
+                _tmpCells2D.Clear();
+                ComputeCellsForPlatform(pickedUpPlatform, defaultLevel, _tmpCells2D);
+                
+                if (_tmpCells2D.Count > 0)
+                {
+                    // Create temporary entry for preview
+                    var previewEntry = new PlatformEntry 
+                    { 
+                        platform = pickedUpPlatform, 
+                        level = defaultLevel, 
+                        marksOccupied = false 
+                    };
+                    previewEntry.cells2D.AddRange(_tmpCells2D);
+                    
+                    // Check connections with all placed platforms
+                    foreach (var placedPlatform in _tmpPlatforms)
+                    {
+                        if (!_entries.TryGetValue(placedPlatform, out var placedEntry)) continue;
+                        ConnectIfAdjacentByGridCells(pickedUpPlatform, previewEntry, placedPlatform, placedEntry);
+                    }
                 }
             }
 

@@ -134,6 +134,10 @@ namespace WaterTown.Building
 
             bool isValid = _currentPickup.CanBePlaced;
             _currentPickup.UpdateValidityVisuals(isValid);
+            
+            // Trigger railing preview update each frame while placing
+            // This ensures railings show/hide based on adjacency to other platforms
+            townManager.TriggerAdjacencyUpdate();
         }
         
         #endregion
