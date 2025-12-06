@@ -312,8 +312,9 @@ namespace WaterTown.Town
 
             _entries.Remove(platform);
 
-            // Clear connections on this platform
-            platform.EditorResetAllConnections();
+            // Clear connections on this platform (only if active)
+            if (platform.gameObject.activeInHierarchy)
+                platform.EditorResetAllConnections();
 
             // Invoke UnityEvent for platform removed
             OnPlatformRemoved?.Invoke(platform);

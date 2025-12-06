@@ -774,7 +774,11 @@ namespace WaterTown.Platforms
             // 4) Recompute rail visibility and socket statuses in the clean state
             RefreshAllRailingsVisibility();
             RefreshSocketStatuses();
-            QueueRebuild();
+            
+            // Only queue rebuild if we're active (skip during shutdown)
+            if (gameObject.activeInHierarchy)
+                QueueRebuild();
+            
             ConnectionsChanged?.Invoke(this);
         }
         
@@ -861,6 +865,10 @@ namespace WaterTown.Platforms
         public void QueueRebuild()
         {
             if (!NavSurface) return;
+            
+            // Don't start coroutines on inactive objects (e.g., during shutdown/cleanup)
+            if (!gameObject.activeInHierarchy) return;
+            
             if (_pendingRebuild != null)
                 StopCoroutine(_pendingRebuild);
             _pendingRebuild = StartCoroutine(RebuildAfterDelay(rebuildDebounceSeconds));
