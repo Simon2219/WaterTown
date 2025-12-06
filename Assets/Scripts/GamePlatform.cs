@@ -3,12 +3,13 @@ using System.Collections.Generic;
 using Unity.AI.Navigation;
 using UnityEngine;
 using UnityEngine.AI;
+using WaterTown.Interfaces;
 
 namespace WaterTown.Platforms
 {
     [DisallowMultipleComponent]
     [RequireComponent(typeof(NavMeshSurface))]
-    public class GamePlatform : MonoBehaviour
+    public class GamePlatform : MonoBehaviour, IPickupable
     {
         #region Global Registry & Events
         
@@ -24,6 +25,27 @@ namespace WaterTown.Platforms
 
         /// <summary>Fired whenever this platform's pose changes (position/rotation/scale).</summary>
         public event System.Action<GamePlatform> PoseChanged;
+        
+        #endregion
+
+        #region IPickupable Implementation
+        
+        // ---------- Pickup/Placement State ----------
+        
+        public bool IsPickedUp { get; set; }
+        public bool CanBePlaced => ValidatePlacement();
+        public Transform Transform => transform;
+        public GameObject GameObject => gameObject;
+        
+        private Vector3 _originalPosition;
+        private Quaternion _originalRotation;
+        private bool _isNewObject;
+        private Material[] _originalMaterials;
+        private readonly List<Renderer> _allRenderers = new List<Renderer>();
+        
+        [Header("Pickup Materials")]
+        [SerializeField] private Material pickupValidMaterial;
+        [SerializeField] private Material pickupInvalidMaterial;
         
         #endregion
 
@@ -202,15 +224,6 @@ namespace WaterTown.Platforms
             
             // Ensure cache is rebuilt on next access
             _worldPositionsCacheValid = false;
-            
-            Debug.Log($"[GamePlatform] Built {sockets.Count} sockets for '{name}' at worldPos={transform.position} (Footprint: {footprintSize.x}x{footprintSize.y})");
-            
-            // Log first few socket positions for debugging
-            for (int i = 0; i < Mathf.Min(4, sockets.Count); i++)
-            {
-                Vector3 worldPos = GetSocketWorldPosition(i);
-                Debug.Log($"  Socket[{i}] localPos={sockets[i].LocalPos}, worldPos={worldPos}");
-            }
         }
 
         public SocketInfo GetSocket(int index)
@@ -1054,6 +1067,173 @@ namespace WaterTown.Platforms
             var railings = GetComponentsInChildren<PlatformRailing>(true);
             foreach (var r in railings)
                 r.EnsureRegistered();
+        }
+        
+        #endregion
+
+        #region IPickupable Interface Methods
+        
+        // ---------- IPickupable Implementation ----------
+
+        public void OnPickedUp(bool isNewObject)
+        {
+            IsPickedUp = true;
+            _isNewObject = isNewObject;
+            
+            // Store original transform for cancellation
+            _originalPosition = transform.position;
+            _originalRotation = transform.rotation;
+            
+            // Disable colliders so we can raycast through the platform
+            foreach (var col in GetComponentsInChildren<Collider>(true))
+                col.enabled = false;
+            
+            // Cache renderers and store original materials
+            _allRenderers.Clear();
+            _allRenderers.AddRange(GetComponentsInChildren<Renderer>(true));
+            
+            if (_originalMaterials == null || _originalMaterials.Length == 0)
+            {
+                // Store first renderer's materials as reference
+                if (_allRenderers.Count > 0 && _allRenderers[0] != null)
+                    _originalMaterials = _allRenderers[0].sharedMaterials;
+            }
+            
+            // If this is an existing object being moved, unregister from TownManager
+            // This will trigger adjacency recomputation so neighboring platforms update their railings
+            if (!isNewObject)
+            {
+                var townManager = FindFirstObjectByType<WaterTown.TownManager>();
+                if (townManager != null)
+                {
+                    townManager.UnregisterPlatform(this);
+                    Debug.Log($"[GamePlatform] Picked up existing '{name}' - neighbors will update railings");
+                }
+            }
+        }
+
+        public void OnPlaced()
+        {
+            IsPickedUp = false;
+            
+            // Restore colliders
+            foreach (var col in GetComponentsInChildren<Collider>(true))
+                col.enabled = true;
+            
+            // Restore original materials
+            RestoreOriginalMaterials();
+            
+            // Ensure sockets are built for adjacency detection
+            BuildSockets();
+            
+            // Ensure child modules and railings are registered
+            EnsureChildrenModulesRegistered();
+            EnsureChildrenRailingsRegistered();
+            
+            // Register with TownManager (triggers adjacency recomputation and NavMesh build)
+            var townManager = FindFirstObjectByType<WaterTown.TownManager>();
+            if (townManager != null)
+            {
+                var cells = new List<Vector2Int>();
+                townManager.ComputeCellsForPlatform(this, 0, cells);
+                // This will:
+                // 1. Mark cells as occupied in WorldGrid
+                // 2. Build NavMesh on this platform
+                // 3. Mark adjacency dirty (triggers railing updates and NavMesh links in LateUpdate)
+                townManager.RegisterPlatform(this, cells, 0, markOccupiedInGrid: true);
+            }
+            
+            Debug.Log($"[GamePlatform] Placed '{name}' at {transform.position}");
+        }
+
+        public void OnPlacementCancelled()
+        {
+            IsPickedUp = false;
+            
+            if (_isNewObject)
+            {
+                // New object - destroy it
+                Debug.Log($"[GamePlatform] Cancelled placement of new '{name}' - destroying");
+                Destroy(gameObject);
+            }
+            else
+            {
+                // Existing object - restore original position
+                transform.position = _originalPosition;
+                transform.rotation = _originalRotation;
+                
+                // Re-enable colliders
+                foreach (var col in GetComponentsInChildren<Collider>(true))
+                    col.enabled = true;
+                
+                // Restore original materials
+                RestoreOriginalMaterials();
+                
+                // Rebuild sockets at original position
+                BuildSockets();
+                
+                // Re-register with TownManager at original position
+                // This triggers adjacency recomputation so railings/NavMesh links update
+                var townManager = FindFirstObjectByType<WaterTown.TownManager>();
+                if (townManager != null)
+                {
+                    var cells = new List<Vector2Int>();
+                    townManager.ComputeCellsForPlatform(this, 0, cells);
+                    townManager.RegisterPlatform(this, cells, 0, markOccupiedInGrid: true);
+                }
+                
+                Debug.Log($"[GamePlatform] Cancelled movement of '{name}' - restored to original position");
+            }
+        }
+
+        public void UpdateValidityVisuals(bool isValid)
+        {
+            Material targetMaterial = isValid ? pickupValidMaterial : pickupInvalidMaterial;
+            
+            if (targetMaterial != null)
+            {
+                foreach (var renderer in _allRenderers)
+                {
+                    if (renderer != null)
+                    {
+                        var materials = renderer.sharedMaterials;
+                        for (int i = 0; i < materials.Length; i++)
+                            materials[i] = targetMaterial;
+                        renderer.sharedMaterials = materials;
+                    }
+                }
+            }
+        }
+
+        private void RestoreOriginalMaterials()
+        {
+            if (_originalMaterials != null && _originalMaterials.Length > 0)
+            {
+                foreach (var renderer in _allRenderers)
+                {
+                    if (renderer != null)
+                    {
+                        renderer.sharedMaterials = _originalMaterials;
+                    }
+                }
+            }
+        }
+
+        private bool ValidatePlacement()
+        {
+            if (!IsPickedUp) return true; // Not being placed
+            
+            var townManager = FindFirstObjectByType<WaterTown.TownManager>();
+            if (townManager == null) return false;
+            
+            // Compute cells this platform would occupy
+            var cells = new List<Vector2Int>();
+            townManager.ComputeCellsForPlatform(this, 0, cells);
+            
+            if (cells.Count == 0) return false;
+            
+            // Check if area is free (excluding this platform's InstanceID)
+            return townManager.IsAreaFree(cells, 0);
         }
         
         #endregion

@@ -205,20 +205,10 @@ namespace WaterTown.Town
                 var cell = new Vector3Int(c.x, c.y, level);
                 
                 if (!grid.CellInBounds(cell))
-                {
-                    Debug.LogWarning($"[TownManager] Cell ({c.x}, {c.y}) at level {level} is OUT OF BOUNDS");
                     return false;
-                }
                 
                 if (grid.CellHasAnyFlag(cell, WorldGrid.CellFlag.Occupied))
-                {
-                    // Debug: which platform is occupying this cell?
-                    if (grid.TryGetCell(cell, out var cellData))
-                    {
-                        Debug.Log($"[TownManager] Cell ({c.x}, {c.y}) is OCCUPIED by platform InstanceID: {cellData.payload}");
-                    }
                     return false;
-                }
             }
             return true;
         }
@@ -295,22 +285,6 @@ namespace WaterTown.Town
         private void MarkAdjacencyDirty()
         {
             _adjacencyDirty = true;
-        }
-
-        /// <summary>
-        /// Helper for preview: register platform using its current transform footprint,
-        /// but WITHOUT marking cells as Occupied in the grid.
-        /// The ghost still participates in adjacency (railing preview).
-        /// </summary>
-        public void RegisterPreviewPlatform(GamePlatform platform, int level = 0)
-        {
-            if (!platform || !grid) return;
-
-            _tmpCells2D.Clear();
-            ComputeCellsForPlatform(platform, level, _tmpCells2D);
-            if (_tmpCells2D.Count == 0) return;
-
-            RegisterPlatform(platform, _tmpCells2D, level, markOccupiedInGrid: false);
         }
 
         /// <summary>
@@ -433,12 +407,7 @@ namespace WaterTown.Town
             }
 
             if (adjacentCellPairs.Count == 0)
-            {
-                Debug.Log($"[TownManager] No adjacency found between '{a.name}' and '{b.name}'");
                 return;
-            }
-            
-            Debug.Log($"[TownManager] Found {adjacentCellPairs.Count} adjacent cell pairs between '{a.name}' and '{b.name}'");
 
             // Find sockets on the edges where cells are adjacent
             var aSocketIndices = new HashSet<int>();
@@ -535,8 +504,6 @@ namespace WaterTown.Town
         {
             platform.GetSocketIndexRangeForEdge(edge, out int startIndex, out int endIndex);
             
-            Debug.Log($"[TownManager] Finding socket on '{platform.name}' edge {edge}: range [{startIndex}..{endIndex}], target worldPos={worldPosition}");
-            
             float bestDistance = float.MaxValue;
             int bestSocketIndex = -1;
             
@@ -544,7 +511,6 @@ namespace WaterTown.Town
             {
                 Vector3 socketWorldPosition = platform.GetSocketWorldPosition(socketIndex);
                 float distanceSquared = Vector3.SqrMagnitude(socketWorldPosition - worldPosition);
-                Debug.Log($"  Socket[{socketIndex}] at {socketWorldPosition}, distance²={distanceSquared:F2}");
                 if (distanceSquared < bestDistance)
                 {
                     bestDistance = distanceSquared;
@@ -552,7 +518,6 @@ namespace WaterTown.Town
                 }
             }
             
-            Debug.Log($"  -> Best socket: {bestSocketIndex} (distance²={bestDistance:F2})");
             return bestSocketIndex;
         }
 
@@ -576,6 +541,10 @@ namespace WaterTown.Town
             {
                 if (!gp) continue;
                 if (!gp.isActiveAndEnabled) continue;
+                
+                // Skip platforms that are currently being picked up/moved
+                if (gp.IsPickedUp) continue;
+                
                 _tmpPlatforms.Add(gp);
             }
 
@@ -647,10 +616,6 @@ namespace WaterTown.Town
             int startX = centerX - rotatedWidth / 2;
             int startY = centerY - rotatedHeight / 2;
 
-            Debug.Log($"[TownManager] ComputeCells for '{platform.name}': WorldPos={worldPosition}, CenterCell=({centerX},{centerY}), " +
-                      $"Footprint={footprintWidth}x{footprintHeight}, RotatedSize={rotatedWidth}x{rotatedHeight}, " +
-                      $"StartCell=({startX},{startY})");
-
             for (int cellY = 0; cellY < rotatedHeight; cellY++)
             {
                 for (int cellX = 0; cellX < rotatedWidth; cellX++)
@@ -664,8 +629,6 @@ namespace WaterTown.Town
                     outputCells.Add(new Vector2Int(gridX, gridY));
                 }
             }
-            
-            Debug.Log($"[TownManager] Platform '{platform.name}' occupies {outputCells.Count} cells");
         }
         
         #endregion
