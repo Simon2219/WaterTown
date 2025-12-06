@@ -220,7 +220,9 @@ namespace WaterTown.Building
         {
             if (_currentPickup == null || mainCamera == null) return;
 
-            Ray ray = mainCamera.ScreenPointToRay(Input.mousePosition);
+            // Use new Input System for mouse position
+            Vector2 mousePosition = Mouse.current != null ? Mouse.current.position.ReadValue() : Vector2.zero;
+            Ray ray = mainCamera.ScreenPointToRay(mousePosition);
             Vector3Int levelRef = new Vector3Int(0, 0, placementLevel);
 
             if (grid.RaycastToCell(ray, levelRef, out Vector3Int hoveredCell, out Vector3 hitPoint))
