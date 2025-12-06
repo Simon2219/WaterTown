@@ -7,13 +7,11 @@ using System.IO;
 public class WorldGridEditorWindow : EditorWindow
 {
     private const string MenuPath = "Tools/World Grid Editor";
-    private const string PrefKey_AutoApply = "WorldGridEditor_AutoApply";
 
     private WorldGrid _sceneGrid;
     private GridVisualizer _visualizer;
-    private GridSettings _settings;
 
-    private bool _autoApply;
+    private bool _showSettings = true;
     private bool _showVisualizer = false;
     private bool _showVizDisplay = false;
     private bool _showVizColors = false;
@@ -37,84 +35,28 @@ public class WorldGridEditorWindow : EditorWindow
 
     private void OnEnable()
     {
-        _autoApply = EditorPrefs.GetBool(PrefKey_AutoApply, true);
-
-        if (_settings == null)
-        {
-            var guids = AssetDatabase.FindAssets("t:GridSettings");
-            if (guids.Length > 0)
-            {
-                string path = AssetDatabase.GUIDToAssetPath(guids[0]);
-                _settings = AssetDatabase.LoadAssetAtPath<GridSettings>(path);
-            }
-        }
-
         if (_sceneGrid == null) _sceneGrid = FindWorldGrid();
         if (_visualizer == null) _visualizer = FindVisualizer();
     }
 
-    private void OnDisable()
-    {
-        EditorPrefs.SetBool(PrefKey_AutoApply, _autoApply);
-    }
-
     private void OnGUI()
     {
-        if (!Application.isPlaying && _autoApply)
-            AutoApplyToSingleReferencingGrid(_settings);
-
         _scroll = EditorGUILayout.BeginScrollView(_scroll);
-
-        EditorGUILayout.Space();
-
-        using (new EditorGUILayout.HorizontalScope())
-        {
-            EditorGUILayout.LabelField("Settings", EditorStyles.boldLabel);
-            GUILayout.FlexibleSpace();
-            _autoApply = EditorGUILayout.ToggleLeft(
-                new GUIContent("Auto-Apply (Edit Mode)"),
-                _autoApply, GUILayout.Width(200));
-        }
 
         EditorGUILayout.Space();
 
         using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
         {
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                _settings = (GridSettings)EditorGUILayout.ObjectField(
-                    new GUIContent("GridSettings"),
-                    _settings, typeof(GridSettings), false);
-
-                if (GUILayout.Button("Create", GUILayout.Width(80)))
-                    CreateSettingsAsset();
-            }
-
             _sceneGrid = (WorldGrid)EditorGUILayout.ObjectField(
                 new GUIContent("Scene WorldGrid"),
                 _sceneGrid, typeof(WorldGrid), true);
         }
 
-        using (new EditorGUI.DisabledScope(_settings == null || _sceneGrid == null))
-        {
-            if (GUILayout.Button(new GUIContent("Apply Grid Settings"), GUILayout.Height(24)))
-            {
-                AssignSettingsToGrid(_sceneGrid, _settings, recordUndo: true);
-                if (_visualizer != null && _visualizer.grid == _sceneGrid)
-                {
-                    _visualizer.RebuildNow();
-                    _visualizer.RecomputeAndApplyColorsForLevel();
-                    _visualizer.SyncRendererMaterial();  // << ensure renderer uses asset
-                    EditorUtility.SetDirty(_visualizer);
-                    SceneView.RepaintAll();
-                    EditorApplication.QueuePlayerLoopUpdate();
-                }
-            }
-        }
-
         EditorGUILayout.Space();
 
-        DrawSettingsGUI();
+        _showSettings = EditorGUILayout.Foldout(_showSettings, "Grid Settings", true);
+        if (_showSettings)
+            DrawSettingsGUI();
 
         using (new EditorGUI.DisabledScope(!_sceneGrid))
         {
@@ -134,63 +76,64 @@ public class WorldGridEditorWindow : EditorWindow
 
     private void DrawSettingsGUI()
     {
-        if (!_settings)
+        if (!_sceneGrid)
         {
-            EditorGUILayout.HelpBox("Assign or create a GridSettings asset to edit grid configuration.", MessageType.Info);
+            EditorGUILayout.HelpBox("Assign a WorldGrid from the scene to edit its configuration.", MessageType.Info);
             return;
         }
 
-        EditorGUI.BeginChangeCheck();
-
-        EditorGUILayout.LabelField("Dimensions (cells)", EditorStyles.boldLabel);
-        _settings.sizeX = EditorGUILayout.IntSlider(new GUIContent("Size X"), _settings.sizeX, 1, MaxCells);
-        _settings.sizeY = EditorGUILayout.IntSlider(new GUIContent("Size Y"), _settings.sizeY, 1, MaxCells);
-
-        using (new EditorGUILayout.HorizontalScope())
+        using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
         {
-            _settings.levels = EditorGUILayout.IntSlider(new GUIContent("Levels"), _settings.levels, 1, MaxLevels);
-            _settings.levels = EditorGUILayout.IntField(_settings.levels, GUILayout.Width(70));
-        }
+            EditorGUI.BeginChangeCheck();
 
-        EditorGUILayout.Space();
-        EditorGUILayout.LabelField("Metrics (meters)", EditorStyles.boldLabel);
-        _settings.cellSize  = EditorGUILayout.IntSlider(new GUIContent("Cell Size (m)"),  _settings.cellSize,  1, MaxCellSize);
-        _settings.levelStep = EditorGUILayout.IntSlider(new GUIContent("Level Step (m)"), _settings.levelStep, 1, MaxLevelStep);
+            EditorGUILayout.LabelField("Dimensions (cells)", EditorStyles.boldLabel);
+            _sceneGrid.sizeX = EditorGUILayout.IntSlider(new GUIContent("Size X"), _sceneGrid.sizeX, 1, MaxCells);
+            _sceneGrid.sizeY = EditorGUILayout.IntSlider(new GUIContent("Size Y"), _sceneGrid.sizeY, 1, MaxCells);
 
-        EditorGUILayout.Space();
-
-        using (new EditorGUILayout.HorizontalScope())
-        {
-            EditorGUILayout.PrefixLabel("World Origin");
-            _settings.worldOrigin = EditorGUILayout.Vector3Field(GUIContent.none, _settings.worldOrigin);
-        }
-
-        EditorGUILayout.Space();
-
-        if (EditorGUI.EndChangeCheck())
-        {
-            EditorUtility.SetDirty(_settings);
-
-            if (_autoApply)
+            using (new EditorGUILayout.HorizontalScope())
             {
-                var g = _sceneGrid != null ? _sceneGrid : FindWorldGrid();
-                if (g != null && g.settings == _settings)
-                {
-                    g.EditorForceSyncFromSettings();
-                    EditorUtility.SetDirty(g);
-                    SceneView.RepaintAll();
-                    EditorApplication.QueuePlayerLoopUpdate();
-                }
+                _sceneGrid.levels = EditorGUILayout.IntSlider(new GUIContent("Levels"), _sceneGrid.levels, 1, MaxLevels);
+                _sceneGrid.levels = EditorGUILayout.IntField(_sceneGrid.levels, GUILayout.Width(70));
+            }
 
-                if (_visualizer != null && _visualizer.grid == g)
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Metrics (meters)", EditorStyles.boldLabel);
+            _sceneGrid.cellSize  = EditorGUILayout.IntSlider(new GUIContent("Cell Size (m)"),  _sceneGrid.cellSize,  1, MaxCellSize);
+            _sceneGrid.levelStep = EditorGUILayout.IntSlider(new GUIContent("Level Step (m)"), _sceneGrid.levelStep, 1, MaxLevelStep);
+
+            EditorGUILayout.Space();
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.PrefixLabel("World Origin");
+                _sceneGrid.worldOrigin = EditorGUILayout.Vector3Field(GUIContent.none, _sceneGrid.worldOrigin);
+            }
+
+            EditorGUILayout.Space();
+
+            if (GUILayout.Button(new GUIContent("Apply Settings"), GUILayout.Height(24)))
+            {
+                Undo.RecordObject(_sceneGrid, "Apply Grid Settings");
+                _sceneGrid.EditorApplySettings();
+                EditorUtility.SetDirty(_sceneGrid);
+                
+                if (_visualizer != null && _visualizer.grid == _sceneGrid)
                 {
                     _visualizer.RebuildNow();
                     _visualizer.RecomputeAndApplyColorsForLevel();
                     _visualizer.SyncRendererMaterial();
                     EditorUtility.SetDirty(_visualizer);
-                    SceneView.RepaintAll();
-                    EditorApplication.QueuePlayerLoopUpdate();
                 }
+                
+                SceneView.RepaintAll();
+                EditorApplication.QueuePlayerLoopUpdate();
+            }
+
+            if (EditorGUI.EndChangeCheck())
+            {
+                EditorUtility.SetDirty(_sceneGrid);
+                SceneView.RepaintAll();
+                EditorApplication.QueuePlayerLoopUpdate();
             }
         }
     }
@@ -401,47 +344,6 @@ public class WorldGridEditorWindow : EditorWindow
     }
 
     // ---------- Helpers ----------
-
-    private void CreateSettingsAsset()
-    {
-        string path = EditorUtility.SaveFilePanelInProject(
-            "Create GridSettings", "GridSettings", "asset",
-            "Choose a location for the GridSettings asset.");
-        if (string.IsNullOrEmpty(path)) return;
-
-        var asset = ScriptableObject.CreateInstance<GridSettings>();
-        AssetDatabase.CreateAsset(asset, path);
-        AssetDatabase.SaveAssets();
-        _settings = asset;
-        EditorGUIUtility.PingObject(asset);
-    }
-
-    private static void AssignSettingsToGrid(WorldGrid grid, GridSettings settings, bool recordUndo)
-    {
-        if (grid == null || settings == null) return;
-        if (recordUndo) Undo.RecordObject(grid, "Apply Grid Settings");
-
-        grid.settings = settings;
-
-        grid.EditorForceSyncFromSettings();
-        EditorUtility.SetDirty(grid);
-        SceneView.RepaintAll();
-        EditorApplication.QueuePlayerLoopUpdate();
-    }
-
-    private void AutoApplyToSingleReferencingGrid(GridSettings settings)
-    {
-        if (settings == null) return;
-
-        var g = _sceneGrid != null ? _sceneGrid : FindWorldGrid();
-        if (g != null && g.settings == settings)
-        {
-            g.EditorForceSyncFromSettings();
-            EditorUtility.SetDirty(g);
-            SceneView.RepaintAll();
-            EditorApplication.QueuePlayerLoopUpdate();
-        }
-    }
 
     private static void FrameGridBounds(WorldGrid grid)
     {

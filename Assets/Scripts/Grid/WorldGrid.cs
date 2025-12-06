@@ -19,11 +19,6 @@ namespace Grid
     {
         #region Configuration & Data Structures
         
-        [Header("Settings Asset (optional but recommended)")]
-        [Tooltip("If assigned, the grid reads all configuration from this asset.")]
-        public GridSettings settings;
-
-        // ---------- Runtime copies (synced from settings if assigned) ----------
         [Header("Grid Dimensions (cells)")]
         [Min(1)] public int sizeX = 128;    // columns (world X)
         [Min(1)] public int sizeY = 128;    // rows (world Z)
@@ -84,15 +79,12 @@ namespace Grid
 
         private void Awake()
         {
-            SyncFromSettings();
             AllocateIfNeeded();
         }
 
 #if UNITY_EDITOR
         private void OnValidate()
         {
-            SyncFromSettings();
-
             sizeX = Mathf.Max(1, sizeX);
             sizeY = Mathf.Max(1, sizeY);
             levels = Mathf.Max(1, levels);
@@ -103,25 +95,18 @@ namespace Grid
                 AllocateIfNeeded();
         }
 
-        /// <summary>Editor-only hard refresh when the settings asset changes (called by the editor window).</summary>
-        public void EditorForceSyncFromSettings()
+        /// <summary>Editor-only method to apply inspector changes and reallocate grid.</summary>
+        public void EditorApplySettings()
         {
-            SyncFromSettings();
+            sizeX = Mathf.Max(1, sizeX);
+            sizeY = Mathf.Max(1, sizeY);
+            levels = Mathf.Max(1, levels);
+            cellSize = Mathf.Max(1, cellSize);
+            levelStep = Mathf.Max(1, levelStep);
+            
             AllocateIfNeeded();
         }
 #endif
-
-        private void SyncFromSettings()
-        {
-            if (settings == null) return;
-
-            sizeX       = settings.sizeX;
-            sizeY       = settings.sizeY;
-            levels      = settings.levels;
-            cellSize    = settings.cellSize;
-            levelStep   = settings.levelStep;
-            worldOrigin = settings.worldOrigin;
-        }
 
         private void AllocateIfNeeded()
         {
