@@ -1269,23 +1269,31 @@ namespace WaterTown.Platforms
         {
             if (_autoValidMaterial == null)
             {
-                _autoValidMaterial = new Material(Shader.Find("Standard"));
+                // Try URP shader first, fallback to Universal Render Pipeline/Lit, then Standard
+                Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+                if (shader == null) shader = Shader.Find("Standard");
+                
+                _autoValidMaterial = new Material(shader);
                 _autoValidMaterial.name = "Auto_ValidPlacement (Testing)";
-                _autoValidMaterial.color = new Color(0f, 1f, 0f, 0.6f); // Bright green, 60% transparent
                 
-                // Enable transparency (Standard shader transparent mode)
-                _autoValidMaterial.SetFloat("_Mode", 3); // Transparent mode
-                _autoValidMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-                _autoValidMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-                _autoValidMaterial.SetInt("_ZWrite", 0);
-                _autoValidMaterial.DisableKeyword("_ALPHATEST_ON");
-                _autoValidMaterial.EnableKeyword("_ALPHABLEND_ON");
-                _autoValidMaterial.DisableKeyword("_ALPHAPREMULTIPLY_ON");
-                _autoValidMaterial.renderQueue = 3000;
+                // Set base color with transparency
+                _autoValidMaterial.SetColor("_BaseColor", new Color(0f, 1f, 0f, 0.6f)); // URP
+                _autoValidMaterial.SetColor("_Color", new Color(0f, 1f, 0f, 0.6f));     // Standard fallback
                 
-                // Make it emissive so it's more visible
-                _autoValidMaterial.EnableKeyword("_EMISSION");
-                _autoValidMaterial.SetColor("_EmissionColor", new Color(0f, 0.3f, 0f, 1f));
+                // Enable transparency for URP
+                _autoValidMaterial.SetFloat("_Surface", 1); // Transparent
+                _autoValidMaterial.SetFloat("_Blend", 0);   // Alpha blend
+                _autoValidMaterial.SetFloat("_AlphaClip", 0);
+                _autoValidMaterial.SetFloat("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                _autoValidMaterial.SetFloat("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                _autoValidMaterial.SetFloat("_ZWrite", 0);
+                
+                // Set render queue for transparency
+                _autoValidMaterial.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+                
+                // Enable keywords for transparency
+                _autoValidMaterial.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                _autoValidMaterial.EnableKeyword("_ALPHAPREMULTIPLY_ON");
             }
             return _autoValidMaterial;
         }
@@ -1298,23 +1306,31 @@ namespace WaterTown.Platforms
         {
             if (_autoInvalidMaterial == null)
             {
-                _autoInvalidMaterial = new Material(Shader.Find("Standard"));
+                // Try URP shader first, fallback to Universal Render Pipeline/Lit, then Standard
+                Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+                if (shader == null) shader = Shader.Find("Standard");
+                
+                _autoInvalidMaterial = new Material(shader);
                 _autoInvalidMaterial.name = "Auto_InvalidPlacement (Testing)";
-                _autoInvalidMaterial.color = new Color(1f, 0f, 0f, 0.6f); // Bright red, 60% transparent
                 
-                // Enable transparency (Standard shader transparent mode)
-                _autoInvalidMaterial.SetFloat("_Mode", 3); // Transparent mode
-                _autoInvalidMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-                _autoInvalidMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-                _autoInvalidMaterial.SetInt("_ZWrite", 0);
-                _autoInvalidMaterial.DisableKeyword("_ALPHATEST_ON");
-                _autoInvalidMaterial.EnableKeyword("_ALPHABLEND_ON");
-                _autoInvalidMaterial.DisableKeyword("_ALPHAPREMULTIPLY_ON");
-                _autoInvalidMaterial.renderQueue = 3000;
+                // Set base color with transparency
+                _autoInvalidMaterial.SetColor("_BaseColor", new Color(1f, 0f, 0f, 0.6f)); // URP
+                _autoInvalidMaterial.SetColor("_Color", new Color(1f, 0f, 0f, 0.6f));     // Standard fallback
                 
-                // Make it emissive so it's more visible
-                _autoInvalidMaterial.EnableKeyword("_EMISSION");
-                _autoInvalidMaterial.SetColor("_EmissionColor", new Color(0.3f, 0f, 0f, 1f));
+                // Enable transparency for URP
+                _autoInvalidMaterial.SetFloat("_Surface", 1); // Transparent
+                _autoInvalidMaterial.SetFloat("_Blend", 0);   // Alpha blend
+                _autoInvalidMaterial.SetFloat("_AlphaClip", 0);
+                _autoInvalidMaterial.SetFloat("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                _autoInvalidMaterial.SetFloat("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                _autoInvalidMaterial.SetFloat("_ZWrite", 0);
+                
+                // Set render queue for transparency
+                _autoInvalidMaterial.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+                
+                // Enable keywords for transparency
+                _autoInvalidMaterial.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                _autoInvalidMaterial.EnableKeyword("_ALPHAPREMULTIPLY_ON");
             }
             return _autoInvalidMaterial;
         }
