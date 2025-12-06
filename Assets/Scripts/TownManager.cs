@@ -199,12 +199,26 @@ namespace WaterTown.Town
         public bool IsAreaFree(List<Vector2Int> cells, int level = 0)
         {
             if (!grid) return false;
+            
             foreach (var c in cells)
             {
                 var cell = new Vector3Int(c.x, c.y, level);
-                if (!grid.CellInBounds(cell)) return false;
-                if (grid.CellHasAnyFlag(cell, WorldGrid.CellFlag.Occupied))
+                
+                if (!grid.CellInBounds(cell))
+                {
+                    Debug.LogWarning($"[TownManager] Cell ({c.x}, {c.y}) at level {level} is OUT OF BOUNDS");
                     return false;
+                }
+                
+                if (grid.CellHasAnyFlag(cell, WorldGrid.CellFlag.Occupied))
+                {
+                    // Debug: which platform is occupying this cell?
+                    if (grid.TryGetCell(cell, out var cellData))
+                    {
+                        Debug.Log($"[TownManager] Cell ({c.x}, {c.y}) is OCCUPIED by platform InstanceID: {cellData.payload}");
+                    }
+                    return false;
+                }
             }
             return true;
         }

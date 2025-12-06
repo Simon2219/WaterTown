@@ -36,20 +36,22 @@ namespace WaterTown.Building
         [SerializeField] private LayerMask raycastLayers;
 
         [Header("Placement Rules")]
-        [SerializeField] private bool requireAdjacency = true;
+        [Tooltip("Global override: if false, platforms can be placed anywhere (ignores blueprint adjacency settings).")]
+        [SerializeField] private bool enforceAdjacencyRequirements = false;
         [SerializeField] private float gridSnapSize = 1f;
 
         // Runtime state
         private PlatformBlueprint _selectedBlueprint;
         private GameObject _ghostPlatform;
         private GamePlatform _ghostPlatformComponent;
-        private float _currentRotation = 0f;
-        private Vector3 _currentPlacementPosition;
+        private float _currentGhostRotation = 0f;
         private bool _isValidPlacement = false;
         private bool _lastValidityState = false; // Cache to avoid unnecessary material updates
-        private List<Vector2Int> _ghostCells = new List<Vector2Int>();
-        private List<Renderer> _ghostRenderers = new List<Renderer>();
-        private List<Vector3Int> _cachedNeighbors = new List<Vector3Int>(); // Reusable list for adjacency checks
+        
+        // Reusable lists for per-frame calculations (avoid allocations)
+        private readonly List<Vector2Int> _tempCellList = new List<Vector2Int>();
+        private readonly List<Vector3Int> _tempNeighborList = new List<Vector3Int>();
+        private readonly List<Renderer> _ghostRenderers = new List<Renderer>();
         
         #endregion
 
@@ -160,7 +162,7 @@ namespace WaterTown.Building
             }
 
             _selectedBlueprint = blueprint;
-            _currentRotation = 0f;
+            _currentGhostRotation = 0f;
             CreateGhost();
         }
         
@@ -212,6 +214,11 @@ namespace WaterTown.Building
             foreach (var col in _ghostPlatform.GetComponentsInChildren<Collider>(true))
                 col.enabled = false;
 
+            // Register ghost ONCE for railing preview (NOT for occupancy)
+            // The ghost will update its position via transform, triggering TownManager's PoseChanged
+            if (townManager != null && _ghostPlatformComponent != null)
+                townManager.RegisterPreviewPlatform(_ghostPlatformComponent, previewLevel);
+
             // Force initial material update by resetting validity state
             _lastValidityState = true; // Force update on first frame
             _isValidPlacement = false; // Start as invalid
@@ -223,7 +230,7 @@ namespace WaterTown.Building
         {
             if (_ghostPlatform != null)
             {
-                // Unregister from TownManager if registered
+                // Unregister from TownManager's preview tracking
                 if (_ghostPlatformComponent != null && townManager != null)
                     townManager.UnregisterPlatform(_ghostPlatformComponent);
 
@@ -233,7 +240,7 @@ namespace WaterTown.Building
             }
 
             _ghostRenderers.Clear();
-            _ghostCells.Clear();
+            _tempCellList.Clear();
         }
         
         #endregion
@@ -257,13 +264,25 @@ namespace WaterTown.Building
 
             if (grid.RaycastToCell(ray, levelRef, out Vector3Int hoveredCell, out Vector3 hitPoint))
             {
-                // Snap to grid
-                Vector3 snappedPosition = grid.GetCellCenter(hoveredCell);
-                _currentPlacementPosition = snappedPosition;
+                // Snap to grid using WorldGrid for perfect alignment
+                // Account for rotation when determining effective footprint
+                Vector2Int baseFootprint = _ghostPlatformComponent != null 
+                    ? _ghostPlatformComponent.Footprint 
+                    : new Vector2Int(1, 1);
+                
+                // Determine if footprint is swapped due to 90° or 270° rotation
+                int rotationSteps = Mathf.RoundToInt(_currentGhostRotation / 90f) & 3;
+                bool isRotated90Or270 = (rotationSteps % 2) == 1;
+                
+                Vector2Int effectiveFootprint = isRotated90Or270 
+                    ? new Vector2Int(baseFootprint.y, baseFootprint.x) // Swap width/height
+                    : baseFootprint;
+                
+                Vector3 snappedPosition = grid.SnapToGridForPlatform(hitPoint, effectiveFootprint, previewLevel);
 
                 // Apply rotation
-                Quaternion rotation = Quaternion.Euler(0f, _currentRotation, 0f);
-                _ghostPlatform.transform.SetPositionAndRotation(_currentPlacementPosition, rotation);
+                Quaternion rotation = Quaternion.Euler(0f, _currentGhostRotation, 0f);
+                _ghostPlatform.transform.SetPositionAndRotation(snappedPosition, rotation);
             }
         }
 
@@ -275,68 +294,56 @@ namespace WaterTown.Building
                 return;
             }
 
-            // Compute which cells this ghost would occupy
-            _ghostCells.Clear();
-            townManager.ComputeCellsForPlatform(_ghostPlatformComponent, previewLevel, _ghostCells);
+            // Compute which cells this ghost would occupy (reuse temp list)
+            _tempCellList.Clear();
+            townManager.ComputeCellsForPlatform(_ghostPlatformComponent, previewLevel, _tempCellList);
 
-            if (_ghostCells.Count == 0)
+            if (_tempCellList.Count == 0)
             {
                 _isValidPlacement = false;
                 return;
             }
 
-            // Check if area is free
-            bool areaFree = townManager.IsAreaFree(_ghostCells, previewLevel);
+            // Check if area is free using TownManager (which checks WorldGrid's Occupied flags)
+            // Ghost should NEVER have Occupied flag set, so it won't interfere
+            bool areaFree = townManager.IsAreaFree(_tempCellList, previewLevel);
 
-            // Check adjacency requirement if enabled
+            // Check adjacency requirement only if globally enforced AND blueprint requires it
             bool meetsAdjacency = true;
-            if (requireAdjacency && _selectedBlueprint != null && _selectedBlueprint.RequireEdgeAdjacency)
+            if (enforceAdjacencyRequirements && _selectedBlueprint != null && _selectedBlueprint.RequireEdgeAdjacency)
             {
-                meetsAdjacency = CheckAdjacencyRequirement(_ghostCells, previewLevel);
+                meetsAdjacency = CheckAdjacencyRequirement(_tempCellList, previewLevel);
             }
 
             _isValidPlacement = areaFree && meetsAdjacency;
-
-            // Debug logging to help diagnose placement issues
-            if (!areaFree)
-                Debug.Log($"[BuildModeManager] Placement invalid: Area not free (occupied cells detected)");
-            if (!meetsAdjacency)
-                Debug.Log($"[BuildModeManager] Placement invalid: Adjacency requirement not met");
-
-            // Register ghost as preview platform:
-            // - Does NOT mark cells as Occupied (players can still place here)
-            // - DOES participate in adjacency calculations (enables railing preview)
-            // This allows players to see how railings will look when platform is placed
-            if (townManager != null && _ghostPlatformComponent != null)
-                townManager.RegisterPreviewPlatform(_ghostPlatformComponent, previewLevel);
         }
 
         private bool CheckAdjacencyRequirement(List<Vector2Int> cells, int level)
         {
             if (cells == null || cells.Count == 0) return false;
 
-            // If there are no existing platforms (excluding ghost), first platform is always valid
-            // Ghost platforms are included in AllPlatforms, so we need to check if there are REAL platforms
+            // Count real placed platforms (ghost should never have Occupied flag set)
             int realPlatformCount = 0;
             foreach (var platform in GamePlatform.AllPlatforms)
             {
-                if (platform != _ghostPlatformComponent && platform != null)
+                if (platform != null && platform != _ghostPlatformComponent)
                     realPlatformCount++;
             }
             
+            // First platform is always valid
             if (realPlatformCount == 0) return true;
 
-            // Check if any cell is adjacent (shares an edge) with an occupied cell
-            // Reuse cached list to avoid allocations
+            // Check if any cell is edge-adjacent to an occupied cell
+            // (Ghost should never set Occupied flag, so it won't interfere)
             foreach (var cell in cells)
             {
                 Vector3Int gridCell = new Vector3Int(cell.x, cell.y, level);
-                grid.GetNeighbors4(gridCell, _cachedNeighbors);
+                grid.GetNeighbors4(gridCell, _tempNeighborList);
 
-                foreach (var neighbor in _cachedNeighbors)
+                foreach (var neighbor in _tempNeighborList)
                 {
                     if (grid.CellHasAnyFlag(neighbor, WorldGrid.CellFlag.Occupied))
-                        return true; // Found an adjacent occupied cell
+                        return true; // Found adjacent occupied cell
                 }
             }
 
@@ -384,15 +391,11 @@ namespace WaterTown.Building
 
         private void OnPlacePerformed(InputAction.CallbackContext context)
         {
-            if (_ghostPlatform == null)
-            {
-                Debug.Log("[BuildModeManager] Cannot place: No ghost platform.");
-                return;
-            }
+            if (_ghostPlatform == null) return; // Silently ignore if no ghost
             
             if (!_isValidPlacement)
             {
-                Debug.Log("[BuildModeManager] Cannot place: Invalid placement.");
+                Debug.Log("[BuildModeManager] Cannot place: Invalid placement (check area free and adjacency).");
                 return;
             }
 
@@ -417,10 +420,10 @@ namespace WaterTown.Building
                 ? 45f 
                 : 90f;
 
-            _currentRotation += rotationStep;
-            if (_currentRotation >= 360f) _currentRotation -= 360f;
+            _currentGhostRotation += rotationStep;
+            if (_currentGhostRotation >= 360f) _currentGhostRotation -= 360f;
 
-            _ghostPlatform.transform.rotation = Quaternion.Euler(0f, _currentRotation, 0f);
+            _ghostPlatform.transform.rotation = Quaternion.Euler(0f, _currentGhostRotation, 0f);
         }
 
         private void OnRotateCCWPerformed(InputAction.CallbackContext context)
@@ -431,10 +434,10 @@ namespace WaterTown.Building
                 ? 45f 
                 : 90f;
 
-            _currentRotation -= rotationStep;
-            if (_currentRotation < 0f) _currentRotation += 360f;
+            _currentGhostRotation -= rotationStep;
+            if (_currentGhostRotation < 0f) _currentGhostRotation += 360f;
 
-            _ghostPlatform.transform.rotation = Quaternion.Euler(0f, _currentRotation, 0f);
+            _ghostPlatform.transform.rotation = Quaternion.Euler(0f, _currentGhostRotation, 0f);
         }
         
         #endregion
@@ -451,32 +454,40 @@ namespace WaterTown.Building
                 return;
             }
 
-            // Instantiate the runtime prefab
-            GameObject placed = Instantiate(
+            // Compute cells for final placement (from current ghost position)
+            _tempCellList.Clear();
+            townManager.ComputeCellsForPlatform(_ghostPlatformComponent, previewLevel, _tempCellList);
+            
+            if (_tempCellList.Count == 0)
+            {
+                Debug.LogWarning("[BuildModeManager] Cannot place: ghost has no valid cells.");
+                return;
+            }
+
+            // Instantiate the runtime prefab at ghost's current position
+            GameObject placedPlatform = Instantiate(
                 _selectedBlueprint.RuntimePrefab,
-                _currentPlacementPosition,
-                Quaternion.Euler(0f, _currentRotation, 0f)
+                _ghostPlatform.transform.position,
+                _ghostPlatform.transform.rotation
             );
 
-            placed.name = _selectedBlueprint.DisplayName;
+            placedPlatform.name = _selectedBlueprint.DisplayName;
 
-            // Get GamePlatform component and register it
-            var platformComponent = placed.GetComponent<GamePlatform>();
+            // Get GamePlatform component and register it as permanent
+            var platformComponent = placedPlatform.GetComponent<GamePlatform>();
             if (platformComponent != null && townManager != null)
             {
-                // Register as permanent platform (marks cells as Occupied)
-                // TownManager will handle NavMesh building via event subscription
-                townManager.RegisterPlatform(platformComponent, _ghostCells, previewLevel, markOccupiedInGrid: true);
+                // Register as permanent platform (marks cells as Occupied in WorldGrid)
+                townManager.RegisterPlatform(platformComponent, _tempCellList, previewLevel, markOccupiedInGrid: true);
+                
+                Debug.Log($"[BuildModeManager] Placed {_selectedBlueprint.DisplayName} at {placedPlatform.transform.position}");
             }
             else
             {
                 Debug.LogWarning("[BuildModeManager] Placed platform has no GamePlatform component!");
             }
 
-            Debug.Log($"[BuildModeManager] Placed {_selectedBlueprint.DisplayName} at {_currentPlacementPosition}");
-
-            // Keep ghost active for continued placement
-            // (User can cancel with Cancel action or select different blueprint)
+            // Ghost stays active for continued placement (will update validation automatically next frame)
         }
         
         #endregion

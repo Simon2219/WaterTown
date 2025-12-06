@@ -227,8 +227,50 @@ namespace Grid
         }
 
         /// <summary>
-        /// Snaps a world position to the nearest grid-aligned position on the specified level.
-        /// Useful for ensuring platforms and objects are perfectly grid-aligned.
+        /// Snaps a world position to the nearest grid-aligned position for a platform with given footprint.
+        /// Handles even vs odd footprints correctly:
+        /// - Even footprints (4x4): snap to cell edges (whole meters like 44.0)
+        /// - Odd footprints (3x3): snap to cell centers (half meters like 44.5)
+        /// </summary>
+        public Vector3 SnapToGridForPlatform(Vector3 worldPosition, Vector2Int footprint, int level)
+        {
+            bool evenWidth = (footprint.x % 2) == 0;
+            bool evenHeight = (footprint.y % 2) == 0;
+            
+            float levelY = GetLevelWorldY(level);
+            
+            // For even dimensions, snap to cell edges (whole meters)
+            // For odd dimensions, snap to cell centers (half meters)
+            float snappedX;
+            float snappedZ;
+            
+            if (evenWidth)
+            {
+                // Snap to whole meters (cell edges)
+                snappedX = worldOrigin.x + Mathf.Round((worldPosition.x - worldOrigin.x) / cellSize) * cellSize;
+            }
+            else
+            {
+                // Snap to cell centers (half meters)
+                snappedX = worldOrigin.x + (Mathf.Floor((worldPosition.x - worldOrigin.x) / cellSize) + 0.5f) * cellSize;
+            }
+            
+            if (evenHeight)
+            {
+                // Snap to whole meters (cell edges)
+                snappedZ = worldOrigin.z + Mathf.Round((worldPosition.z - worldOrigin.z) / cellSize) * cellSize;
+            }
+            else
+            {
+                // Snap to cell centers (half meters)
+                snappedZ = worldOrigin.z + (Mathf.Floor((worldPosition.z - worldOrigin.z) / cellSize) + 0.5f) * cellSize;
+            }
+            
+            return new Vector3(snappedX, levelY, snappedZ);
+        }
+
+        /// <summary>
+        /// Snaps a world position to the nearest grid cell center on the specified level.
         /// </summary>
         public Vector3 SnapWorldPositionToGrid(Vector3 worldPosition, int level)
         {
@@ -243,15 +285,6 @@ namespace Grid
         {
             Vector3Int cell = WorldToCell(worldPosition);
             return GetCellCenter(cell);
-        }
-
-        /// <summary>
-        /// Checks if a world position is grid-aligned (within tolerance) on the specified level.
-        /// </summary>
-        public bool IsWorldPositionGridAligned(Vector3 worldPosition, int level, float tolerance = 0.01f)
-        {
-            Vector3 snapped = SnapWorldPositionToGrid(worldPosition, level);
-            return Vector3.SqrMagnitude(worldPosition - snapped) < tolerance * tolerance;
         }
 
         /// <summary>World-space axis-aligned bounds of a cell (thin in Y).</summary>
