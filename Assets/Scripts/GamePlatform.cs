@@ -202,6 +202,15 @@ namespace WaterTown.Platforms
             
             // Ensure cache is rebuilt on next access
             _worldPositionsCacheValid = false;
+            
+            Debug.Log($"[GamePlatform] Built {sockets.Count} sockets for '{name}' at worldPos={transform.position} (Footprint: {footprintSize.x}x{footprintSize.y})");
+            
+            // Log first few socket positions for debugging
+            for (int i = 0; i < Mathf.Min(4, sockets.Count); i++)
+            {
+                Vector3 worldPos = GetSocketWorldPosition(i);
+                Debug.Log($"  Socket[{i}] localPos={sockets[i].LocalPos}, worldPos={worldPos}");
+            }
         }
 
         public SocketInfo GetSocket(int index)

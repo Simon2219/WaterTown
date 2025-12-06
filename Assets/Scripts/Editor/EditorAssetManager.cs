@@ -130,7 +130,7 @@ namespace Editor
                                 if (!gp) gp = Undo.AddComponent<GamePlatform>(root.gameObject);
 
                                 var so = new SerializedObject(gp);
-                                so.FindProperty("footprint").vector2IntValue = new Vector2Int(_wCells, _lCells);
+                                so.FindProperty("footprintSize").vector2IntValue = new Vector2Int(_wCells, _lCells);
                                 so.ApplyModifiedProperties();
 
                                 gp.BuildSockets();

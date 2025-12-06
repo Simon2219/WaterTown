@@ -454,7 +454,11 @@ namespace WaterTown.Building
                 return;
             }
 
-            // Compute cells for final placement (from current ghost position)
+            // Store ghost position/rotation before unregistering
+            Vector3 ghostPosition = _ghostPlatform.transform.position;
+            Quaternion ghostRotation = _ghostPlatform.transform.rotation;
+
+            // Compute cells for final placement
             _tempCellList.Clear();
             townManager.ComputeCellsForPlatform(_ghostPlatformComponent, previewLevel, _tempCellList);
             
@@ -464,11 +468,19 @@ namespace WaterTown.Building
                 return;
             }
 
-            // Instantiate the runtime prefab at ghost's current position
+            // IMPORTANT: Unregister ghost BEFORE placing real platform
+            // This prevents the ghost from interfering with adjacency detection
+            if (townManager != null && _ghostPlatformComponent != null)
+            {
+                townManager.UnregisterPlatform(_ghostPlatformComponent);
+                Debug.Log("[BuildModeManager] Unregistered ghost before placing real platform");
+            }
+
+            // Instantiate the runtime prefab at ghost's position
             GameObject placedPlatform = Instantiate(
                 _selectedBlueprint.RuntimePrefab,
-                _ghostPlatform.transform.position,
-                _ghostPlatform.transform.rotation
+                ghostPosition,
+                ghostRotation
             );
 
             placedPlatform.name = _selectedBlueprint.DisplayName;
@@ -478,16 +490,24 @@ namespace WaterTown.Building
             if (platformComponent != null && townManager != null)
             {
                 // Register as permanent platform (marks cells as Occupied in WorldGrid)
-                townManager.RegisterPlatform(platformComponent, _tempCellList, previewLevel, markOccupiedInGrid: true);
+                // Use a COPY of _tempCellList since it will be reused for the ghost
+                townManager.RegisterPlatform(platformComponent, new List<Vector2Int>(_tempCellList), previewLevel, markOccupiedInGrid: true);
                 
-                Debug.Log($"[BuildModeManager] Placed {_selectedBlueprint.DisplayName} at {placedPlatform.transform.position}");
+                Debug.Log($"[BuildModeManager] Placed '{_selectedBlueprint.DisplayName}' at {ghostPosition}");
             }
             else
             {
                 Debug.LogWarning("[BuildModeManager] Placed platform has no GamePlatform component!");
             }
 
-            // Ghost stays active for continued placement (will update validation automatically next frame)
+            // Re-register ghost immediately for continued placement
+            if (townManager != null && _ghostPlatformComponent != null)
+            {
+                townManager.RegisterPreviewPlatform(_ghostPlatformComponent, previewLevel);
+                Debug.Log("[BuildModeManager] Re-registered ghost after placing");
+            }
+
+            // Ghost validation will update automatically next frame
         }
         
         #endregion
