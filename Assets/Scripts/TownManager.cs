@@ -86,21 +86,15 @@ public class TownManager : MonoBehaviour
     private void OnEnable()
     {
         // Subscribe to PlatformManager events to propagate town-level feedback
-        if (_platformManager != null)
-        {
-            _platformManager.OnPlatformPlaced.AddListener(HandlePlatformPlaced);
-            _platformManager.OnPlatformRemoved.AddListener(HandlePlatformRemoved);
-        }
+        _platformManager.OnPlatformPlaced.AddListener(HandlePlatformPlaced);
+        _platformManager.OnPlatformRemoved.AddListener(HandlePlatformRemoved);
     }
 
     private void OnDisable()
     {
         // Unsubscribe from PlatformManager events
-        if (_platformManager != null)
-        {
-            _platformManager.OnPlatformPlaced.RemoveListener(HandlePlatformPlaced);
-            _platformManager.OnPlatformRemoved.RemoveListener(HandlePlatformRemoved);
-        }
+        _platformManager.OnPlatformPlaced.RemoveListener(HandlePlatformPlaced);
+        _platformManager.OnPlatformRemoved.RemoveListener(HandlePlatformRemoved);
     }
     
     #endregion

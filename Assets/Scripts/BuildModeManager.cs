@@ -31,7 +31,6 @@ namespace WaterTown.Building
         [SerializeField] private InputActionReference rotateCCWAction;
 
         [Header("Placement Settings")]
-        [SerializeField] private int placementLevel = 0;
         [SerializeField] private LayerMask raycastLayers;
         [SerializeField] private float rotationStep = 90f;
 
@@ -256,7 +255,7 @@ namespace WaterTown.Building
             // Use new Input System for mouse position
             Vector2 mousePosition = Mouse.current != null ? Mouse.current.position.ReadValue() : Vector2.zero;
             Ray ray = mainCamera.ScreenPointToRay(mousePosition);
-            Vector3Int levelRef = new Vector3Int(0, 0, placementLevel);
+            Vector3Int levelRef = new Vector3Int(0, 0, 0);
 
             if (grid.RaycastToCell(ray, out Vector2Int hoveredCell, out Vector3 hitPoint))
             {

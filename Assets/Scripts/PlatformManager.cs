@@ -40,8 +40,6 @@ public class PlatformManager : MonoBehaviour
     
     private WorldGrid _worldGrid;
     
-    private int defaultLevel = 0;
-    
     private const int ROTATION_STEP_DEGREES = 90;
     private const int ROTATION_MODULO_MASK = 3; // 0-3 for 4 cardinal directions (0°, 90°, 180°, 270°)
     
@@ -112,7 +110,9 @@ public class PlatformManager : MonoBehaviour
 
     private void OnEnable()
     {
-        // No static events - platforms register directly
+        // Subscribe to platform lifecycle events
+        GamePlatform.PlatformEnabled += OnPlatformEnabled;
+        GamePlatform.PlatformDisabled += OnPlatformDisabled;
     }
 
     private void Start()
@@ -147,6 +147,10 @@ public class PlatformManager : MonoBehaviour
 
     private void OnDisable()
     {
+        // Unsubscribe from platform lifecycle events
+        GamePlatform.PlatformEnabled -= OnPlatformEnabled;
+        GamePlatform.PlatformDisabled -= OnPlatformDisabled;
+        
         // Best-effort cleanup of pose subscriptions
         foreach (var kvp in _allPlatforms)
         {
@@ -157,13 +161,17 @@ public class PlatformManager : MonoBehaviour
     
     #endregion
 
-    #region Platform Registration
+    #region Platform Lifecycle Event Handlers
     
-    /// Called by GamePlatform when it becomes enabled.
+    /// <summary>
+    /// Event handler: called when ANY platform becomes enabled.
     /// Adds the platform to the global registry (without grid occupancy).
     /// Platform must call TownManager.RegisterPlatform() separately to occupy grid cells.
-    public void NotifyPlatformEnabled(GamePlatform platform)
+    /// </summary>
+    private void OnPlatformEnabled(GamePlatform platform)
     {
+        if (!platform) return;
+        
         // Add to registry if not already present (without occupying grid)
         if (!_allPlatforms.ContainsKey(platform))
         {
@@ -173,13 +181,14 @@ public class PlatformManager : MonoBehaviour
             };
         }
     }
-
-
     
-    /// Called by GamePlatform when it becomes disabled.
+    /// <summary>
+    /// Event handler: called when ANY platform becomes disabled.
     /// Removes the platform from the global registry and unregisters from grid.
-    public void NotifyPlatformDisabled(GamePlatform platform)
+    /// </summary>
+    private void OnPlatformDisabled(GamePlatform platform)
     {
+        if (!platform) return;
         UnregisterPlatform(platform);
     }
 
@@ -197,8 +206,7 @@ public class PlatformManager : MonoBehaviour
             foreach (var cell in data.cells)
             {
                 // Remove from WorldGrid
-                var gridCell = new Vector2Int(cell.x, cell.y);
-                _worldGrid.TryRemoveFlag(gridCell, WorldGrid.CellFlag.Occupied);
+                _worldGrid.TryRemoveFlag(cell, WorldGrid.CellFlag.Occupied);
                 
                 // Remove from reverse lookup
                 _cellToPlatform.Remove(cell);
@@ -214,14 +222,13 @@ public class PlatformManager : MonoBehaviour
 
         if (data.marksOccupied)
         {
-            foreach (var cell2D in data.cells)
+            foreach (var cell in data.cells)
             {
                 // Add to WorldGrid
-                var gridCell = new Vector2Int(cell2D.x, cell2D.y);
-                _worldGrid.TryAddFlag(gridCell, WorldGrid.CellFlag.Occupied);
+                _worldGrid.TryAddFlag(cell, WorldGrid.CellFlag.Occupied);
                 
                 // Add to reverse lookup
-                _cellToPlatform[cell2D] = platform;
+                _cellToPlatform[cell] = platform;
             }
         }
         
@@ -294,24 +301,18 @@ public class PlatformManager : MonoBehaviour
         List<Vector2Int> cells,
         bool markOccupiedInGrid = true)
     {
-        if (!platform || cells == null || cells.Count == 0 || !_worldGrid) return;
+        if (!platform || cells == null || cells.Count == 0) return;
 
         // Remove old occupancy if any
         if (_allPlatforms.TryGetValue(platform, out var oldData))
         {
             if (oldData.marksOccupied)
             {
-                // Remove from WorldGrid
-                foreach (var cell2D in oldData.cells)
+                // Remove from WorldGrid and reverse lookup
+                foreach (var cell in oldData.cells)
                 {
-                    var gridCell = new Vector2Int(cell2D.x, cell2D.y);
-                    _worldGrid.TryRemoveFlag(gridCell, WorldGrid.CellFlag.Occupied);
-                }
-                
-                // Remove from reverse lookup
-                foreach (var cell2D in oldData.cells)
-                {
-                    _cellToPlatform.Remove(cell2D);
+                    _worldGrid.TryRemoveFlag(cell, WorldGrid.CellFlag.Occupied);
+                    _cellToPlatform.Remove(cell);
                 }
             }
         }
@@ -330,17 +331,11 @@ public class PlatformManager : MonoBehaviour
 
         if (markOccupiedInGrid)
         {
-            // Add to WorldGrid
-            foreach (var cell2D in cells)
+            // Add to WorldGrid and reverse lookup
+            foreach (var cell in cells)
             {
-                var gridCell = new Vector2Int(cell2D.x, cell2D.y);
-                _worldGrid.TryAddFlag(gridCell, WorldGrid.CellFlag.Occupied);
-            }
-            
-            // Add to reverse lookup
-            foreach (var cell2D in cells)
-            {
-                _cellToPlatform[cell2D] = platform;
+                _worldGrid.TryAddFlag(cell, WorldGrid.CellFlag.Occupied);
+                _cellToPlatform[cell] = platform;
             }
             
             // Build NavMesh for newly placed permanent platforms
@@ -378,24 +373,18 @@ public class PlatformManager : MonoBehaviour
     /// </summary>
     public void UnregisterPlatform(GamePlatform platform)
     {
-        if (!platform || !_worldGrid) return;
+        if (!platform) return;
         if (!_allPlatforms.TryGetValue(platform, out var data)) return;
 
         platform.PoseChanged -= OnPlatformPoseChanged;
 
         if (data.marksOccupied)
         {
-            // Remove from WorldGrid
-            foreach (var cell2D in data.cells)
+            // Remove from WorldGrid and reverse lookup
+            foreach (var cell in data.cells)
             {
-                var gridCell = new Vector2Int(cell2D.x, cell2D.y);
-                _worldGrid.TryRemoveFlag(gridCell, WorldGrid.CellFlag.Occupied);
-            }
-            
-            // Remove from reverse lookup
-            foreach (var cell2D in data.cells)
-            {
-                _cellToPlatform.Remove(cell2D);
+                _worldGrid.TryRemoveFlag(cell, WorldGrid.CellFlag.Occupied);
+                _cellToPlatform.Remove(cell);
             }
         }
 
@@ -422,7 +411,7 @@ public class PlatformManager : MonoBehaviour
     /// </summary>
     public void ConnectPlatformsIfAdjacent(GamePlatform platformA, GamePlatform platformB)
     {
-        if (!platformA || !platformB || !_worldGrid) return;
+        if (!platformA || !platformB) return;
         
         if (!_allPlatforms.TryGetValue(platformA, out var dataA) || !_allPlatforms.TryGetValue(platformB, out var dataB))
         {
@@ -473,23 +462,19 @@ public class PlatformManager : MonoBehaviour
         
         foreach (var cellA in dataA.cells)
         {
-            Vector2Int gridCellA = new Vector2Int(cellA.x, cellA.y);
-            
             // Check all 4 edge neighbors of cellA
-            List<Vector2Int> neighbors = _worldGrid.GetNeighbors4(gridCellA);
+            List<Vector2Int> neighbors = _worldGrid.GetNeighbors4(cellA);
             
             foreach (var neighbor in neighbors)
             {
-                Vector2Int neighbor2D = new Vector2Int(neighbor.x, neighbor.y);
-                
                 // Check if this neighbor is occupied by platform B
-                if (dataB.cells.Contains(neighbor2D))
+                if (dataB.cells.Contains(neighbor))
                 {
                     // Found an edge-adjacent pair
-                    if (!adjacentCellPairs.Contains((cellA, neighbor2D)) && 
-                        !adjacentCellPairs.Contains((neighbor2D, cellA)))
+                    if (!adjacentCellPairs.Contains((cellA, neighbor)) && 
+                        !adjacentCellPairs.Contains((neighbor, cellA)))
                     {
-                        adjacentCellPairs.Add((cellA, neighbor2D));
+                        adjacentCellPairs.Add((cellA, neighbor));
                     }
                 }
             }
@@ -615,8 +600,6 @@ public class PlatformManager : MonoBehaviour
     /// </summary>
     private void RecomputeAllAdjacency()
     {
-        if (!_worldGrid) return;
-
         // Prevent recursive calls during adjacency computation
         if (_isRecomputingAdjacency) return;
         _isRecomputingAdjacency = true;
@@ -719,7 +702,7 @@ public class PlatformManager : MonoBehaviour
     public void GetCellsForPlatform(GamePlatform platform, List<Vector2Int> outputCells)
     {
         outputCells.Clear();
-        if (!platform || !_worldGrid) return;
+        if (!platform) return;
 
         // Use platform's world position to find center cell on the desired level
         Vector3 worldPosition = platform.transform.position;

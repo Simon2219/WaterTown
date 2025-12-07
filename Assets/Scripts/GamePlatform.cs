@@ -25,6 +25,12 @@ namespace WaterTown.Platforms
         /// <summary>Fired whenever this platform's pose changes (position/rotation/scale).</summary>
         public event Action<GamePlatform> PoseChanged;
         
+        /// <summary>Static event fired when ANY platform becomes enabled. Used by managers for registration.</summary>
+        public static event Action<GamePlatform> PlatformEnabled;
+        
+        /// <summary>Static event fired when ANY platform becomes disabled. Used by managers for cleanup.</summary>
+        public static event Action<GamePlatform> PlatformDisabled;
+        
         #endregion
 
         #region IPickupable Implementation
@@ -794,18 +800,16 @@ namespace WaterTown.Platforms
             _lastRot = transform.rotation;
             _lastScale = transform.localScale;
 
-            // Notify PlatformManager that this platform is now active
-            if (_platformManager)
-                _platformManager.NotifyPlatformEnabled(this);
+            // Fire static event for any listening managers (e.g., PlatformManager)
+            PlatformEnabled?.Invoke(this);
             
             InitializePlatform();
         }
 
         private void OnDisable()
         {
-            // Notify PlatformManager that this platform is now inactive
-            if (_platformManager)
-                _platformManager.NotifyPlatformDisabled(this);
+            // Fire static event for any listening managers (e.g., PlatformManager)
+            PlatformDisabled?.Invoke(this);
         }
 
         private void LateUpdate()
