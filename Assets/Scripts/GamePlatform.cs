@@ -1,11 +1,10 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using Unity.AI.Navigation;
 using UnityEngine;
 using UnityEngine.AI;
-using WaterTown.Core;
 using WaterTown.Interfaces;
-using WaterTown.Town;
 using Grid;
 
 namespace WaterTown.Platforms
@@ -14,11 +13,11 @@ namespace WaterTown.Platforms
     [RequireComponent(typeof(NavMeshSurface))]
     public class GamePlatform : MonoBehaviour, IPickupable
     {
-        #region Global Registry & Events
+        #region Configuration & Dependencies
         
         // ---------- Global registry & events ----------
-        public static event System.Action<GamePlatform> PlatformRegistered;
-        public static event System.Action<GamePlatform> PlatformUnregistered;
+        public static event Action<GamePlatform> PlatformRegistered;
+        public static event Action<GamePlatform> PlatformUnregistered;
 
         private static readonly HashSet<GamePlatform> _allPlatforms = new();
         public static IReadOnlyCollection<GamePlatform> AllPlatforms => _allPlatforms;
@@ -1183,12 +1182,12 @@ namespace WaterTown.Platforms
             
             // Register with TownManager (triggers adjacency recomputation and NavMesh build)
             var cells = new List<Vector2Int>();
-            _townManager.ComputeCellsForPlatform(this, 0, cells);
+            _townManager.ComputeCellsForPlatform(this, cells);
             
             // CRITICAL: Set IsPickedUp AFTER registration to avoid race condition
             // If we set it to false before registration, RecomputeAllAdjacency might run
             // while the platform is in a transitional state (not picked up, but not registered either)
-            _townManager.RegisterPlatform(this, cells, 0, markOccupiedInGrid: true);
+            _townManager.RegisterPlatform(this, cells, markOccupiedInGrid: true);
             
             IsPickedUp = false;
         }
@@ -1222,8 +1221,8 @@ namespace WaterTown.Platforms
                 // Re-register with TownManager at original position
                 // This triggers adjacency recomputation so railings/NavMesh links update
                 var cells = new List<Vector2Int>();
-                _townManager.ComputeCellsForPlatform(this, 0, cells);
-                _townManager.RegisterPlatform(this, cells, 0, markOccupiedInGrid: true);
+                _townManager.ComputeCellsForPlatform(this, cells);
+                _townManager.RegisterPlatform(this, cells, markOccupiedInGrid: true);
             }
         }
 
@@ -1343,7 +1342,7 @@ namespace WaterTown.Platforms
             
             // Compute cells this platform would occupy
             var cells = new List<Vector2Int>();
-            _townManager.ComputeCellsForPlatform(this, 0, cells);
+            _townManager.ComputeCellsForPlatform(this, cells);
             
             if (cells.Count == 0) return false;
             

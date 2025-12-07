@@ -1,8 +1,8 @@
+using System;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using Unity.Cinemachine;
 using UnityEngine.Serialization;
-using WaterTown.Core;
 
 [RequireComponent(typeof(PlayerInput))]
 public class CameraMovementController : MonoBehaviour
@@ -86,7 +86,7 @@ public class CameraMovementController : MonoBehaviour
         }
         catch (Exception ex)
         {
-            WaterTown.Core.ErrorHandler.LogAndDisable(ex, this);
+            ErrorHandler.LogAndDisable(ex, this);
         }
     }
     
@@ -100,7 +100,7 @@ public class CameraMovementController : MonoBehaviour
 
         if (moveAction == null)
         {
-            throw WaterTown.Core.ErrorHandler.MissingDependency("Move Action (InputActionReference)", this);
+            throw ErrorHandler.MissingDependency("Move Action (InputActionReference)", this);
         }
         
         // If no Cinemachine camera has been assigned, try to find one among the children.
