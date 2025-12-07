@@ -1157,12 +1157,12 @@ namespace WaterTown.Platforms
             
             // Register with TownManager (triggers adjacency recomputation and NavMesh build)
             var cells = new List<Vector2Int>();
-            _townManager.ComputeCellsForPlatform(this, cells);
+            _platformManager.ComputeCellsForPlatform(this, cells);
             
             // CRITICAL: Set IsPickedUp AFTER registration to avoid race condition
             // If we set it to false before registration, RecomputeAllAdjacency might run
             // while the platform is in a transitional state (not picked up, but not registered either)
-            _townManager.RegisterPlatform(this, cells, markOccupiedInGrid: true);
+            _platformManager.RegisterPlatform(this, cells, markOccupiedInGrid: true);
             
             IsPickedUp = false;
         }
@@ -1196,8 +1196,8 @@ namespace WaterTown.Platforms
                 // Re-register with TownManager at original position
                 // This triggers adjacency recomputation so railings/NavMesh links update
                 var cells = new List<Vector2Int>();
-                _townManager.ComputeCellsForPlatform(this, cells);
-                _townManager.RegisterPlatform(this, cells, markOccupiedInGrid: true);
+                _platformManager.ComputeCellsForPlatform(this, cells);
+                _platformManager.RegisterPlatform(this, cells, markOccupiedInGrid: true);
             }
         }
 
@@ -1317,7 +1317,7 @@ namespace WaterTown.Platforms
             
             // Compute cells this platform would occupy
             var cells = new List<Vector2Int>();
-            _townManager.ComputeCellsForPlatform(this, cells);
+            _platformManager.ComputeCellsForPlatform(this, cells);
             
             if (cells.Count == 0) return false;
             

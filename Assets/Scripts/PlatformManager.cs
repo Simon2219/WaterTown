@@ -13,53 +13,61 @@ using WaterTown.Platforms;
 [DisallowMultipleComponent]
 public class PlatformManager : MonoBehaviour
 {
-    #region Configuration & Constants
+    #region Inspector Fields
     
-    private const int ROTATION_STEP_DEGREES = 90;
-    private const int ROTATION_MODULO_MASK = 3; // 0-3 for 4 cardinal directions (0°, 90°, 180°, 270°)
-
-    [Header("Dependencies")]
-    [SerializeField] private WorldGrid grid;
-    public WorldGrid Grid => grid;
-
-    [Header("Default Level")]
-    [Tooltip("Level index to use when auto-computing a platform's cells.")]
-    [SerializeField] private int defaultLevel = 0;
-    public int DefaultLevel => defaultLevel;
-
+    
     [Header("NavMesh Link Settings")]
+    
     [Tooltip("Width of NavMesh links created between connected platforms (meters).")]
     [SerializeField] private float navLinkWidth = 0.6f;
 
+    
     [Header("Events")]
+    
     [Tooltip("Invoked when a platform is successfully placed and registered.")]
-    public UnityEvent<GamePlatform> OnPlatformPlaced = new UnityEvent<GamePlatform>();
+    public UnityEvent<GamePlatform> OnPlatformPlaced;
     
     [Tooltip("Invoked when a platform is removed/unregistered.")]
-    public UnityEvent<GamePlatform> OnPlatformRemoved = new UnityEvent<GamePlatform>();
+    public UnityEvent<GamePlatform> OnPlatformRemoved;
     
-    // --- Platform registry (moved from GamePlatform static) ---
     
+    #endregion
+    
+    
+    
+    
+    #region Configuration & Constants
+    
+    
+    private WorldGrid grid;
+    
+    private int defaultLevel = 0;
+    
+    private const int ROTATION_STEP_DEGREES = 90;
+    private const int ROTATION_MODULO_MASK = 3; // 0-3 for 4 cardinal directions (0°, 90°, 180°, 270°)
+    
+    // --- Platform registry ---
     private readonly HashSet<GamePlatform> _allPlatforms = new HashSet<GamePlatform>();
     
-    /// <summary>All registered platforms in the scene (read-only access).</summary>
     public IReadOnlyCollection<GamePlatform> AllPlatforms => _allPlatforms;
+    
     
     // --- Platform occupancy bookkeeping ---
 
     private class PlatformEntry
     {
         public GamePlatform platform;
-        public List<Vector2Int> cells2D = new();
+        public List<Vector2Int> cells = new();
         public bool marksOccupied; // true = we write Occupied flags into the grid
     }
 
     // Platforms we know about → their occupied cells
     private readonly Dictionary<GamePlatform, PlatformEntry> _entries = new();
 
-    // Temp lists (avoid allocations)
+
+    // Temp lists
     private static readonly List<GamePlatform> _tmpPlatforms = new();
-    private readonly List<Vector2Int> _tmpCells2D = new();
+    private readonly List<Vector2Int> _tmpCells = new();
 
     // Adjacency recomputation batching (performance optimization)
     private bool _adjacencyDirty = false;
@@ -110,12 +118,12 @@ public class PlatformManager : MonoBehaviour
             if (!platform) continue;
             if (!platform.isActiveAndEnabled) continue;
 
-            _tmpCells2D.Clear();
-            ComputeCellsForPlatform(platform, _tmpCells2D);
-            if (_tmpCells2D.Count > 0)
+            _tmpCells.Clear();
+            ComputeCellsForPlatform(platform, _tmpCells);
+            if (_tmpCells.Count > 0)
             {
                 // Registers occupancy AND triggers adjacency for all platforms
-                RegisterPlatform(platform, _tmpCells2D, markOccupiedInGrid: true);
+                RegisterPlatform(platform, _tmpCells, markOccupiedInGrid: true);
             }
         }
     }
@@ -179,7 +187,7 @@ public class PlatformManager : MonoBehaviour
         // 1) Clear old occupancy for this platform
         if (marksOccupied)
         {
-            foreach (var cell2D in entry.cells2D)
+            foreach (var cell2D in entry.cells)
             {
                 var gridCell = new Vector3Int(cell2D.x, cell2D.y, 0);
                 grid.TryRemoveFlag(gridCell, WorldGrid.CellFlag.Occupied);
@@ -187,18 +195,18 @@ public class PlatformManager : MonoBehaviour
         }
 
         // 2) Compute new footprint cells from current transform (rotation-aware)
-        _tmpCells2D.Clear();
-        ComputeCellsForPlatform(platform, _tmpCells2D);
+        _tmpCells.Clear();
+        ComputeCellsForPlatform(platform, _tmpCells);
 
-        entry.cells2D.Clear();
-        entry.cells2D.AddRange(_tmpCells2D);
+        entry.cells.Clear();
+        entry.cells.AddRange(_tmpCells);
 
         if (marksOccupied)
         {
-            foreach (var cell2D in entry.cells2D)
+            foreach (var cell2D in entry.cells)
             {
                 var gridCell = new Vector3Int(cell2D.x, cell2D.y, 0);
-                grid.TryAddFlag(gridCell, WorldGrid.CellFlag.Occupied, platformId: 0, payload: platform.GetInstanceID());
+                grid.TryAddFlag(gridCell, WorldGrid.CellFlag.Occupied);
             }
         }
 
@@ -253,7 +261,7 @@ public class PlatformManager : MonoBehaviour
         {
             if (oldEntry.marksOccupied)
             {
-                foreach (var cell2D in oldEntry.cells2D)
+                foreach (var cell2D in oldEntry.cells)
                 {
                     var gridCell = new Vector3Int(cell2D.x, cell2D.y, 0);
                     grid.TryRemoveFlag(gridCell, WorldGrid.CellFlag.Occupied);
@@ -270,15 +278,15 @@ public class PlatformManager : MonoBehaviour
         }
         
         entry.marksOccupied = markOccupiedInGrid;
-        entry.cells2D.Clear();
-        entry.cells2D.AddRange(cells);
+        entry.cells.Clear();
+        entry.cells.AddRange(cells);
 
         if (markOccupiedInGrid)
         {
             foreach (var cell2D in cells)
             {
                 var gridCell = new Vector3Int(cell2D.x, cell2D.y, 0);
-                grid.TryAddFlag(gridCell, WorldGrid.CellFlag.Occupied, platformId: 0, payload: platform.GetInstanceID());
+                grid.TryAddFlag(gridCell, WorldGrid.CellFlag.Occupied);
             }
             
             // Build NavMesh for newly placed permanent platforms
@@ -323,7 +331,7 @@ public class PlatformManager : MonoBehaviour
 
         if (entry.marksOccupied)
         {
-            foreach (var cell2D in entry.cells2D)
+            foreach (var cell2D in entry.cells)
             {
                 var gridCell = new Vector3Int(cell2D.x, cell2D.y, 0);
                 grid.TryRemoveFlag(gridCell, WorldGrid.CellFlag.Occupied);
@@ -360,11 +368,11 @@ public class PlatformManager : MonoBehaviour
             // If platforms aren't registered, compute their cells
             if (!_entries.TryGetValue(platformA, out entryA))
             {
-                _tmpCells2D.Clear();
-                ComputeCellsForPlatform(platformA, _tmpCells2D);
-                if (_tmpCells2D.Count > 0)
+                _tmpCells.Clear();
+                ComputeCellsForPlatform(platformA, _tmpCells);
+                if (_tmpCells.Count > 0)
                 {
-                    RegisterPlatform(platformA, _tmpCells2D, markOccupiedInGrid: false);
+                    RegisterPlatform(platformA, _tmpCells, markOccupiedInGrid: false);
                     entryA = _entries[platformA];
                 }
                 else return;
@@ -372,11 +380,11 @@ public class PlatformManager : MonoBehaviour
             
             if (!_entries.TryGetValue(platformB, out entryB))
             {
-                _tmpCells2D.Clear();
-                ComputeCellsForPlatform(platformB, _tmpCells2D);
-                if (_tmpCells2D.Count > 0)
+                _tmpCells.Clear();
+                ComputeCellsForPlatform(platformB, _tmpCells);
+                if (_tmpCells.Count > 0)
                 {
-                    RegisterPlatform(platformB, _tmpCells2D, markOccupiedInGrid: false);
+                    RegisterPlatform(platformB, _tmpCells, markOccupiedInGrid: false);
                     entryB = _entries[platformB];
                 }
                 else return;
@@ -402,20 +410,19 @@ public class PlatformManager : MonoBehaviour
         // Find edge-adjacent cell pairs
         var adjacentCellPairs = new List<(Vector2Int cellA, Vector2Int cellB)>();
         
-        foreach (var cellA in entryA.cells2D)
+        foreach (var cellA in entryA.cells)
         {
             Vector3Int gridCellA = new Vector3Int(cellA.x, cellA.y, 0);
             
             // Check all 4 edge neighbors of cellA
-            var neighbors = new List<Vector3Int>();
-            grid.GetNeighbors4(gridCellA, neighbors);
+            List<Vector3Int> neighbors = grid.GetNeighbors4(gridCellA);
             
             foreach (var neighbor in neighbors)
             {
                 Vector2Int neighbor2D = new Vector2Int(neighbor.x, neighbor.y);
                 
                 // Check if this neighbor is occupied by platform B
-                if (entryB.cells2D.Contains(neighbor2D))
+                if (entryB.cells.Contains(neighbor2D))
                 {
                     // Found an edge-adjacent pair
                     if (!adjacentCellPairs.Contains((cellA, neighbor2D)) && 
@@ -612,10 +619,10 @@ public class PlatformManager : MonoBehaviour
         if (pickedUpPlatform != null)
         {
             // Compute cells for preview (doesn't register in grid)
-            _tmpCells2D.Clear();
-            ComputeCellsForPlatform(pickedUpPlatform, _tmpCells2D);
+            _tmpCells.Clear();
+            ComputeCellsForPlatform(pickedUpPlatform, _tmpCells);
             
-            if (_tmpCells2D.Count > 0)
+            if (_tmpCells.Count > 0)
             {
                 // Create temporary entry for preview (NOT registered, marksOccupied = false)
                 var previewEntry = new PlatformEntry
@@ -623,7 +630,7 @@ public class PlatformManager : MonoBehaviour
                     platform = pickedUpPlatform,
                     marksOccupied = false // IMPORTANT: Does not occupy cells in grid
                 };
-                previewEntry.cells2D.AddRange(_tmpCells2D);
+                previewEntry.cells.AddRange(_tmpCells);
                 
                 // Check connections with all placed platforms for preview
                 foreach (var placedPlatform in _tmpPlatforms)
@@ -656,7 +663,7 @@ public class PlatformManager : MonoBehaviour
 
         // Use platform's world position to find center cell on the desired level
         Vector3 worldPosition = platform.transform.position;
-        var centerCell = grid.WorldToCellOnLevel(worldPosition, new Vector3Int(0, 0, 0));
+        var centerCell = grid.WorldToCell(worldPosition);
         int centerX = centerCell.x;
         int centerY = centerCell.y;
 

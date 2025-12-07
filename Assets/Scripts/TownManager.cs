@@ -138,7 +138,7 @@ public class TownManager : MonoBehaviour
     /// </summary>
     public void RegisterPlatform(GamePlatform platform, List<Vector2Int> cells, bool markOccupiedInGrid = true)
     {
-        _platformManager?.RegisterPlatform(platform, cells, markOccupiedInGrid);
+        _platformManager.RegisterPlatform(platform, cells, markOccupiedInGrid);
     }
     
     /// <summary>
@@ -146,23 +146,16 @@ public class TownManager : MonoBehaviour
     /// </summary>
     public void UnregisterPlatform(GamePlatform platform)
     {
-        _platformManager?.UnregisterPlatform(platform);
+        _platformManager.UnregisterPlatform(platform);
     }
-
-    /// <summary>
-    /// Compute cells for a platform (delegates to PlatformManager).
-    /// </summary>
-    public void ComputeCellsForPlatform(GamePlatform platform, List<Vector2Int> outputCells)
-    {
-        _platformManager?.ComputeCellsForPlatform(platform, outputCells);
-    }
+    
 
     /// <summary>
     /// Trigger adjacency update (delegates to PlatformManager).
     /// </summary>
     public void TriggerAdjacencyUpdate()
     {
-        _platformManager?.TriggerAdjacencyUpdate();
+        _platformManager.TriggerAdjacencyUpdate();
     }
     
     #endregion
