@@ -31,14 +31,14 @@ namespace Grid
         [Header("Origin")]
         
         [Tooltip("World-space origin of cell (0,0,0) lower-left corner.")]
-        public Vector3 worldOrigin { get; } = Vector3.zero;
+        public Vector3 worldOrigin { get; private set; } = Vector3.zero;
 
         public const int CellSize = 1;
         
         
         
         // ---------- Storage [x, y, level] ----------
-        private CellData[,,] _cells;
+        private CellData[,] _cells;
 
         /// Monotonic version stamp bumped on any mutating API call.
         public int Version { get; private set; }
@@ -48,8 +48,8 @@ namespace Grid
         
         // ---------- Change events (optional; visuals can also poll Version) ----------
 
-        public event Action<Vector3Int> CellChanged;             // single cell modified
-        public event Action<Vector3Int, Vector3Int> AreaChanged; // inclusive [min..max] area modified
+        public event Action<Vector2Int> CellChanged;             // single cell modified
+        public event Action<Vector2Int, Vector2Int> AreaChanged; // inclusive [min..max] area modified
 
         
         
@@ -149,7 +149,7 @@ namespace Grid
 
             if (sizeChanged)
             {
-                _cells = new CellData[sizeX, sizeY, levels]; // default = cleared
+                _cells = new CellData[sizeX, sizeY]; // default = cleared
                 Version++; 
             }
         }
@@ -162,41 +162,38 @@ namespace Grid
 
         
         /// True if (x,y,level) lies inside the grid.
-        public bool CellInBounds(Vector3Int cell)
+        public bool CellInBounds(Vector2Int cell)
         {
             return (uint)cell.x < (uint)sizeX
-                && (uint)cell.y < (uint)sizeY
-                && (uint)cell.z < (uint)levels;
+                && (uint)cell.y < (uint)sizeY;
         }
         
 
         
         /// Clamps a cell index to the grid extents (useful for safe math on indices).
-        public Vector3Int ClampCell(Vector3Int cell)
+        public Vector2Int ClampCell(Vector2Int cell)
         {
-            return new Vector3Int(
+            return new Vector2Int(
                 Mathf.Clamp(cell.x, 0, sizeX - 1),
-                Mathf.Clamp(cell.y, 0, sizeY - 1),
-                Mathf.Clamp(cell.z, 0, levels - 1)
+                Mathf.Clamp(cell.y, 0, sizeY - 1)
             );
         }
         
         
         /// Converts world → cell (x,y,level = 0)
         /// Floors edges so borders map to the lower/left cell.
-        public Vector3Int WorldToCell(Vector3 worldPos)
+        public Vector2Int WorldToCell(Vector3 worldPos)
         {
             var local = worldPos - worldOrigin;
             int x = Mathf.FloorToInt(local.x / (float)CellSize);
             int y = Mathf.FloorToInt(local.z / (float)CellSize);
-            int level = 0;
-            return new Vector3Int(x, y, level);
+            return new Vector2Int(x, y);
         }
         
         
         /// As WorldToCellOnLevel, but clamps to grid and returns whether the original was in bounds.
         /// Handy for mouse hover that should stay inside grid.
-        public bool WorldToCellClamped(Vector3 worldPos, Vector3Int levelRef, out Vector3Int cell)
+        public bool WorldToCellClamped(Vector3 worldPos, Vector3Int levelRef, out Vector2Int cell)
         {
             var raw = WorldToCell(worldPos);
             bool inBounds = CellInBounds(raw);
@@ -205,7 +202,7 @@ namespace Grid
         }
 
         /// World center of a cell (uses levelStep for Y).
-        public Vector3 GetCellCenter(Vector3Int cell)
+        public Vector3 GetCellCenter(Vector2Int cell)
         {
             return new Vector3(
                 worldOrigin.x + (cell.x + 0.5f) * CellSize,
@@ -261,14 +258,14 @@ namespace Grid
         /// Snaps a world position to the nearest grid cell center, inferring level from Y coordinate.
         public Vector3 SnapWorldPositionToGrid(Vector3 worldPosition)
         {
-            Vector3Int cell = WorldToCell(worldPosition);
+            Vector2Int cell = WorldToCell(worldPosition);
             return GetCellCenter(cell);
         }
 
         
         
         /// World-space axis-aligned bounds of a cell (thin in Y).
-        public Bounds GetCellBounds(Vector3Int cell)
+        public Bounds GetCellBounds(Vector2Int cell)
         {
             Vector3 center = GetCellCenter(cell);
             Vector3 size = new Vector3(CellSize, 0.01f, CellSize);
@@ -309,7 +306,7 @@ namespace Grid
         
         /// World → (cell, uv01). Projects onto levelRef.z, returns the inside-cell UV [0..1].
         /// Returns false if cell is out of bounds.
-        public bool WorldToLocalInCell(Vector3 worldPos, out Vector3Int cell, out Vector2 uv01)
+        public bool WorldToLocalInCell(Vector3 worldPos, out Vector2Int cell, out Vector2 uv01)
         {
             cell = WorldToCell(worldPos);
             uv01 = default;
@@ -334,7 +331,7 @@ namespace Grid
         
         /// Raycast to plane(y = GetLevelWorldY(levelRef.z)), return hit world point + cell if inside.
         /// Only levelRef.z is used.
-        public bool RaycastToCell(Ray worldRay, Vector3Int levelRef, out Vector3Int cell, out Vector3 hitPoint)
+        public bool RaycastToCell(Ray worldRay, out Vector2Int cell, out Vector3 hitPoint)
         {
             float h = 0;
             
@@ -362,22 +359,22 @@ namespace Grid
         // ---------- Single-cell data & flags ----------
 
         /// Read cell data if in bounds.
-        public bool TryGetCell(Vector3Int cell, out CellData data)
+        public bool TryGetCell(Vector2Int cell, out CellData data)
         {
             if (!CellInBounds(cell)) { data = default; return false; }
             
-            data = _cells[cell.x, cell.y, cell.z];
+            data = _cells[cell.x, cell.y];
             
             return true;
         }
 
         /// Write cell data if in bounds.
         /// Bumps Version and raises CellChanged.
-        public void SetCell(Vector3Int cell, CellData data)
+        public void SetCell(Vector2Int cell, CellData data)
         {
             if (!CellInBounds(cell)) return;
             
-            _cells[cell.x, cell.y, cell.z] = data;
+            _cells[cell.x, cell.y] = data;
             
             Version++;
             CellChanged?.Invoke(cell);
@@ -387,11 +384,11 @@ namespace Grid
         /// Clear cell (flags=Empty, payloads zero).
         /// Returns true if in bounds;
         /// bumps Version & raises CellChanged.
-        public void ClearCell(Vector3Int cell)
+        public void ClearCell(Vector2Int cell)
         {
             if (!CellInBounds(cell)) return;
             
-            _cells[cell.x, cell.y, cell.z] = default;
+            _cells[cell.x, cell.y] = default;
             
             Version++;
             CellChanged?.Invoke(cell);
@@ -401,14 +398,14 @@ namespace Grid
         /// Add a flag to a single cell (in-bounds).
         /// Returns true on success;
         /// bumps Version & raises CellChanged.
-        public bool TryAddFlag(Vector3Int cell, CellFlag flag)
+        public bool TryAddFlag(Vector2Int cell, CellFlag flag)
         {
             if (!CellInBounds(cell)) return false;
             
-            var cd = _cells[cell.x, cell.y, cell.z];
+            var cd = _cells[cell.x, cell.y];
             cd.flags |= flag;
 
-            _cells[cell.x, cell.y, cell.z] = cd;
+            _cells[cell.x, cell.y] = cd;
             
             Version++;
             CellChanged?.Invoke(cell);
@@ -420,14 +417,14 @@ namespace Grid
         
         /// Remove a flag from a single cell (in-bounds).
         /// Returns true on success; bumps Version & raises CellChanged.
-        public bool TryRemoveFlag(Vector3Int cell, CellFlag flag)
+        public bool TryRemoveFlag(Vector2Int cell, CellFlag flag)
         {
             if (!CellInBounds(cell)) return false;
             
-            var cd = _cells[cell.x, cell.y, cell.z];
+            var cd = _cells[cell.x, cell.y];
             cd.flags &= ~flag;
             
-            _cells[cell.x, cell.y, cell.z] = cd;
+            _cells[cell.x, cell.y] = cd;
             
             Version++;
             CellChanged?.Invoke(cell);
@@ -438,19 +435,19 @@ namespace Grid
         
         
         /// True if the cell has ALL bits in flags (in-bounds only).
-        public bool CellHasAllFlags(Vector3Int cell, CellFlag flags)
+        public bool CellHasAllFlags(Vector2Int cell, CellFlag flags)
         {
             if (!CellInBounds(cell)) return false;
             
-            return (_cells[cell.x, cell.y, cell.z].flags & flags) == flags;
+            return (_cells[cell.x, cell.y].flags & flags) == flags;
         }
 
         /// True if the cell has ANY bit in flags (in-bounds only).
-        public bool CellHasAnyFlag(Vector3Int cell, CellFlag flags)
+        public bool CellHasAnyFlag(Vector2Int cell, CellFlag flags)
         {
             if (!CellInBounds(cell)) return false;
             
-            return (_cells[cell.x, cell.y, cell.z].flags & flags) != 0;
+            return (_cells[cell.x, cell.y].flags & flags) != 0;
         }
         
         #endregion
@@ -459,11 +456,10 @@ namespace Grid
         
         // ---------- Area helpers (two corners, inclusive, level = a.z) ----------
 
-        private void ClampAreaInclusive(Vector3Int a, Vector3Int b, out Vector3Int min, out Vector3Int max)
+        private void ClampAreaInclusive(Vector2Int a, Vector2Int b, out Vector2Int min, out Vector2Int max)
         {
-            int level = Mathf.Clamp(a.z, 0, Mathf.Max(levels - 1, 0));
-            min = new Vector3Int(Mathf.Min(a.x, b.x), Mathf.Min(a.y, b.y), level);
-            max = new Vector3Int(Mathf.Max(a.x, b.x), Mathf.Max(a.y, b.y), level);
+            min = new Vector2Int(Mathf.Min(a.x, b.x), Mathf.Min(a.y, b.y));
+            max = new Vector2Int(Mathf.Max(a.x, b.x), Mathf.Max(a.y, b.y));
 
             min.x = Mathf.Clamp(min.x, 0, sizeX - 1);
             min.y = Mathf.Clamp(min.y, 0, sizeY - 1);
@@ -472,12 +468,12 @@ namespace Grid
         }
 
         /// Iterate each cell (x,y,level) in an inclusive rectangle (level = a.z).
-        public void ForEachCellInclusive(Vector3Int a, Vector3Int b, Action<Vector3Int> visit)
+        public void ForEachCellInclusive(Vector2Int a, Vector2Int b, Action<Vector2Int> visit)
         {
             ClampAreaInclusive(a, b, out var min, out var max);
             for (int y = min.y; y <= max.y; y++)
             for (int x = min.x; x <= max.x; x++)
-                visit(new Vector3Int(x, y, min.z));
+                visit(new Vector2Int(x, y));
         }
 
         // ---------- Area operations (flags & queries) ----------
@@ -485,17 +481,17 @@ namespace Grid
         /// Add (OR) flag to every cell in area.
         /// Optional platformId/payload when non-zero.
         /// Bumps Version & raises AreaChanged.
-        public void AddFlagInArea(Vector3Int a, Vector3Int b, CellFlag flag)
+        public void AddFlagInArea(Vector2Int a, Vector2Int b, CellFlag flag)
         {
             ClampAreaInclusive(a, b, out var min, out var max);
             
             for (int y = min.y; y <= max.y; y++)
             for (int x = min.x; x <= max.x; x++)
             {
-                var cd = _cells[x, y, min.z];
+                var cd = _cells[x, y];
                 cd.flags |= flag;
 
-                _cells[x, y, min.z] = cd;
+                _cells[x, y] = cd;
             }
             
             Version++;
@@ -506,17 +502,17 @@ namespace Grid
         
         /// Replace flags in area with exactFlags (overwrites existing flags).
         /// Bumps Version & raises AreaChanged.
-        public void SetFlagsInAreaExact(Vector3Int a, Vector3Int b, CellFlag exactFlags)
+        public void SetFlagsInAreaExact(Vector2Int a, Vector2Int b, CellFlag exactFlags)
         {
             ClampAreaInclusive(a, b, out var min, out var max);
             
             for (int y = min.y; y <= max.y; y++)
             for (int x = min.x; x <= max.x; x++)
             {
-                var cd = _cells[x, y, min.z];
+                var cd = _cells[x, y];
                 cd.flags = exactFlags;
 
-                _cells[x, y, min.z] = cd;
+                _cells[x, y] = cd;
             }
             
             Version++;
@@ -526,17 +522,17 @@ namespace Grid
         
         
         /// Remove (AND NOT) flag from every cell in area. Bumps Version & raises AreaChanged.
-        public void RemoveFlagInArea(Vector3Int a, Vector3Int b, CellFlag flag)
+        public void RemoveFlagInArea(Vector2Int a, Vector2Int b, CellFlag flag)
         {
             ClampAreaInclusive(a, b, out var min, out var max);
             
             for (int y = min.y; y <= max.y; y++)
             for (int x = min.x; x <= max.x; x++)
             {
-                var cd = _cells[x, y, min.z];
+                var cd = _cells[x, y];
                 cd.flags &= ~flag;
                 
-                _cells[x, y, min.z] = cd;
+                _cells[x, y] = cd;
             }
             
             Version++;
@@ -546,14 +542,14 @@ namespace Grid
         
         
         /// Clear cells (set default) within area. Bumps Version & raises AreaChanged.
-        public void ClearArea(Vector3Int a, Vector3Int b)
+        public void ClearArea(Vector2Int a, Vector2Int b)
         {
             ClampAreaInclusive(a, b, out var min, out var max);
             
             for (int y = min.y; y <= max.y; y++)
             for (int x = min.x; x <= max.x; x++)
             {
-                _cells[x, y, min.z] = default;
+                _cells[x, y] = default;
             }
 
             Version++;
@@ -563,14 +559,14 @@ namespace Grid
         
         
         /// True if every cell in area has ALL bits in flags.
-        public bool AreaHasAllFlags(Vector3Int a, Vector3Int b, CellFlag flags)
+        public bool AreaHasAllFlags(Vector2Int a, Vector2Int b, CellFlag flags)
         {
             ClampAreaInclusive(a, b, out var min, out var max);
             
             for (int y = min.y; y <= max.y; y++)
             for (int x = min.x; x <= max.x; x++)
             {
-                if ((_cells[x, y, min.z].flags & flags) != flags) return false;
+                if ((_cells[x, y].flags & flags) != flags) return false;
             }
 
             return true;
@@ -579,14 +575,14 @@ namespace Grid
         
         
         /// True if any cell in area has ANY bit in flags.
-        public bool AreaHasAnyFlag(Vector3Int a, Vector3Int b, CellFlag flags)
+        public bool AreaHasAnyFlag(Vector2Int a, Vector2Int b, CellFlag flags)
         {
             ClampAreaInclusive(a, b, out var min, out var max);
             
             for (int y = min.y; y <= max.y; y++)
             for (int x = min.x; x <= max.x; x++)
             {
-                if ((_cells[x, y, min.z].flags & flags) != 0) return true;
+                if ((_cells[x, y].flags & flags) != 0) return true;
             }
 
             return false;
@@ -595,16 +591,16 @@ namespace Grid
         
         
         /// Returns List with all cells inside area.
-        public List<Vector3Int> GetCellsInArea(Vector3Int a, Vector3Int b)
+        public List<Vector2Int> GetCellsInArea(Vector2Int a, Vector2Int b)
         {
-            var cells = new List<Vector3Int>();
+            var cells = new List<Vector2Int>();
             
             ClampAreaInclusive(a, b, out var min, out var max);
             
             for (int y = min.y; y <= max.y; y++)
             for (int x = min.x; x <= max.x; x++)
             {
-                cells.Add(new Vector3Int(x, y, min.z));
+                cells.Add(new Vector2Int(x, y));
             }
             
             return cells;
@@ -613,7 +609,7 @@ namespace Grid
         
         
         /// Count cells in area with ALL bits in flags.
-        public List<CellData> GetCellsWithAllFlags(Vector3Int a, Vector3Int b, CellFlag flags)
+        public List<CellData> GetCellsWithAllFlags(Vector2Int a, Vector2Int b, CellFlag flags)
         {
             ClampAreaInclusive(a, b, out var min, out var max);
             
@@ -622,7 +618,7 @@ namespace Grid
             for (int y = min.y; y <= max.y; y++)
             for (int x = min.x; x <= max.x; x++)
             {
-                var cell = _cells[x, y, min.z];
+                var cell = _cells[x, y];
                 if (cell.flags == flags) cells.Add(cell);
             }
 
@@ -632,7 +628,7 @@ namespace Grid
         
         
         /// Get cells in area with ANY bit in flags.
-        public List<CellData> GetCellsWithAnyFlag(Vector3Int a, Vector3Int b, CellFlag flags)
+        public List<CellData> GetCellsWithAnyFlag(Vector2Int a, Vector2Int b, CellFlag flags)
         {
             ClampAreaInclusive(a, b, out var min, out var max);
             
@@ -641,7 +637,7 @@ namespace Grid
             for (int y = min.y; y <= max.y; y++)
             for (int x = min.x; x <= max.x; x++)
             {
-                var cell = _cells[x, y, min.z];
+                var cell = _cells[x, y];
                 if ((cell.flags & flags) != 0) cells.Add(cell);
             }
 
@@ -654,11 +650,11 @@ namespace Grid
         
         // ---------- Neighbors (pathing/adjacency) ----------
 
-        public List<Vector3Int> GetNeighbors4(Vector3Int cell)
+        public List<Vector2Int> GetNeighbors4(Vector2Int cell)
         {
-            var neighbors = new List<Vector3Int>();
+            var neighbors = new List<Vector2Int>();
             
-            var n = new Vector3Int(cell.x + 1, cell.y, cell.z); if (CellInBounds(n)) neighbors.Add(n);
+            var n = new Vector2Int(cell.x + 1, cell.y); if (CellInBounds(n)) neighbors.Add(n);
             n.x = cell.x - 1;                                     if (CellInBounds(n)) neighbors.Add(n);
             n.x = cell.x; n.y = cell.y + 1;                       if (CellInBounds(n)) neighbors.Add(n);
             n.y = cell.y - 1;                                     if (CellInBounds(n)) neighbors.Add(n);
@@ -666,16 +662,16 @@ namespace Grid
             return neighbors;
         }
 
-        public List<Vector3Int> GetNeighbors8(Vector3Int cell)
+        public List<Vector2Int> GetNeighbors8(Vector2Int cell)
         {
-            var neighbors = new List<Vector3Int>();
+            var neighbors = new List<Vector2Int>();
             
             for (int dy = -1; dy <= 1; dy++)
             for (int dx = -1; dx <= 1; dx++)
             {
                 if (dx == 0 && dy == 0) continue;
                 
-                var n = new Vector3Int(cell.x + dx, cell.y + dy, cell.z);
+                var n = new Vector2Int(cell.x + dx, cell.y + dy);
                 
                 if (CellInBounds(n)) neighbors.Add(n);
             }
@@ -687,7 +683,7 @@ namespace Grid
         
         /// Gets the world position of the edge center between two adjacent cells.
         /// Returns the midpoint between the centers of cellA and cellB.
-        public Vector3 GetEdgeCenterBetweenCells(Vector3Int cellA, Vector3Int cellB)
+        public Vector3 GetEdgeCenterBetweenCells(Vector2Int cellA, Vector2Int cellB)
         {
             Vector3 centerA = GetCellCenter(cellA);
             Vector3 centerB = GetCellCenter(cellB);

@@ -98,18 +98,9 @@ public class WorldGridEditorWindow : EditorWindow
 
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Metrics (meters)", EditorStyles.boldLabel);
-            _sceneGrid.cellSize  = EditorGUILayout.IntSlider(new GUIContent("Cell Size (m)"),  _sceneGrid.cellSize,  1, MaxCellSize);
-            _sceneGrid.levelStep = EditorGUILayout.IntSlider(new GUIContent("Level Step (m)"), _sceneGrid.levelStep, 1, MaxLevelStep);
 
             EditorGUILayout.Space();
-
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                EditorGUILayout.PrefixLabel("World Origin");
-                _sceneGrid.worldOrigin = EditorGUILayout.Vector3Field(GUIContent.none, _sceneGrid.worldOrigin);
-            }
-
-            EditorGUILayout.Space();
+            
 
             if (GUILayout.Button(new GUIContent("Apply Settings"), GUILayout.Height(24)))
             {
@@ -350,8 +341,8 @@ public class WorldGridEditorWindow : EditorWindow
 #if UNITY_EDITOR
         if (grid == null) return;
 
-        float w = Mathf.Max(1f, grid.sizeX * grid.cellSize);
-        float h = Mathf.Max(1f, grid.sizeY * grid.cellSize);
+        float w = Mathf.Max(1f, grid.sizeX * WorldGrid.CellSize);
+        float h = Mathf.Max(1f, grid.sizeY * WorldGrid.CellSize);
         var center = grid.worldOrigin + new Vector3(w * 0.5f, 0f, h * 0.5f);
 
         var sv = SceneView.lastActiveSceneView;

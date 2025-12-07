@@ -154,7 +154,7 @@ namespace Grid
         }
 
         // ----- Color Map API -----
-        public void SetCellColor(Vector3Int cell, Color color)
+        public void SetCellColor(Vector2Int cell, Color color)
         {
             if (!grid || !grid.CellInBounds(cell)) return;
             EnsureColorMap();
@@ -179,8 +179,7 @@ namespace Grid
         {
             if (grid == null) return;
             EnsureColorMap();
-
-            int z = Mathf.Clamp(level, 0, Mathf.Max(0, grid.levels - 1));
+            
             int w = Mathf.Max(1, grid.sizeX);
             int h = Mathf.Max(1, grid.sizeY);
 
@@ -192,7 +191,7 @@ namespace Grid
                 int row = y * w;
                 for (int x = 0; x < w; x++)
                 {
-                    var cell = new Vector3Int(x, y, z);
+                    var cell = new Vector2Int(x, y);
                     grid.TryGetCell(cell, out var cd);
 
                     var flags = cd.flags;

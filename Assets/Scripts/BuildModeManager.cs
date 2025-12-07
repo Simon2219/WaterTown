@@ -1,12 +1,11 @@
+using System;
 using System.Collections.Generic;
 using Grid;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using WaterTown.Building.UI;
-using WaterTown.Core;
 using WaterTown.Interfaces;
 using WaterTown.Platforms;
-using WaterTown.Town;
 
 namespace WaterTown.Building
 {
@@ -259,7 +258,7 @@ namespace WaterTown.Building
             Ray ray = mainCamera.ScreenPointToRay(mousePosition);
             Vector3Int levelRef = new Vector3Int(0, 0, placementLevel);
 
-            if (grid.RaycastToCell(ray, levelRef, out Vector3Int hoveredCell, out Vector3 hitPoint))
+            if (grid.RaycastToCell(ray, out Vector2Int hoveredCell, out Vector3 hitPoint))
             {
                 // Get footprint
                 Vector2Int footprint = Vector2Int.one;
@@ -276,7 +275,7 @@ namespace WaterTown.Building
                     : footprint;
 
                 // Snap to grid
-                Vector3 snappedPosition = grid.SnapToGridForPlatform(hitPoint, effectiveFootprint, placementLevel);
+                Vector3 snappedPosition = grid.SnapToGridForPlatform(hitPoint, effectiveFootprint);
                 Quaternion rotation = Quaternion.Euler(0f, _currentRotation, 0f);
 
                 _currentPickup.Transform.SetPositionAndRotation(snappedPosition, rotation);

@@ -2,7 +2,6 @@
 using UnityEditor;
 using UnityEngine;
 using WaterTown.Platforms;
-using WaterTown.Town;
 
 namespace Editor
 {
@@ -40,9 +39,9 @@ namespace Editor
                 p.EditorResetAllConnections();
 
             // Try to use TownManager's grid-based adjacency checking if available
-            var townManager = Object.FindFirstObjectByType<TownManager>();
+            var platformManager = Object.FindFirstObjectByType<PlatformManager>();
             
-            if (townManager != null)
+            if (platformManager != null)
             {
                 // Use grid-based adjacency checking
                 for (int i = 0; i < all.Length; i++)
@@ -51,7 +50,7 @@ namespace Editor
                     for (int j = i + 1; j < all.Length; j++)
                     {
                         var b = all[j];
-                        townManager.ConnectPlatformsIfAdjacent(a, b);
+                        platformManager.ConnectPlatformsIfAdjacent(a, b);
                     }
                 }
             }
