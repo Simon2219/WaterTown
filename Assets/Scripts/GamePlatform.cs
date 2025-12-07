@@ -15,58 +15,15 @@ namespace WaterTown.Platforms
     {
         #region Configuration & Dependencies
         
-        // ---------- Global registry & events ----------
-        public static event Action<GamePlatform> PlatformRegistered;
-        public static event Action<GamePlatform> PlatformUnregistered;
-
-        private static readonly HashSet<GamePlatform> _allPlatforms = new();
-        public static IReadOnlyCollection<GamePlatform> AllPlatforms => _allPlatforms;
+        // ---------- Instance References to Manager Systems ----------
+        private TownManager _townManager;
+        private PlatformManager _platformManager;
 
         /// <summary>Fired whenever this platform's connection/railing state changes.</summary>
-        public event System.Action<GamePlatform> ConnectionsChanged;
+        public event Action<GamePlatform> ConnectionsChanged;
 
         /// <summary>Fired whenever this platform's pose changes (position/rotation/scale).</summary>
-        public event System.Action<GamePlatform> PoseChanged;
-        
-        #endregion
-
-        #region Core System References
-        
-        // ---------- Cached System References ----------
-        // These are backbone systems, validated once at startup
-        
-        private static TownManager _townManager;
-        private static WorldGrid _worldGrid;
-        private static bool _systemReferencesValidated = false;
-        
-        private static void EnsureSystemReferences()
-        {
-            if (_systemReferencesValidated) return;
-            
-            try
-            {
-                _townManager = FindFirstObjectByType<TownManager>();
-                _worldGrid = FindFirstObjectByType<WorldGrid>();
-                
-                if (_townManager == null)
-                {
-                    throw ErrorHandler.MissingDependency(typeof(TownManager), null);
-                }
-                
-                if (_worldGrid == null)
-                {
-                    throw ErrorHandler.MissingDependency(typeof(WorldGrid), null);
-                }
-                
-                _systemReferencesValidated = true;
-            }
-            catch (Exception ex)
-            {
-                ErrorHandler.LogAndDisable(ex, null);
-                // Mark as validated to prevent spam, but systems won't work properly
-                _systemReferencesValidated = true;
-            }
-        }
+        public event Action<GamePlatform> PoseChanged;
         
         #endregion
 
@@ -799,11 +756,36 @@ namespace WaterTown.Platforms
 
         private void Awake()
         {
-            // Ensure backbone system references are cached (only searches once across all platforms)
-            EnsureSystemReferences();
+            try
+            {
+                FindDependencies();
+            }
+            catch (Exception ex)
+            {
+                ErrorHandler.LogAndDisable(ex, this);
+                return;
+            }
             
             if (!_navSurface) _navSurface = GetComponent<NavMeshSurface>();
             InitializePlatform();
+        }
+        
+        /// <summary>
+        /// Finds and validates all required manager dependencies.
+        /// </summary>
+        private void FindDependencies()
+        {
+            _townManager = FindFirstObjectByType<TownManager>();
+            if (!_townManager)
+            {
+                throw ErrorHandler.MissingDependency(typeof(TownManager), this);
+            }
+            
+            _platformManager = FindFirstObjectByType<PlatformManager>();
+            if (!_platformManager)
+            {
+                throw ErrorHandler.MissingDependency(typeof(PlatformManager), this);
+            }
         }
 
         private void OnEnable()
@@ -812,13 +794,18 @@ namespace WaterTown.Platforms
             _lastRot = transform.rotation;
             _lastScale = transform.localScale;
 
-            RegisterSelf();
+            // Notify PlatformManager that this platform is now active
+            if (_platformManager)
+                _platformManager.NotifyPlatformEnabled(this);
+            
             InitializePlatform();
         }
 
         private void OnDisable()
         {
-            UnregisterSelf();
+            // Notify PlatformManager that this platform is now inactive
+            if (_platformManager)
+                _platformManager.NotifyPlatformDisabled(this);
         }
 
         private void LateUpdate()
@@ -844,18 +831,6 @@ namespace WaterTown.Platforms
             EnsureChildrenModulesRegistered();
             EnsureChildrenRailingsRegistered();
             RefreshSocketStatuses();
-        }
-
-        private void RegisterSelf()
-        {
-            if (_allPlatforms.Add(this))
-                PlatformRegistered?.Invoke(this);
-        }
-
-        private void UnregisterSelf()
-        {
-            if (_allPlatforms.Remove(this))
-                PlatformUnregistered?.Invoke(this);
         }
 
         public void ForcePoseChanged()
@@ -1347,7 +1322,7 @@ namespace WaterTown.Platforms
             if (cells.Count == 0) return false;
             
             // Check if area is free
-            return _townManager.IsAreaFree(cells, 0);
+            return _townManager.IsAreaFree(cells);
         }
         
         #endregion

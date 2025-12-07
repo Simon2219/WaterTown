@@ -128,25 +128,18 @@ public class TownManager : MonoBehaviour
     /// <summary>
     /// Check if an area is free for building (delegates to PlatformManager).
     /// </summary>
-    public bool IsAreaFree(List<Vector2Int> cells, int level = 0)
+    public bool IsAreaFree(List<Vector2Int> cells)
     {
-        return _platformManager.IsAreaFree(cells, level);
+        return _platformManager.IsAreaFree(cells);
     }
-
-    
     
     /// <summary>
     /// Register a platform (delegates to PlatformManager).
     /// </summary>
-    public void RegisterPlatform(
-        GamePlatform platform,
-        List<Vector2Int> cells,
-        bool markOccupiedInGrid = true)
+    public void RegisterPlatform(GamePlatform platform, List<Vector2Int> cells, bool markOccupiedInGrid = true)
     {
         _platformManager?.RegisterPlatform(platform, cells, markOccupiedInGrid);
     }
-
-    
     
     /// <summary>
     /// Unregister a platform (delegates to PlatformManager).
@@ -156,7 +149,13 @@ public class TownManager : MonoBehaviour
         _platformManager?.UnregisterPlatform(platform);
     }
 
-
+    /// <summary>
+    /// Compute cells for a platform (delegates to PlatformManager).
+    /// </summary>
+    public void ComputeCellsForPlatform(GamePlatform platform, List<Vector2Int> outputCells)
+    {
+        _platformManager?.ComputeCellsForPlatform(platform, outputCells);
+    }
 
     /// <summary>
     /// Trigger adjacency update (delegates to PlatformManager).

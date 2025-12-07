@@ -38,6 +38,13 @@ public class PlatformManager : MonoBehaviour
     [Tooltip("Invoked when a platform is removed/unregistered.")]
     public UnityEvent<GamePlatform> OnPlatformRemoved = new UnityEvent<GamePlatform>();
     
+    // --- Platform registry (moved from GamePlatform static) ---
+    
+    private readonly HashSet<GamePlatform> _allPlatforms = new HashSet<GamePlatform>();
+    
+    /// <summary>All registered platforms in the scene (read-only access).</summary>
+    public IReadOnlyCollection<GamePlatform> AllPlatforms => _allPlatforms;
+    
     // --- Platform occupancy bookkeeping ---
 
     private class PlatformEntry
@@ -92,14 +99,13 @@ public class PlatformManager : MonoBehaviour
 
     private void OnEnable()
     {
-        GamePlatform.PlatformRegistered   += OnPlatformRegistered;
-        GamePlatform.PlatformUnregistered += OnPlatformUnregistered;
+        // No longer subscribing to static events - platforms register directly now
     }
 
     private void Start()
     {
         // Ensure all existing platforms in the scene are registered into the grid
-        foreach (var platform in GamePlatform.AllPlatforms)
+        foreach (var platform in _allPlatforms)
         {
             if (!platform) continue;
             if (!platform.isActiveAndEnabled) continue;
@@ -126,9 +132,6 @@ public class PlatformManager : MonoBehaviour
 
     private void OnDisable()
     {
-        GamePlatform.PlatformRegistered   -= OnPlatformRegistered;
-        GamePlatform.PlatformUnregistered -= OnPlatformUnregistered;
-
         // Best-effort cleanup of pose subscriptions
         foreach (var kvp in _entries)
         {
@@ -139,19 +142,26 @@ public class PlatformManager : MonoBehaviour
     
     #endregion
 
-    #region GamePlatform Event Handlers
+    #region Platform Registration (Called by GamePlatform)
     
-    private void OnPlatformRegistered(GamePlatform platform)
-    {
-        // We intentionally DO NOT auto-register into the grid here,
-        // because BuildModeManager controls when a platform is
-        // preview-only vs actually placed.
-        // Scene platforms are registered once in Start().
-    }
-
-    private void OnPlatformUnregistered(GamePlatform platform)
+    /// <summary>
+    /// Called by GamePlatform when it becomes enabled.
+    /// Adds the platform to the global registry.
+    /// </summary>
+    public void NotifyPlatformEnabled(GamePlatform platform)
     {
         if (!platform) return;
+        _allPlatforms.Add(platform);
+    }
+
+    /// <summary>
+    /// Called by GamePlatform when it becomes disabled.
+    /// Removes the platform from the global registry and unregisters from grid.
+    /// </summary>
+    public void NotifyPlatformDisabled(GamePlatform platform)
+    {
+        if (!platform) return;
+        _allPlatforms.Remove(platform);
         UnregisterPlatform(platform);
     }
 
@@ -164,7 +174,6 @@ public class PlatformManager : MonoBehaviour
         if (!grid || platform == null) return;
         if (!_entries.TryGetValue(platform, out var entry)) return;
 
-        int level = 0;
         bool marksOccupied = entry.marksOccupied;
 
         // 1) Clear old occupancy for this platform
@@ -172,7 +181,7 @@ public class PlatformManager : MonoBehaviour
         {
             foreach (var cell2D in entry.cells2D)
             {
-                var gridCell = new Vector3Int(cell2D.x, cell2D.y, level);
+                var gridCell = new Vector3Int(cell2D.x, cell2D.y, 0);
                 grid.TryRemoveFlag(gridCell, WorldGrid.CellFlag.Occupied);
             }
         }
@@ -188,7 +197,7 @@ public class PlatformManager : MonoBehaviour
         {
             foreach (var cell2D in entry.cells2D)
             {
-                var gridCell = new Vector3Int(cell2D.x, cell2D.y, level);
+                var gridCell = new Vector3Int(cell2D.x, cell2D.y, 0);
                 grid.TryAddFlag(gridCell, WorldGrid.CellFlag.Occupied, platformId: 0, payload: platform.GetInstanceID());
             }
         }
@@ -202,16 +211,16 @@ public class PlatformManager : MonoBehaviour
     #region Public API (Platform Registration)
     
     /// <summary>
-    /// True if all given 2D cells (at level) are inside the grid and not Occupied.
+    /// True if all given 2D cells are inside the grid and not Occupied (level 0).
     /// Used by BuildModeManager as placement validation.
     /// </summary>
-    public bool IsAreaFree(List<Vector2Int> cells, int level = 0)
+    public bool IsAreaFree(List<Vector2Int> cells)
     {
         if (!grid) return false;
         
         foreach (var c in cells)
         {
-            var cell = new Vector3Int(c.x, c.y, level);
+            var cell = new Vector3Int(c.x, c.y, 0);
             
             if (!grid.CellInBounds(cell))
                 return false;
@@ -544,23 +553,23 @@ public class PlatformManager : MonoBehaviour
         if (_isRecomputingAdjacency) return;
         _isRecomputingAdjacency = true;
 
-        _tmpPlatforms.Clear();
-        GamePlatform pickedUpPlatform = null;
-        
-        foreach (var gp in GamePlatform.AllPlatforms)
-        {
-            if (!gp) continue;
-            if (!gp.isActiveAndEnabled) continue;
+            _tmpPlatforms.Clear();
+            GamePlatform pickedUpPlatform = null;
             
-            if (gp.IsPickedUp)
+            foreach (var gp in _allPlatforms)
             {
-                // Track picked-up platform for preview
-                pickedUpPlatform = gp;
-                continue;
+                if (!gp) continue;
+                if (!gp.isActiveAndEnabled) continue;
+                
+                if (gp.IsPickedUp)
+                {
+                    // Track picked-up platform for preview
+                    pickedUpPlatform = gp;
+                    continue;
+                }
+                
+                _tmpPlatforms.Add(gp);
             }
-            
-            _tmpPlatforms.Add(gp);
-        }
 
         // Ensure registration is always valid
         foreach (var p in _tmpPlatforms)
