@@ -182,6 +182,11 @@ public class PlatformManager : MonoBehaviour
         // Track for preview mode
         _currentlyPickedUpPlatform = platform;
         
+        // Ensure platform components are set up (once)
+        platform.EnsureChildrenModulesRegistered();
+        platform.EnsureChildrenRailingsRegistered();
+        platform.BuildSockets();
+        
         // Clear grid cells to free the space
         if (_allPlatforms.Contains(platform) && platform.occupiedCells != null)
         {
@@ -531,23 +536,36 @@ public class PlatformManager : MonoBehaviour
 
     ///
     /// Lightweight preview update for picked-up platform
-    /// Only checks adjacency with platforms occupying neighbor cells
-    /// Updates railings only, no NavMesh or links
+    /// Updates railings for ALL platforms to show correct preview state
+    /// No NavMesh rebuilds or link creation
     ///
     private void UpdatePreview(GamePlatform previewPlatform)
     {
-        // Ensure preview platform components are registered
-        previewPlatform.EnsureChildrenModulesRegistered();
-        previewPlatform.EnsureChildrenRailingsRegistered();
-        
-        // Reset preview platform connections
+        // Reset connections on ALL platforms so railings update correctly
         previewPlatform.EditorResetAllConnections();
+        
+        var placedPlatforms = new List<GamePlatform>();
+        foreach (var gp in _allPlatforms)
+        {
+            if (!gp || !gp.isActiveAndEnabled) continue;
+            gp.EditorResetAllConnections();
+            placedPlatforms.Add(gp);
+        }
+        
+        // Update connections between placed platforms (no NavMesh)
+        for (int i = 0; i < placedPlatforms.Count; i++)
+        {
+            for (int j = i + 1; j < placedPlatforms.Count; j++)
+            {
+                ConnectPlatformsIfAdjacent(placedPlatforms[i], placedPlatforms[j], rebuildNavMesh: false);
+            }
+        }
         
         // Get cells the preview platform would occupy
         List<Vector2Int> previewCells = GetCellsForPlatform(previewPlatform);
         if (previewCells == null || previewCells.Count == 0) return;
         
-        // Find adjacent platforms via cell lookup (optimization!)
+        // Find adjacent platforms via cell lookup (optimization for preview platform)
         var adjacentPlatforms = new HashSet<GamePlatform>();
         foreach (var cell in previewCells)
         {
@@ -562,7 +580,7 @@ public class PlatformManager : MonoBehaviour
             }
         }
         
-        // Only check adjacency with platforms in neighbor cells (no NavMesh)
+        // Update connections between preview and adjacent placed platforms (no NavMesh)
         foreach (var adjacentPlatform in adjacentPlatforms)
         {
             ConnectPlatformsIfAdjacent(previewPlatform, adjacentPlatform, rebuildNavMesh: false);
