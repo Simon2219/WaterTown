@@ -837,9 +837,14 @@ namespace WaterTown.Platforms
 
         private void InitializePlatform()
         {
+            // Build sockets once on initialization
             if (!_socketsBuilt) BuildSockets();
+            
+            // Register child components once on initialization
             EnsureChildrenModulesRegistered();
             EnsureChildrenRailingsRegistered();
+            
+            // Initial socket status calculation
             RefreshSocketStatuses();
         }
 
@@ -1018,10 +1023,11 @@ namespace WaterTown.Platforms
                 _originalMaterials = _allRenderers[0].sharedMaterials;
             }
             
-            // Notify managers for preview mode (both new and existing platforms)
-            Debug.Log($"[GamePlatform.OnPickedUp] Firing PlatformPickedUp event for {name}, isNewObject={isNewObject}");
-            PlatformPickedUp?.Invoke(this);
-            Debug.Log($"[GamePlatform.OnPickedUp] Event fired. Subscribers: {(PlatformPickedUp != null ? PlatformPickedUp.GetInvocationList().Length : 0)}");
+            // Fire pickup event for existing platforms (not for new spawned ones)
+            if (!isNewObject)
+            {
+                PlatformPickedUp?.Invoke(this);
+            }
         }
 
 
@@ -1033,13 +1039,6 @@ namespace WaterTown.Platforms
             
             // Restore original materials
             RestoreOriginalMaterials();
-            
-            // Ensure sockets are built for adjacency detection
-            BuildSockets();
-            
-            // Ensure child modules and railings are registered
-            EnsureChildrenModulesRegistered();
-            EnsureChildrenRailingsRegistered();
             
             // Compute cells for placement
             List<Vector2Int> cells = _platformManager.GetCellsForPlatform(this);
@@ -1076,9 +1075,6 @@ namespace WaterTown.Platforms
                 
                 // Restore original materials
                 RestoreOriginalMaterials();
-                
-                // Rebuild sockets at original position
-                BuildSockets();
                 
                 // Compute cells and fire placement event to re-register at original position
                 // This triggers adjacency recomputation so railings/NavMesh links update
