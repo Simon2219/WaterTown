@@ -605,9 +605,51 @@ public class PlatformManager : MonoBehaviour
                 }
                 if (countB > 0) avgPosB /= countB;
 
-                GamePlatform.CreateNavLinkBetween(a, avgPosA, b, avgPosB, navLinkWidth);
+                CreateNavLinkBetween(a, avgPosA, b, avgPosB);
             }
         }
+    }
+    
+    ///
+    /// Creates a NavMesh link between two platforms at specified world positions
+    /// Link is attached to platform A
+    ///
+    private void CreateNavLinkBetween(GamePlatform platformA, Vector3 posA, GamePlatform platformB, Vector3 posB)
+    {
+        if (!platformA || !platformB) return;
+        
+        var parent = GetOrCreateLinksParent(platformA.transform);
+        var go = new GameObject($"Link_{platformA.name}_to_{platformB.name}");
+        go.transform.SetParent(parent, false);
+
+        Vector3 center = 0.5f * (posA + posB);
+        go.transform.position = center;
+
+        var link = go.AddComponent<NavMeshLink>();
+        link.startPoint = go.transform.InverseTransformPoint(posA);
+        link.endPoint   = go.transform.InverseTransformPoint(posB);
+        link.bidirectional = true;
+        link.width = navLinkWidth;
+        link.area = 0;
+        link.agentTypeID = platformA.NavSurface ? platformA.NavSurface.agentTypeID : 0;
+    }
+    
+    ///
+    /// Gets or creates a child transform with the given name
+    ///
+    private static Transform GetOrCreateLinksParent(Transform parent)
+    {
+        var t = parent.Find("Links");
+        if (!t)
+        {
+            var go = new GameObject("Links");
+            t = go.transform;
+            t.SetParent(parent, false);
+            t.localPosition = Vector3.zero;
+            t.localRotation = Quaternion.identity;
+            t.localScale = Vector3.one;
+        }
+        return t;
     }
 
 
@@ -679,20 +721,17 @@ public class PlatformManager : MonoBehaviour
         }
 
         // Handle picked-up platform for railing PREVIEW ONLY
-        // Does NOT mark cells as occupied but updates socket statuses for visual feedback
+        // Updates socket statuses for visual feedback during placement
         if (pickedUpPlatform != null)
         {
-            // Compute cells for preview (doesn't register in grid)
+            // Compute cells for preview
             _tmpCells.Clear();
             GetCellsForPlatform(pickedUpPlatform, _tmpCells);
             
             if (_tmpCells.Count > 0)
             {
-                // Create temporary data for preview (NOT registered, marksOccupied = false)
-                var previewData = new PlatformGameData
-                {
-                    marksOccupied = false // IMPORTANT: Does not occupy cells in grid
-                };
+                // Create temporary data for preview (NOT in permanent registry)
+                var previewData = new PlatformGameData();
                 previewData.cells.AddRange(_tmpCells);
                 
                 // Check connections with all placed platforms for preview

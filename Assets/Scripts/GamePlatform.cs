@@ -971,45 +971,8 @@ namespace WaterTown.Platforms
         
         #endregion
 
-        #region NavMesh Link Creation & Adjacency
+        #region Child Component Registration
         
-        /// Creates a NavMesh link between two world positions
-        /// Link is attached to platform A
-        public static void CreateNavLinkBetween(GamePlatform platformA, Vector3 posA, GamePlatform platformB, Vector3 posB, float linkWidth)
-        {
-            if (!platformA || !platformB) return;
-            
-            var parent = GetOrCreate(platformA.transform, "Links");
-            var go = new GameObject($"Link_{platformA.name}_to_{platformB.name}");
-            go.transform.SetParent(parent, false);
-
-            Vector3 center = 0.5f * (posA + posB);
-            go.transform.position = center;
-
-            var link = go.AddComponent<NavMeshLink>();
-            link.startPoint = go.transform.InverseTransformPoint(posA);
-            link.endPoint   = go.transform.InverseTransformPoint(posB);
-            link.bidirectional = true;
-            link.width = linkWidth;
-            link.area = 0;
-            link.agentTypeID = platformA.NavSurface ? platformA.NavSurface.agentTypeID : 0;
-        }
-
-        private static Transform GetOrCreate(Transform parent, string name)
-        {
-            var t = parent.Find(name);
-            if (!t)
-            {
-                var go = new GameObject(name);
-                t = go.transform;
-                t.SetParent(parent, false);
-                t.localPosition = Vector3.zero;
-                t.localRotation = Quaternion.identity;
-                t.localScale = Vector3.one;
-            }
-            return t;
-        }
-
         public void EnsureChildrenModulesRegistered()
         {
             var modules = GetComponentsInChildren<PlatformModule>(true);
