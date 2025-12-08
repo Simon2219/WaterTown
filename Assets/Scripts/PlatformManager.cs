@@ -106,11 +106,9 @@ public class PlatformManager : MonoBehaviour
 
     private void OnEnable()
     {
-        // Subscribe to platform lifecycle events
+        // Subscribe to static platform lifecycle events (for discovery and cleanup)
         GamePlatform.PlatformEnabled += OnPlatformEnabled;
         GamePlatform.PlatformDisabled += OnPlatformDisabled;
-        GamePlatform.PlatformPlaced += HandlePlatformPlaced;
-        GamePlatform.PlatformPickedUp += OnPlatformPickedUp;
     }
 
 
@@ -133,16 +131,19 @@ public class PlatformManager : MonoBehaviour
 
     private void OnDisable()
     {
-        // Unsubscribe from platform lifecycle events
+        // Unsubscribe from static platform lifecycle events
         GamePlatform.PlatformEnabled -= OnPlatformEnabled;
         GamePlatform.PlatformDisabled -= OnPlatformDisabled;
-        GamePlatform.PlatformPlaced -= HandlePlatformPlaced;
-        GamePlatform.PlatformPickedUp -= OnPlatformPickedUp;
         
-        // Best-effort cleanup of pose subscriptions
-        foreach (GamePlatform kvp in _allPlatforms.Keys)
+        // Best-effort cleanup of instance event subscriptions
+        foreach (GamePlatform platform in _allPlatforms.Keys)
         {
-                kvp.PoseChanged -= OnPlatformPoseChanged;
+            if (platform)
+            {
+                platform.HasMoved -= OnPlatformHasMoved;
+                platform.Placed -= HandlePlatformPlaced;
+                platform.PickedUp -= OnPlatformPickedUp;
+            }
         }
     }
     
@@ -177,7 +178,7 @@ public class PlatformManager : MonoBehaviour
     
     ///
     /// Event handler called when ANY platform becomes enabled
-    /// Adds the platform to the global registry and subscribes to pose changes
+    /// Adds platform to registry and subscribes to its instance events
     ///
     private void OnPlatformEnabled(GamePlatform platform)
     {
@@ -187,8 +188,11 @@ public class PlatformManager : MonoBehaviour
         if (!_allPlatforms.ContainsKey(platform))
         {
             _allPlatforms[platform] = new PlatformGameData();
-            // Subscribe to pose changes so we can track movement in preview/placed modes
-            platform.PoseChanged += OnPlatformPoseChanged;
+            
+            // Subscribe to this platform's instance events
+            platform.HasMoved += OnPlatformHasMoved;
+            platform.Placed += HandlePlatformPlaced;
+            platform.PickedUp += OnPlatformPickedUp;
         }
     }
 
@@ -226,26 +230,30 @@ public class PlatformManager : MonoBehaviour
 
     ///
     /// Event handler called when ANY platform is picked up
-    /// Clears Occupied flags and marks adjacency dirty
+    /// Clears Occupied flags and cell ownership, marks adjacency dirty
     ///
     private void OnPlatformPickedUp(GamePlatform platform)
     {
         if (!platform) return;
         
-        // Clear Occupied flags from cells this platform was occupying
+        // Clear Occupied flags and cell ownership for cells this platform was occupying
         if (_allPlatforms.TryGetValue(platform, out var data))
         {
             data.previousCells.Clear();
             data.previousCells.AddRange(data.cells);
             
-            // Clear Occupied flags (cells will remain in _cellToPlatform for adjacency updates)
+            // Clear both cell flags AND _cellToPlatform to maintain consistency
             foreach (Vector2Int cell in data.cells)
             {
                 if (_cellToPlatform.TryGetValue(cell, out var owner) && owner == platform)
                 {
                     _worldGrid.TrySetCellFlag(cell, WorldGrid.CellFlag.Empty);
+                    _cellToPlatform.Remove(cell);
                 }
             }
+            
+            // Clear data.cells since platform no longer occupies any cells until it moves
+            data.cells.Clear();
         }
         
         // Mark adjacency dirty so neighbors update in LateUpdate
@@ -257,11 +265,11 @@ public class PlatformManager : MonoBehaviour
     /// Called when a platform reports its transform changed
     /// Lightweight update for runtime platform movement
     ///
-    private void OnPlatformPoseChanged(GamePlatform platform)
+    private void OnPlatformHasMoved(GamePlatform platform)
     {
         if (!platform) return;
         
-        // Use lightweight MovePlatform for pose changes (called every frame)
+        // Use lightweight MovePlatform for movement (called every frame when transform changes)
         MovePlatform(platform);
     }
 
@@ -339,12 +347,12 @@ public class PlatformManager : MonoBehaviour
 
 
     ///
-    /// Check if a specific cell is occupied by any platform
-    /// O(1) lookup via reverse dictionary
+    /// Check if a specific cell is occupied by any platform (placed or preview)
+    /// Uses cell flags for accurate state (consistent with IsAreaFree)
     ///
     public bool IsCellOccupied(Vector2Int cell)
     {
-        return _cellToPlatform.ContainsKey(cell);
+        return _worldGrid.CellHasAnyFlag(cell, WorldGrid.CellFlag.Occupied | WorldGrid.CellFlag.OccupyPreview);
     }
 
 
@@ -407,12 +415,16 @@ public class PlatformManager : MonoBehaviour
             }
         }
 
-        // Ensure we have game data (pose change subscription handled in OnPlatformEnabled)
+        // Ensure we have game data (instance event subscriptions handled in OnPlatformEnabled)
         if (!_allPlatforms.TryGetValue(platform, out var data))
         {
             data = new PlatformGameData();
             _allPlatforms[platform] = data;
-            platform.PoseChanged += OnPlatformPoseChanged;
+            
+            // Subscribe to instance events if not already done
+            platform.HasMoved += OnPlatformHasMoved;
+            platform.Placed += HandlePlatformPlaced;
+            platform.PickedUp += OnPlatformPickedUp;
         }
         
         data.cells.Clear();
@@ -438,7 +450,10 @@ public class PlatformManager : MonoBehaviour
         if (!platform) return;
         if (!_allPlatforms.TryGetValue(platform, out PlatformGameData data)) return;
 
-        platform.PoseChanged -= OnPlatformPoseChanged;
+        // Unsubscribe from instance events
+        platform.HasMoved -= OnPlatformHasMoved;
+        platform.Placed -= HandlePlatformPlaced;
+        platform.PickedUp -= OnPlatformPickedUp;
 
         // Clear cells from WorldGrid and reverse lookup
         foreach (Vector2Int cell in data.cells)
@@ -526,35 +541,6 @@ public class PlatformManager : MonoBehaviour
         }
         
         return affected;
-    }
-
-
-    ///
-    /// Calculate adjacency for a specific platform and its neighbors
-    /// Only updates affected platforms (efficient for moving platforms)
-    ///
-    private void CalculateAdjacencyForPlatform(GamePlatform platform)
-    {
-        if (!platform) return;
-        
-        var affectedPlatforms = GetAffectedPlatforms(platform);
-        
-        // Reset connections for affected platforms
-        foreach (var p in affectedPlatforms)
-        {
-            if (p && p.gameObject.activeInHierarchy)
-                ResetPlatformConnections(p);
-        }
-        
-        // Calculate socket connections between all affected platforms
-        var platformList = new List<GamePlatform>(affectedPlatforms);
-        for (int i = 0; i < platformList.Count; i++)
-        {
-            for (int j = i + 1; j < platformList.Count; j++)
-            {
-                UpdateSocketConnections(platformList[i], platformList[j]);
-            }
-        }
     }
 
 

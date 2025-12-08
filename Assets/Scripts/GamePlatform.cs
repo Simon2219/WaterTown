@@ -22,24 +22,24 @@ namespace WaterTown.Platforms
         /// Fired whenever this platform's connection/railing state changes
         public event Action<GamePlatform> ConnectionsChanged;
 
-        /// Fired whenever this platform's pose changes (position/rotation/scale)
-        public event Action<GamePlatform> PoseChanged;
+        /// Fired whenever this platform moves (position/rotation/scale changes)
+        public event Action<GamePlatform> HasMoved;
         
-        /// Static event fired when ANY platform becomes enabled
-        /// Used by managers for registration
+        /// Static event fired when ANY platform becomes enabled (for initial discovery)
+        /// Used by managers to add platform to registry and subscribe to instance events
         public static event Action<GamePlatform> PlatformEnabled;
         
-        /// Static event fired when ANY platform becomes disabled
-        /// Used by managers for cleanup
+        /// Static event fired when ANY platform becomes disabled (for cleanup)
+        /// Used by managers to unsubscribe and remove platform from registry
         public static event Action<GamePlatform> PlatformDisabled;
         
-        /// Static event fired when ANY platform is placed (after successful placement)
-        /// Used by managers to register platform in grid and trigger adjacency
-        public static event Action<GamePlatform> PlatformPlaced;
+        /// Instance event fired when this platform is placed (after successful placement)
+        /// Subscribed by PlatformManager to register platform in grid and trigger adjacency
+        public event Action<GamePlatform> Placed;
         
-        /// Static event fired when ANY platform is picked up (before being moved)
-        /// Used by managers to update adjacency without full unregister overhead
-        public static event Action<GamePlatform> PlatformPickedUp;
+        /// Instance event fired when this platform is picked up (before being moved)
+        /// Subscribed by PlatformManager to update adjacency without full unregister overhead
+        public event Action<GamePlatform> PickedUp;
 
         public List<Vector2Int> occupiedCells = null;
         
@@ -830,7 +830,7 @@ namespace WaterTown.Platforms
                 // Invalidate world position cache on transform change
                 _worldPositionsCacheValid = false;
 
-                PoseChanged?.Invoke(this);
+                HasMoved?.Invoke(this);
             }
         }
 
@@ -849,12 +849,12 @@ namespace WaterTown.Platforms
         }
 
 
-        public void ForcePoseChanged()
+        public void ForceHasMoved()
         {
             _lastPos = transform.position;
             _lastRot = transform.rotation;
             _lastScale = transform.localScale;
-            PoseChanged?.Invoke(this);
+            HasMoved?.Invoke(this);
         }
 
 
@@ -1026,7 +1026,7 @@ namespace WaterTown.Platforms
             // Fire pickup event for existing platforms (not for new spawned ones)
             if (!isNewObject)
             {
-                PlatformPickedUp?.Invoke(this);
+                PickedUp?.Invoke(this);
             }
         }
 
@@ -1049,7 +1049,7 @@ namespace WaterTown.Platforms
             IsPickedUp = false;
             
             // Fire event for managers to register platform and trigger adjacency
-            PlatformPlaced?.Invoke(this);
+            Placed?.Invoke(this);
         }
 
 
@@ -1081,7 +1081,7 @@ namespace WaterTown.Platforms
                 List<Vector2Int> cells = _platformManager.GetCellsForPlatform(this);
                 occupiedCells = cells;
                 
-                PlatformPlaced?.Invoke(this);
+                Placed?.Invoke(this);
             }
         }
 
