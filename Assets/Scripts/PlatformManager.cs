@@ -338,8 +338,9 @@ public class PlatformManager : MonoBehaviour
     ///
     /// True if all given 2D cells are inside the grid and not Occupied (level 0)
     /// Used by BuildModeManager as placement validation
+    /// Can optionally ignore a specific platform (useful for validating while moving a platform)
     ///
-    public bool IsAreaFree(List<Vector2Int> cells)
+    public bool IsAreaFree(List<Vector2Int> cells, GamePlatform ignorePlatform = null)
     {
         foreach (Vector2Int cell in cells)
         {
@@ -347,8 +348,18 @@ public class PlatformManager : MonoBehaviour
             if (!_worldGrid.CellInBounds(cell))
                 return false;
             
+            // If this cell is occupied, check if it's occupied by the platform we're ignoring
             if (_worldGrid.CellHasAnyFlag(cell, WorldGrid.CellFlag.Occupied))
+            {
+                // If we have an ignore platform, check if this cell belongs to it
+                if (ignorePlatform != null && _cellToPlatform.TryGetValue(cell, out var occupyingPlatform))
+                {
+                    if (occupyingPlatform == ignorePlatform)
+                        continue; // Ignore this cell since it's occupied by the platform we're moving
+                }
+                
                 return false;
+            }
         }
         return true;
     }
