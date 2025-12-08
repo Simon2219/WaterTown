@@ -1019,7 +1019,9 @@ namespace WaterTown.Platforms
             }
             
             // Notify managers for preview mode (both new and existing platforms)
+            Debug.Log($"[GamePlatform.OnPickedUp] Firing PlatformPickedUp event for {name}, isNewObject={isNewObject}");
             PlatformPickedUp?.Invoke(this);
+            Debug.Log($"[GamePlatform.OnPickedUp] Event fired. Subscribers: {(PlatformPickedUp != null ? PlatformPickedUp.GetInvocationList().Length : 0)}");
         }
 
 

@@ -98,10 +98,12 @@ public class PlatformManager : MonoBehaviour
 
     private void OnEnable()
     {
+        Debug.Log("[PlatformManager.OnEnable] Subscribing to platform lifecycle events");
         // Subscribe to platform lifecycle events
         GamePlatform.PlatformDisabled += OnPlatformDisabled;
         GamePlatform.PlatformPlaced += HandlePlatformPlaced;
         GamePlatform.PlatformPickedUp += OnPlatformPickedUp;
+        Debug.Log("[PlatformManager.OnEnable] Subscribed to PlatformPickedUp event");
     }
 
 
@@ -129,8 +131,14 @@ public class PlatformManager : MonoBehaviour
     private void LateUpdate()
     {
         // Only update preview for picked-up platform
+        if (_adjacencyDirty)
+        {
+            Debug.Log($"[PlatformManager.LateUpdate] _adjacencyDirty=true, _currentlyPickedUpPlatform={((_currentlyPickedUpPlatform != null) ? _currentlyPickedUpPlatform.name : "NULL")}");
+        }
+        
         if (_adjacencyDirty && _currentlyPickedUpPlatform != null)
         {
+            Debug.Log($"[PlatformManager.LateUpdate] Calling UpdatePreview for {_currentlyPickedUpPlatform.name}");
             _adjacencyDirty = false;
             UpdatePreview(_currentlyPickedUpPlatform);
         }
@@ -177,10 +185,12 @@ public class PlatformManager : MonoBehaviour
     ///
     private void OnPlatformPickedUp(GamePlatform platform)
     {
+        Debug.Log($"[PlatformManager.OnPlatformPickedUp] Called with platform: {(platform ? platform.name : "NULL")}");
         if (!platform) return;
         
         // Track for preview mode
         _currentlyPickedUpPlatform = platform;
+        Debug.Log($"[PlatformManager.OnPlatformPickedUp] Set _currentlyPickedUpPlatform to {platform.name}");
         
         // Ensure platform components are set up (once)
         platform.EnsureChildrenModulesRegistered();
@@ -190,6 +200,7 @@ public class PlatformManager : MonoBehaviour
         // Clear grid cells to free the space
         if (_allPlatforms.Contains(platform) && platform.occupiedCells != null)
         {
+            Debug.Log($"[PlatformManager.OnPlatformPickedUp] Clearing {platform.occupiedCells.Count} grid cells");
             foreach (Vector2Int cell in platform.occupiedCells)
             {
                 _worldGrid.TryRemoveFlag(cell, WorldGrid.CellFlag.Occupied);
@@ -198,7 +209,9 @@ public class PlatformManager : MonoBehaviour
         }
         
         // Mark for preview update
+        Debug.Log($"[PlatformManager.OnPlatformPickedUp] Marking adjacency dirty");
         MarkAdjacencyDirty();
+        Debug.Log($"[PlatformManager.OnPlatformPickedUp] _adjacencyDirty is now: {_adjacencyDirty}");
     }
     
     #endregion
@@ -269,7 +282,9 @@ public class PlatformManager : MonoBehaviour
     /// Used by BuildModeManager to update railing preview during placement
     public void TriggerAdjacencyUpdate()
     {
+        Debug.Log($"[PlatformManager.TriggerAdjacencyUpdate] Called. _currentlyPickedUpPlatform={((_currentlyPickedUpPlatform != null) ? _currentlyPickedUpPlatform.name : "NULL")}");
         MarkAdjacencyDirty();
+        Debug.Log($"[PlatformManager.TriggerAdjacencyUpdate] _adjacencyDirty is now: {_adjacencyDirty}");
     }
 
 
