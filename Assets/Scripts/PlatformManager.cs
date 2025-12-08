@@ -68,9 +68,6 @@ public class PlatformManager : MonoBehaviour
     private bool _adjacencyDirty = false;
     private bool _isRecomputingAdjacency = false;
     
-    // Track currently picked-up platform for preview mode
-    private GamePlatform _currentlyPickedUpPlatform = null;
-    
     #endregion
 
     #region Unity Lifecycle
@@ -139,22 +136,11 @@ public class PlatformManager : MonoBehaviour
 
     private void LateUpdate()
     {
-        // Batch adjacency recomputation to once per frame if dirty
+        // Batch adjacency recomputation for placed platforms
         if (_adjacencyDirty && !_isRecomputingAdjacency)
         {
             _adjacencyDirty = false;
-            
-            // Check if we're in preview mode (platform being moved) or placed mode
-            if (_currentlyPickedUpPlatform != null)
-            {
-                // Lightweight preview update - railings only, no NavMesh
-                UpdatePreview(_currentlyPickedUpPlatform);
-            }
-            else
-            {
-                // Full update with NavMesh for placed platforms
-                UpdatePlacedPlatforms();
-            }
+            UpdatePlacedPlatforms();
         }
     }
 
@@ -201,25 +187,17 @@ public class PlatformManager : MonoBehaviour
     private void HandlePlatformPlaced(GamePlatform platform)
     {
         if (!platform) return;
-        
-        // Exit preview mode
-        _currentlyPickedUpPlatform = null;
-        
-        // Full registration with NavMesh
         RegisterPlatform(platform);
     }
 
 
     ///
     /// Event handler called when ANY platform is picked up
-    /// Clears grid cells and enters preview mode
+    /// Clears grid cells and updates preview immediately
     ///
     private void OnPlatformPickedUp(GamePlatform platform)
     {
         if (!platform) return;
-        
-        // Track for preview mode
-        _currentlyPickedUpPlatform = platform;
         
         // Clear grid cells to free the space
         if (_allPlatforms.TryGetValue(platform, out PlatformGameData data))
@@ -231,8 +209,8 @@ public class PlatformManager : MonoBehaviour
             }
         }
         
-        // Mark for preview update
-        MarkAdjacencyDirty();
+        // Immediately update preview (lightweight, no NavMesh)
+        UpdatePreview(platform);
     }
     
     #endregion
@@ -615,18 +593,13 @@ public class PlatformManager : MonoBehaviour
 
 
     ///
-    /// Public API for BuildModeManager to update preview platform railings
-    /// Marks adjacency dirty and lets LateUpdate handle the lightweight preview
+    /// Public API for BuildModeManager to update preview during movement
+    /// Updates adjacency immediately for the picked-up platform
     ///
-    public void UpdatePreviewPlatformRailings(GamePlatform previewPlatform)
+    public void UpdateMovingPlatformPreview(GamePlatform platform)
     {
-        if (!previewPlatform) return;
-        
-        // Track as currently picked up platform
-        _currentlyPickedUpPlatform = previewPlatform;
-        
-        // Mark for preview update in LateUpdate
-        MarkAdjacencyDirty();
+        if (!platform) return;
+        UpdatePreview(platform);
     }
     
     #endregion
