@@ -164,50 +164,46 @@ namespace Grid
 
 
         ///
-        /// Get all 8-directional neighbor cells for a given cell (only in-bounds neighbors)
+        /// Get neighboring cells (4-directional or 8-directional)
+        /// For single cell: returns its neighbors
+        /// For multiple cells: returns neighbors excluding the input cells (ring around area)
         ///
-        public List<Vector2Int> GetNeighborCells(Vector2Int cell)
-        {
-            var neighbors = new List<Vector2Int>(8);
-            
-            for (int dx = -1; dx <= 1; dx++)
-            {
-                for (int dy = -1; dy <= 1; dy++)
-                {
-                    if (dx == 0 && dy == 0) continue; // Skip the cell itself
-                    
-                    var neighborCell = new Vector2Int(cell.x + dx, cell.y + dy);
-                    if (CellInBounds(neighborCell))
-                        neighbors.Add(neighborCell);
-                }
-            }
-            
-            return neighbors;
-        }
-
-
-        ///
-        /// Get all neighboring cells around a list of cells (8-directional ring, excluding the cells themselves)
-        ///
-        public HashSet<Vector2Int> GetNeighborCellsAround(List<Vector2Int> cells)
+        public HashSet<Vector2Int> GetNeighborCells(List<Vector2Int> cells, bool include8Directional = true)
         {
             var neighbors = new HashSet<Vector2Int>();
             var cellSet = new HashSet<Vector2Int>(cells);
             
             foreach (var cell in cells)
             {
-                for (int dx = -1; dx <= 1; dx++)
+                if (include8Directional)
                 {
-                    for (int dy = -1; dy <= 1; dy++)
+                    // 8-directional neighbors
+                    for (int dx = -1; dx <= 1; dx++)
                     {
-                        if (dx == 0 && dy == 0) continue; // Skip the cell itself
-                        
-                        var neighborCell = new Vector2Int(cell.x + dx, cell.y + dy);
-                        
-                        // Only add if it's in bounds and not part of the original cells
-                        if (CellInBounds(neighborCell) && !cellSet.Contains(neighborCell))
-                            neighbors.Add(neighborCell);
+                        for (int dy = -1; dy <= 1; dy++)
+                        {
+                            if (dx == 0 && dy == 0) continue;
+                            
+                            var neighborCell = new Vector2Int(cell.x + dx, cell.y + dy);
+                            if (CellInBounds(neighborCell) && !cellSet.Contains(neighborCell))
+                                neighbors.Add(neighborCell);
+                        }
                     }
+                }
+                else
+                {
+                    // 4-directional neighbors (cardinal only)
+                    var n = new Vector2Int(cell.x + 1, cell.y);
+                    if (CellInBounds(n) && !cellSet.Contains(n)) neighbors.Add(n);
+                    
+                    n = new Vector2Int(cell.x - 1, cell.y);
+                    if (CellInBounds(n) && !cellSet.Contains(n)) neighbors.Add(n);
+                    
+                    n = new Vector2Int(cell.x, cell.y + 1);
+                    if (CellInBounds(n) && !cellSet.Contains(n)) neighbors.Add(n);
+                    
+                    n = new Vector2Int(cell.x, cell.y - 1);
+                    if (CellInBounds(n) && !cellSet.Contains(n)) neighbors.Add(n);
                 }
             }
             
@@ -414,127 +410,91 @@ namespace Grid
             return true;
         }
 
-        /// Write cell data if in bounds.
-        /// Bumps Version and raises CellChanged.
-        public void SetCell(Vector2Int cell, CellData data)
-        {
-            if (!CellInBounds(cell)) return;
-            
-            _cells[cell.x, cell.y] = data;
-            
-            Version++;
-            CellChanged?.Invoke(cell);
-        }
-
-        
-        /// Clear cell (flags=Empty, payloads zero).
-        /// Returns true if in bounds;
-        /// bumps Version & raises CellChanged.
-        public void ClearCell(Vector2Int cell)
-        {
-            if (!CellInBounds(cell)) return;
-            
-            _cells[cell.x, cell.y] = default;
-            
-            Version++;
-            CellChanged?.Invoke(cell);
-        }
-
-        
         ///
-        /// Set cell status with priority enforcement
+        /// Primary method to set cell flags with priority enforcement
         /// Priority: Locked > Occupied > OccupyPreview > Buildable > Empty
-        /// Higher priority flags prevent lower priority flags from being set
+        /// Returns false if operation is blocked by higher priority flag
         ///
-        public bool SetCellStatus(Vector2Int cell, CellFlag newFlag)
+        public bool TrySetCellFlag(Vector2Int cell, CellFlag newFlag, bool enforcePriority = true)
         {
             if (!CellInBounds(cell)) return false;
             
             var cd = _cells[cell.x, cell.y];
             
-            // Locked cells cannot change (highest priority)
-            if (cd.HasFlag(CellFlag.Locked) && newFlag != CellFlag.Locked)
-                return false;
-            
-            // When setting a new flag, enforce mutual exclusivity based on priority
-            if (newFlag == CellFlag.Locked)
+            if (enforcePriority)
             {
-                // Locked removes all other flags
-                cd.flags = CellFlag.Locked;
-            }
-            else if (newFlag == CellFlag.Occupied)
-            {
-                // Occupied removes preview and buildable
-                cd.flags &= ~(CellFlag.OccupyPreview | CellFlag.Buildable);
-                cd.flags |= CellFlag.Occupied;
-            }
-            else if (newFlag == CellFlag.OccupyPreview)
-            {
-                // Preview cannot overwrite Occupied
-                if (cd.HasFlag(CellFlag.Occupied))
+                // Locked cells cannot change (highest priority)
+                if (cd.HasFlag(CellFlag.Locked) && newFlag != CellFlag.Locked)
                     return false;
                 
-                cd.flags &= ~CellFlag.Buildable;
-                cd.flags |= CellFlag.OccupyPreview;
+                // Enforce mutual exclusivity based on priority
+                if (newFlag == CellFlag.Locked)
+                {
+                    cd.flags = CellFlag.Locked;
+                }
+                else if (newFlag == CellFlag.Occupied)
+                {
+                    cd.flags &= ~(CellFlag.OccupyPreview | CellFlag.Buildable);
+                    cd.flags |= CellFlag.Occupied;
+                }
+                else if (newFlag == CellFlag.OccupyPreview)
+                {
+                    // Preview cannot overwrite Occupied
+                    if (cd.HasFlag(CellFlag.Occupied))
+                        return false;
+                    
+                    cd.flags &= ~CellFlag.Buildable;
+                    cd.flags |= CellFlag.OccupyPreview;
+                }
+                else if (newFlag == CellFlag.Buildable)
+                {
+                    // Buildable cannot overwrite Occupied or Preview
+                    if (cd.HasFlag(CellFlag.Occupied) || cd.HasFlag(CellFlag.OccupyPreview))
+                        return false;
+                    
+                    cd.flags |= CellFlag.Buildable;
+                }
+                else if (newFlag == CellFlag.Empty)
+                {
+                    cd.flags = CellFlag.Empty;
+                }
             }
-            else if (newFlag == CellFlag.Buildable)
+            else
             {
-                // Buildable cannot overwrite Occupied or Preview
-                if (cd.HasFlag(CellFlag.Occupied) || cd.HasFlag(CellFlag.OccupyPreview))
-                    return false;
-                
-                cd.flags |= CellFlag.Buildable;
-            }
-            else if (newFlag == CellFlag.Empty)
-            {
-                // Empty clears all flags
-                cd.flags = CellFlag.Empty;
+                // Direct flag manipulation without priority enforcement
+                if (newFlag == CellFlag.Empty)
+                    cd.flags = CellFlag.Empty;
+                else
+                    cd.flags |= newFlag;
             }
             
             _cells[cell.x, cell.y] = cd;
-            Version++;
-            CellChanged?.Invoke(cell);
-            
-            return true;
-        }
-        
-        
-        /// Add a flag to a single cell (in-bounds).
-        /// Returns true on success;
-        /// bumps Version & raises CellChanged.
-        public bool TryAddFlag(Vector2Int cell, CellFlag flag)
-        {
-            if (!CellInBounds(cell)) return false;
-            
-            var cd = _cells[cell.x, cell.y];
-            cd.flags |= flag;
-
-            _cells[cell.x, cell.y] = cd;
-            
             Version++;
             CellChanged?.Invoke(cell);
             
             return true;
         }
 
-        
-        
-        /// Remove a flag from a single cell (in-bounds).
-        /// Returns true on success; bumps Version & raises CellChanged.
-        public bool TryRemoveFlag(Vector2Int cell, CellFlag flag)
+
+        ///
+        /// Remove specific flags from a cell
+        /// Returns false if cell is out of bounds
+        ///
+        public bool TryClearCellFlags(Vector2Int cell, CellFlag flagsToClear)
         {
             if (!CellInBounds(cell)) return false;
             
             var cd = _cells[cell.x, cell.y];
-            cd.flags &= ~flag;
+            cd.flags &= ~flagsToClear;
             
             _cells[cell.x, cell.y] = cd;
-            
             Version++;
             CellChanged?.Invoke(cell);
             
             return true;
         }
+
+
 
         
         
@@ -754,34 +714,6 @@ namespace Grid
         
         // ---------- Neighbors (pathing/adjacency) ----------
 
-        public List<Vector2Int> GetNeighbors4(Vector2Int cell)
-        {
-            var neighbors = new List<Vector2Int>();
-            
-            var n = new Vector2Int(cell.x + 1, cell.y); if (CellInBounds(n)) neighbors.Add(n);
-            n.x = cell.x - 1;                                     if (CellInBounds(n)) neighbors.Add(n);
-            n.x = cell.x; n.y = cell.y + 1;                       if (CellInBounds(n)) neighbors.Add(n);
-            n.y = cell.y - 1;                                     if (CellInBounds(n)) neighbors.Add(n);
-            
-            return neighbors;
-        }
-
-        public List<Vector2Int> GetNeighbors8(Vector2Int cell)
-        {
-            var neighbors = new List<Vector2Int>();
-            
-            for (int dy = -1; dy <= 1; dy++)
-            for (int dx = -1; dx <= 1; dx++)
-            {
-                if (dx == 0 && dy == 0) continue;
-                
-                var n = new Vector2Int(cell.x + dx, cell.y + dy);
-                
-                if (CellInBounds(n)) neighbors.Add(n);
-            }
-            
-            return neighbors;
-        }
 
         
         
