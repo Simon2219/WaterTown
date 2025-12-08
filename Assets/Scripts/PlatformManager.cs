@@ -106,9 +106,7 @@ public class PlatformManager : MonoBehaviour
 
     private void OnEnable()
     {
-        // Subscribe to static platform lifecycle events (for discovery and cleanup)
-        GamePlatform.PlatformEnabled += OnPlatformEnabled;
-        GamePlatform.PlatformDisabled += OnPlatformDisabled;
+        // No static event subscriptions needed - GamePlatform calls us directly
     }
 
 
@@ -131,10 +129,6 @@ public class PlatformManager : MonoBehaviour
 
     private void OnDisable()
     {
-        // Unsubscribe from static platform lifecycle events
-        GamePlatform.PlatformEnabled -= OnPlatformEnabled;
-        GamePlatform.PlatformDisabled -= OnPlatformDisabled;
-        
         // Best-effort cleanup of instance event subscriptions
         foreach (GamePlatform platform in _allPlatforms.Keys)
         {
@@ -177,10 +171,10 @@ public class PlatformManager : MonoBehaviour
     
     
     ///
-    /// Event handler called when ANY platform becomes enabled
+    /// Called by GamePlatform when it becomes enabled
     /// Adds platform to registry and subscribes to its instance events
     ///
-    private void OnPlatformEnabled(GamePlatform platform)
+    public void OnPlatformCreated(GamePlatform platform)
     {
         if (!platform) return;
         
@@ -198,10 +192,10 @@ public class PlatformManager : MonoBehaviour
 
 
     ///
-    /// Event handler called when ANY platform becomes disabled
+    /// Called by GamePlatform when it becomes disabled
     /// Removes the platform from the global registry and unregisters from grid
     ///
-    private void OnPlatformDisabled(GamePlatform platform)
+    public void OnPlatformDestroyed(GamePlatform platform)
     {
         if (!platform) return;
         UnregisterPlatform(platform);
@@ -415,7 +409,7 @@ public class PlatformManager : MonoBehaviour
             }
         }
 
-        // Ensure we have game data (instance event subscriptions handled in OnPlatformEnabled)
+        // Ensure we have game data (instance event subscriptions handled in OnPlatformCreated)
         if (!_allPlatforms.TryGetValue(platform, out var data))
         {
             data = new PlatformGameData();

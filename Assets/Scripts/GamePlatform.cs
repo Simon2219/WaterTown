@@ -25,14 +25,6 @@ namespace WaterTown.Platforms
         /// Fired whenever this platform moves (position/rotation/scale changes)
         public event Action<GamePlatform> HasMoved;
         
-        /// Static event fired when ANY platform becomes enabled (for initial discovery)
-        /// Used by managers to add platform to registry and subscribe to instance events
-        public static event Action<GamePlatform> PlatformEnabled;
-        
-        /// Static event fired when ANY platform becomes disabled (for cleanup)
-        /// Used by managers to unsubscribe and remove platform from registry
-        public static event Action<GamePlatform> PlatformDisabled;
-        
         /// Instance event fired when this platform is placed (after successful placement)
         /// Subscribed by PlatformManager to register platform in grid and trigger adjacency
         public event Action<GamePlatform> Placed;
@@ -805,15 +797,17 @@ namespace WaterTown.Platforms
             
             InitializePlatform();
             
-            // Fire static event for any listening managers (e.g., PlatformManager)
-            PlatformEnabled?.Invoke(this);
+            // Notify PlatformManager directly (no static events needed)
+            if (_platformManager)
+                _platformManager.OnPlatformCreated(this);
         }
 
 
         private void OnDisable()
         {
-            // Fire static event for any listening managers (e.g., PlatformManager)
-            PlatformDisabled?.Invoke(this);
+            // Notify PlatformManager directly (no static events needed)
+            if (_platformManager)
+                _platformManager.OnPlatformDestroyed(this);
         }
 
 
