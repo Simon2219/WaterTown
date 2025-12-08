@@ -16,7 +16,7 @@ namespace WaterTown.Platforms
         #region Configuration & Dependencies
         
         // ---------- Instance References to Manager Systems ----------
-        private TownManager _townManager;
+        
         private PlatformManager _platformManager;
 
         /// <summary>Fired whenever this platform's connection/railing state changes.</summary>
@@ -30,6 +30,8 @@ namespace WaterTown.Platforms
         
         /// <summary>Static event fired when ANY platform becomes disabled. Used by managers for cleanup.</summary>
         public static event Action<GamePlatform> PlatformDisabled;
+
+        public List<Vector2Int> occupiedCells = null;
         
         #endregion
 
@@ -781,11 +783,7 @@ namespace WaterTown.Platforms
         /// </summary>
         private void FindDependencies()
         {
-            _townManager = FindFirstObjectByType<TownManager>();
-            if (!_townManager)
-            {
-                throw ErrorHandler.MissingDependency(typeof(TownManager), this);
-            }
+            
             
             _platformManager = FindFirstObjectByType<PlatformManager>();
             if (!_platformManager)
@@ -799,11 +797,11 @@ namespace WaterTown.Platforms
             _lastPos = transform.position;
             _lastRot = transform.rotation;
             _lastScale = transform.localScale;
-
-            // Fire static event for any listening managers (e.g., PlatformManager)
-            PlatformEnabled?.Invoke(this);
             
             InitializePlatform();
+            
+            // Fire static event for any listening managers (e.g., PlatformManager)
+            PlatformEnabled?.Invoke(this);
         }
 
         private void OnDisable()
@@ -969,13 +967,11 @@ namespace WaterTown.Platforms
         #region NavMesh Link Creation & Adjacency (Deprecated)
         
         // ---------- Link creation & adjacency ----------
-
-        /// <summary>
+        
         /// [DEPRECATED: Use TownManager's grid-based adjacency checking instead]
         /// Check if two platforms are adjacent by matching socket positions.
         /// This method uses distance-based calculations which should be replaced with grid cell adjacency.
         /// Kept for backward compatibility with editor tools.
-        /// </summary>
         [System.Obsolete("Use TownManager's grid-based adjacency checking instead. This method uses distance calculations.")]
         public static bool ConnectIfAdjacent(GamePlatform a, GamePlatform b, 
             float socketMatchingDistance = 0.25f, 
@@ -1135,11 +1131,11 @@ namespace WaterTown.Platforms
                 _originalMaterials = _allRenderers[0].sharedMaterials;
             }
             
-            // If this is an existing object being moved, unregister from TownManager
+            // If this is an existing object being moved, unregister
             // This will trigger adjacency recomputation so neighboring platforms update their railings
             if (!isNewObject)
             {
-                _townManager.UnregisterPlatform(this);
+                _platformManager.UnregisterPlatform(this);
             }
         }
 
@@ -1159,14 +1155,15 @@ namespace WaterTown.Platforms
             EnsureChildrenModulesRegistered();
             EnsureChildrenRailingsRegistered();
             
-            // Register with TownManager (triggers adjacency recomputation and NavMesh build)
+            // Register (triggers adjacency recomputation and NavMesh build)
             var cells = new List<Vector2Int>();
             _platformManager.GetCellsForPlatform(this, cells);
-            
+            occupiedCells = cells;
             // CRITICAL: Set IsPickedUp AFTER registration to avoid race condition
             // If we set it to false before registration, RecomputeAllAdjacency might run
             // while the platform is in a transitional state (not picked up, but not registered either)
-            _platformManager.RegisterPlatform(this, cells, markOccupiedInGrid: true);
+            _platformManager.RegisterPlatform(this, markOccupiedInGrid: true);
+            
             
             IsPickedUp = false;
         }
@@ -1197,11 +1194,12 @@ namespace WaterTown.Platforms
                 // Rebuild sockets at original position
                 BuildSockets();
                 
-                // Re-register with TownManager at original position
+                // Re-register t original position
                 // This triggers adjacency recomputation so railings/NavMesh links update
                 var cells = new List<Vector2Int>();
                 _platformManager.GetCellsForPlatform(this, cells);
-                _platformManager.RegisterPlatform(this, cells, markOccupiedInGrid: true);
+                occupiedCells = cells;
+                _platformManager.RegisterPlatform(this, markOccupiedInGrid: true);
             }
         }
 
@@ -1326,7 +1324,7 @@ namespace WaterTown.Platforms
             if (cells.Count == 0) return false;
             
             // Check if area is free
-            return _townManager.IsAreaFree(cells);
+            return _platformManager.IsAreaFree(cells);
         }
         
         #endregion
