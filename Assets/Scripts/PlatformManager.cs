@@ -129,11 +129,19 @@ public class PlatformManager : MonoBehaviour
     private void LateUpdate()
     {
         // Only update preview for picked-up platform
-        if (_adjacencyDirty && _currentlyPickedUpPlatform != null)
+        if (_adjacencyDirty)
         {
-            _adjacencyDirty = false;
-            Debug.Log($"[PlatformManager] UpdatePreview called for {_currentlyPickedUpPlatform.name}");
-            UpdatePreview(_currentlyPickedUpPlatform);
+            if (_currentlyPickedUpPlatform != null)
+            {
+                _adjacencyDirty = false;
+                Debug.Log($"[PlatformManager] LateUpdate: Calling UpdatePreview for {_currentlyPickedUpPlatform.name}");
+                UpdatePreview(_currentlyPickedUpPlatform);
+            }
+            else
+            {
+                Debug.LogWarning("[PlatformManager] LateUpdate: _adjacencyDirty is true but _currentlyPickedUpPlatform is NULL!");
+                _adjacencyDirty = false;
+            }
         }
     }
 
@@ -178,10 +186,17 @@ public class PlatformManager : MonoBehaviour
     ///
     private void OnPlatformPickedUp(GamePlatform platform)
     {
-        if (!platform) return;
+        if (!platform)
+        {
+            Debug.LogWarning("[PlatformManager] OnPlatformPickedUp called with null platform!");
+            return;
+        }
+        
+        Debug.Log($"[PlatformManager] OnPlatformPickedUp: {platform.name}");
         
         // Track for preview mode
         _currentlyPickedUpPlatform = platform;
+        Debug.Log($"[PlatformManager] Set _currentlyPickedUpPlatform to {platform.name}");
         
         // Ensure platform components are set up (once)
         platform.EnsureChildrenModulesRegistered();
@@ -196,10 +211,12 @@ public class PlatformManager : MonoBehaviour
                 _worldGrid.TryRemoveFlag(cell, WorldGrid.CellFlag.Occupied);
                 _cellToPlatform.Remove(cell);
             }
+            Debug.Log($"[PlatformManager] Cleared {platform.occupiedCells.Count} grid cells");
         }
         
         // Mark for preview update
         MarkAdjacencyDirty();
+        Debug.Log($"[PlatformManager] Marked adjacency dirty");
     }
     
     #endregion
@@ -270,6 +287,7 @@ public class PlatformManager : MonoBehaviour
     /// Used by BuildModeManager to update railing preview during placement
     public void TriggerAdjacencyUpdate()
     {
+        Debug.Log($"[PlatformManager] TriggerAdjacencyUpdate called. Current picked up: {(_currentlyPickedUpPlatform ? _currentlyPickedUpPlatform.name : "NULL")}");
         MarkAdjacencyDirty();
     }
 
@@ -285,6 +303,7 @@ public class PlatformManager : MonoBehaviour
         // Clear picked up platform reference if this is being placed
         if (_currentlyPickedUpPlatform == platform)
         {
+            Debug.Log($"[PlatformManager] RegisterPlatform: Clearing _currentlyPickedUpPlatform for {platform.name}");
             _currentlyPickedUpPlatform = null;
         }
 
