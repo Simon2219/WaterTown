@@ -157,15 +157,7 @@ public class TownManager : MonoBehaviour
     {
         _platformManager.TriggerAdjacencyUpdate();
     }
-
-
-    ///
-    /// Update preview platform railings (delegates to PlatformManager)
-    ///
-    public void UpdatePreviewPlatformRailings(GamePlatform platform)
-    {
-        _platformManager.UpdatePreviewPlatformRailings(platform);
-    }
+    
     
     #endregion
 }
