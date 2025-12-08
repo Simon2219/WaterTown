@@ -166,17 +166,12 @@ public class PlatformManager : MonoBehaviour
 
     ///
     /// Event handler called when ANY platform becomes enabled
-    /// Adds the platform to the global registry (without grid occupancy)
+    /// Platforms are only registered when placed, not on enable
     ///
     private void OnPlatformEnabled(GamePlatform platform)
     {
-        if (!platform) return;
-        
-        // Add to registry if not already present
-        if (!_allPlatforms.ContainsKey(platform))
-        {
-            _allPlatforms[platform] = new PlatformGameData();
-        }
+        // Platform will be registered when placed via PlatformPlaced event
+        // No auto-registration needed here
     }
 
 
@@ -204,15 +199,14 @@ public class PlatformManager : MonoBehaviour
 
     ///
     /// Event handler called when ANY platform is picked up
-    /// Triggers lightweight adjacency update without unregistering from grid
+    /// Unregisters platform from grid for ghost/preview mode
     ///
     private void OnPlatformPickedUp(GamePlatform platform)
     {
         if (!platform) return;
         
-        // Just mark adjacency as dirty for lightweight update
-        // Don't unregister - that's expensive and unnecessary
-        MarkAdjacencyDirty();
+        // Unregister from grid - platform enters ghost/preview mode
+        UnregisterPlatform(platform);
     }
 
 
@@ -426,192 +420,94 @@ public class PlatformManager : MonoBehaviour
     #region Adjacency System (Grid-Based)
 
     ///
-    /// Public method for checking if two platforms are adjacent using grid cells
-    /// Used by editor tools and runtime systems
-    ///
-    public void ConnectPlatformsIfAdjacent(GamePlatform platformA, GamePlatform platformB)
-    { 
-        if (!_allPlatforms.TryGetValue(platformA, out var dataA) || !_allPlatforms.TryGetValue(platformB, out var dataB))
-        {
-            // If platforms aren't registered, compute their cells
-            if (!_allPlatforms.TryGetValue(platformA, out dataA))
-            {
-                List<Vector2Int> cells = GetCellsForPlatform(platformA);
-                if (cells.Count > 0)
-                {
-                    platformA.occupiedCells = cells;
-                    RegisterPlatform(platformA);
-                    dataA = _allPlatforms[platformA];
-                }
-                else return;
-            }
-            
-            if (!_allPlatforms.TryGetValue(platformB, out dataB))
-            {
-                List<Vector2Int> cells = GetCellsForPlatform(platformB);
-                if (cells.Count > 0)
-                {
-                    platformB.occupiedCells = cells;
-                    RegisterPlatform(platformB);
-                    dataB = _allPlatforms[platformB];
-                }
-                else return;
-            }
-        }
-        
-        // Allow NavMesh rebuild for manual connections (not during drag)
-        bool shouldRebuildNavMesh = !platformA.IsPickedUp && !platformB.IsPickedUp;
-        ConnectIfAdjacentByGridCells(platformA, dataA, platformB, dataB, shouldRebuildNavMesh);
-    }
-
-
-    ///
     /// Check if two platforms are adjacent by comparing their grid cells
     /// Two platforms are adjacent if any of their cells share an edge (not just a corner)
     /// Creates socket connections and NavMesh links where cells are adjacent
+    /// Used by editor tools and runtime systems
     ///
-    private void ConnectIfAdjacentByGridCells(GamePlatform a, PlatformGameData dataA, GamePlatform b, PlatformGameData dataB, bool rebuildNavMesh)
+    public void ConnectPlatformsIfAdjacent(GamePlatform a, GamePlatform b, bool rebuildNavMesh)
     {
         if (!a || !b || a == b) return;
         
-        // Build sockets if needed (BuildSockets is safe to call multiple times)
+        // Get cell data for both platforms
+        List<Vector2Int> cellsA = GetCellsForPlatform(a);
+        List<Vector2Int> cellsB = GetCellsForPlatform(b);
+        
+        if (cellsA.Count == 0 || cellsB.Count == 0) return;
+        
+        // Build sockets if needed
         a.BuildSockets();
         b.BuildSockets();
 
-        // Find edge-adjacent cell pairs
-        var adjacentCellPairs = new List<(Vector2Int cellA, Vector2Int cellB)>();
-        
-        foreach (var cellA in dataA.cells)
+        // Quick check: are any cells edge-adjacent
+        bool hasAdjacentCells = false;
+        foreach (var cellA in cellsA)
         {
-            // Check all 4 edge neighbors of cellA
             List<Vector2Int> neighbors = _worldGrid.GetNeighbors4(cellA);
-            
             foreach (var neighbor in neighbors)
             {
-                // Check if this neighbor is occupied by platform B
-                if (dataB.cells.Contains(neighbor))
+                if (cellsB.Contains(neighbor))
                 {
-                    // Found an edge-adjacent pair
-                    if (!adjacentCellPairs.Contains((cellA, neighbor)) && 
-                        !adjacentCellPairs.Contains((neighbor, cellA)))
-                    {
-                        adjacentCellPairs.Add((cellA, neighbor));
-                    }
+                    hasAdjacentCells = true;
+                    break;
                 }
             }
+            if (hasAdjacentCells) break;
         }
 
-        if (adjacentCellPairs.Count == 0)
-            return;
+        if (!hasAdjacentCells) return;
 
-        // Find sockets on the edges where cells are adjacent
+        // Find matching sockets at connection boundary
         var aSocketIndices = new HashSet<int>();
         var bSocketIndices = new HashSet<int>();
-        var connectionPositions = new List<Vector3>();
-
-        // Match sockets by EXACT world position (with small tolerance for floating point errors)
-        // Sockets are at 0.5m intervals so we can't use grid cells (which are at 1m intervals)
-        const float socketMatchDistance = 0.1f; // 10cm tolerance for floating point errors
         
-        // Build socket position map for platform B (for fast lookup by rounded position)
-        var bSocketsByRoundedPos = new Dictionary<Vector3Int, List<int>>();
+        // Match sockets by world position (0.5m intervals)
+        const float socketMatchDistance = 0.1f;
         
-        for (int i = 0; i < b.SocketCount; i++)
-        {
-            Vector3 worldPos = b.GetSocketWorldPosition(i);
-            // Round to nearest 0.5m for bucketing (sockets are at 0.5m intervals)
-            Vector3Int rounded = new Vector3Int(
-                Mathf.RoundToInt(worldPos.x * 2f), // x2 to capture 0.5m precision
-                Mathf.RoundToInt(worldPos.y * 2f),
-                Mathf.RoundToInt(worldPos.z * 2f)
-            );
-            
-            if (!bSocketsByRoundedPos.TryGetValue(rounded, out var list))
-            {
-                list = new List<int>();
-                bSocketsByRoundedPos[rounded] = list;
-            }
-            list.Add(i);
-        }
-        
-        // Check each socket on platform A for a match on platform B
         for (int i = 0; i < a.SocketCount; i++)
         {
             Vector3 worldPosA = a.GetSocketWorldPosition(i);
-            Vector3Int roundedA = new Vector3Int(
-                Mathf.RoundToInt(worldPosA.x * 2f),
-                Mathf.RoundToInt(worldPosA.y * 2f),
-                Mathf.RoundToInt(worldPosA.z * 2f)
-            );
             
-            // Check for matches in the same bucket
-            if (bSocketsByRoundedPos.TryGetValue(roundedA, out var candidatesB))
+            for (int j = 0; j < b.SocketCount; j++)
             {
-                foreach (int j in candidatesB)
+                Vector3 worldPosB = b.GetSocketWorldPosition(j);
+                float distSqr = (worldPosA - worldPosB).sqrMagnitude;
+                
+                if (distSqr <= socketMatchDistance * socketMatchDistance)
                 {
-                    Vector3 worldPosB = b.GetSocketWorldPosition(j);
-                    float distSqr = (worldPosA - worldPosB).sqrMagnitude;
-                    
-                    if (distSqr <= socketMatchDistance * socketMatchDistance)
-                    {
-                        // Exact match - these sockets should connect
-                        aSocketIndices.Add(i);
-                        bSocketIndices.Add(j);
-                        connectionPositions.Add(worldPosA);
-                        break; // Only match each socket once
-                    }
+                    aSocketIndices.Add(i);
+                    bSocketIndices.Add(j);
+                    break;
                 }
             }
         }
 
-        if (aSocketIndices.Count == 0 && bSocketIndices.Count == 0)
-            return;
+        if (aSocketIndices.Count == 0 && bSocketIndices.Count == 0) return;
 
-        // Apply connection visuals
+        // Apply connection visuals (railings)
         if (aSocketIndices.Count > 0)
             a.ApplyConnectionVisuals(aSocketIndices, true);
         if (bSocketIndices.Count > 0)
             b.ApplyConnectionVisuals(bSocketIndices, true);
 
-        // Only rebuild NavMesh if platforms are placed (not being dragged)
-        if (rebuildNavMesh)
+        // Only rebuild NavMesh and create links if platforms are placed
+        if (rebuildNavMesh && !a.IsPickedUp && !b.IsPickedUp)
         {
-            if (!a.IsPickedUp) a.QueueRebuild();
-            if (!b.IsPickedUp) b.QueueRebuild();
-        }
+            a.QueueRebuild();
+            b.QueueRebuild();
+            
+            // Create NavMesh link at average connection position
+            Vector3 avgPosA = Vector3.zero;
+            foreach (int idx in aSocketIndices)
+                avgPosA += a.GetSocketWorldPosition(idx);
+            avgPosA /= aSocketIndices.Count;
 
-        // Create NavMesh links at connection points
-        if (connectionPositions.Count > 0)
-        {
-            Vector3 avgPosition = Vector3.zero;
-            foreach (var pos in connectionPositions)
-                avgPosition += pos;
-            avgPosition /= connectionPositions.Count;
+            Vector3 avgPosB = Vector3.zero;
+            foreach (int idx in bSocketIndices)
+                avgPosB += b.GetSocketWorldPosition(idx);
+            avgPosB /= bSocketIndices.Count;
 
-            // Create a link between the platforms at the average connection position
-            if (aSocketIndices.Count > 0 && bSocketIndices.Count > 0)
-            {
-                // Calculate average positions of connected sockets
-                Vector3 avgPosA = Vector3.zero;
-                int countA = 0;
-                foreach (int idx in aSocketIndices)
-                {
-                    avgPosA += a.GetSocketWorldPosition(idx);
-                    countA++;
-                }
-                if (countA > 0) avgPosA /= countA;
-
-                Vector3 avgPosB = Vector3.zero;
-                int countB = 0;
-                foreach (int idx in bSocketIndices)
-                {
-                    avgPosB += b.GetSocketWorldPosition(idx);
-                    countB++;
-                }
-                if (countB > 0) avgPosB /= countB;
-
-                CreateNavLinkBetween(a, avgPosA, b, avgPosB);
-            }
+            CreateNavLinkBetween(a, avgPosA, b, avgPosB);
         }
     }
 
@@ -661,8 +557,9 @@ public class PlatformManager : MonoBehaviour
 
 
     ///
-    /// Recomputes connections for ALL platforms (runtime)
-    /// Separated into two paths: placed platforms (with NavMesh) and preview (without NavMesh)
+    /// Recomputes connections for ALL registered platforms
+    /// Only processes placed platforms (IsPickedUp = false)
+    /// Preview platforms are handled separately without full registration
     /// This is batched to run once per frame maximum via LateUpdate
     ///
     private void RecomputeAllAdjacency()
@@ -672,30 +569,34 @@ public class PlatformManager : MonoBehaviour
         _isRecomputingAdjacency = true;
 
         var placedPlatforms = new List<GamePlatform>();
-        GamePlatform pickedUpPlatform = null;
         
-        // Separate placed platforms from picked-up platform
+        // Only process registered placed platforms
         foreach (var gp in _allPlatforms.Keys)
         {
             if (!gp) continue;
             if (!gp.isActiveAndEnabled) continue;
             
-            if (gp.IsPickedUp)
-            {
-                pickedUpPlatform = gp;
-                continue;
-            }
-            
             placedPlatforms.Add(gp);
         }
 
-        // Process placed platforms (with NavMesh rebuild)
-        RecomputePlacedPlatformsAdjacency(placedPlatforms);
-        
-        // Process picked-up platform preview (without NavMesh rebuild)
-        if (pickedUpPlatform != null)
+        // Ensure all components are registered
+        foreach (var p in placedPlatforms)
         {
-            RecomputePickedUpPlatformPreview(pickedUpPlatform, placedPlatforms);
+            p.EnsureChildrenModulesRegistered();
+            p.EnsureChildrenRailingsRegistered();
+        }
+
+        // Reset all connections first so rails reappear when platforms separate
+        foreach (var p in placedPlatforms)
+            p.EditorResetAllConnections();
+
+        // Compute pairwise connections with full NavMesh rebuild
+        for (int i = 0; i < placedPlatforms.Count; i++)
+        {
+            for (int j = i + 1; j < placedPlatforms.Count; j++)
+            {
+                ConnectPlatformsIfAdjacent(placedPlatforms[i], placedPlatforms[j], rebuildNavMesh: true);
+            }
         }
 
         _isRecomputingAdjacency = false;
@@ -703,70 +604,24 @@ public class PlatformManager : MonoBehaviour
 
 
     ///
-    /// Recomputes adjacency for placed platforms with full NavMesh rebuild
-    /// Called for permanent platforms that need connection updates
+    /// Updates railing preview for a ghost/preview platform
+    /// Lightweight - only updates socket/railing visibility without grid registration
+    /// Called during platform placement to show connection preview
     ///
-    private void RecomputePlacedPlatformsAdjacency(List<GamePlatform> placedPlatforms)
+    public void UpdatePreviewPlatformRailings(GamePlatform previewPlatform)
     {
-        // Ensure registration is always valid
-        foreach (var p in placedPlatforms)
+        if (!previewPlatform) return;
+        
+        // Reset preview platform connections
+        previewPlatform.EditorResetAllConnections();
+        
+        // Check adjacency with all placed platforms (lightweight, no NavMesh)
+        foreach (var placedPlatform in _allPlatforms.Keys)
         {
-            p.EnsureChildrenModulesRegistered();
-            p.EnsureChildrenRailingsRegistered();
-        }
-
-        // Reset everything first so rails reappear when platforms separate
-        foreach (var p in placedPlatforms)
-            p.EditorResetAllConnections();
-
-        // Try pairwise connections with NavMesh rebuild enabled
-        int platformCount = placedPlatforms.Count;
-        for (int i = 0; i < platformCount; i++)
-        {
-            var platformA = placedPlatforms[i];
-            if (!_allPlatforms.TryGetValue(platformA, out var dataA))
-            {
-                Debug.LogWarning($"[PlatformManager] Platform '{platformA.name}' in scene but NOT registered in _allPlatforms!");
-                continue;
-            }
+            if (!placedPlatform) continue;
+            if (!placedPlatform.isActiveAndEnabled) continue;
             
-            for (int j = i + 1; j < platformCount; j++)
-            {
-                var platformB = placedPlatforms[j];
-                if (!_allPlatforms.TryGetValue(platformB, out var dataB)) continue;
-                
-                // Check adjacency with NavMesh rebuild (platforms are placed)
-                ConnectIfAdjacentByGridCells(platformA, dataA, platformB, dataB, rebuildNavMesh: true);
-            }
-        }
-    }
-
-
-    ///
-    /// Recomputes adjacency for picked-up platform WITHOUT NavMesh rebuild
-    /// Provides visual preview of connections while dragging
-    ///
-    private void RecomputePickedUpPlatformPreview(GamePlatform pickedUpPlatform, List<GamePlatform> placedPlatforms)
-    {
-        // Reset picked-up platform so preview starts fresh
-        pickedUpPlatform.EditorResetAllConnections();
-        
-        // Compute cells for preview
-        List<Vector2Int> previewCells = GetCellsForPlatform(pickedUpPlatform);
-        
-        if (previewCells.Count == 0) return;
-        
-        // Create temporary data for preview
-        var previewData = new PlatformGameData();
-        previewData.cells.AddRange(previewCells);
-        
-        // Check connections with all placed platforms for preview (no NavMesh rebuild)
-        foreach (var placedPlatform in placedPlatforms)
-        {
-            if (!_allPlatforms.TryGetValue(placedPlatform, out var placedData)) continue;
-            
-            // Update socket statuses for preview without rebuilding NavMesh
-            ConnectIfAdjacentByGridCells(pickedUpPlatform, previewData, placedPlatform, placedData, rebuildNavMesh: false);
+            ConnectPlatformsIfAdjacent(previewPlatform, placedPlatform, rebuildNavMesh: false);
         }
     }
     
