@@ -293,6 +293,28 @@ public class PlatformManager : MonoBehaviour
 
 
     ///
+    /// Public API for BuildModeManager to update preview for a specific platform
+    /// Used for both new platforms (spawning) and existing platforms (moving)
+    ///
+    public void UpdatePreviewPlatformRailings(GamePlatform previewPlatform)
+    {
+        if (!previewPlatform)
+        {
+            Debug.LogWarning("[PlatformManager] UpdatePreviewPlatformRailings called with null platform!");
+            return;
+        }
+        
+        Debug.Log($"[PlatformManager] UpdatePreviewPlatformRailings called for {previewPlatform.name}");
+        
+        // Track as currently picked up platform
+        _currentlyPickedUpPlatform = previewPlatform;
+        
+        // Mark for preview update in LateUpdate
+        MarkAdjacencyDirty();
+    }
+
+
+    ///
     /// Register platform and occupy grid cells
     /// Updates platform's occupied cells in the grid and triggers adjacency computation
     ///
