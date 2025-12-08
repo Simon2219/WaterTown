@@ -54,9 +54,6 @@ namespace Editor
                     }
                 }
             }
-            else
-            {
-            }
         }
     }
 }
