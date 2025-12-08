@@ -68,6 +68,9 @@ public class PlatformManager : MonoBehaviour
     private bool _adjacencyDirty = false;
     private bool _isRecomputingAdjacency = false;
     
+    // Track currently picked-up platform for preview mode
+    private GamePlatform _currentlyPickedUpPlatform = null;
+    
     #endregion
 
     #region Unity Lifecycle
@@ -140,7 +143,18 @@ public class PlatformManager : MonoBehaviour
         if (_adjacencyDirty && !_isRecomputingAdjacency)
         {
             _adjacencyDirty = false;
-            RecomputeAllAdjacency();
+            
+            // Clear separation: preview mode vs placed mode
+            if (_currentlyPickedUpPlatform != null)
+            {
+                // Lightweight preview update (railings only, no NavMesh)
+                UpdatePreviewMode(_currentlyPickedUpPlatform);
+            }
+            else
+            {
+                // Full update with NavMesh rebuild
+                UpdatePlacedMode();
+            }
         }
     }
 
@@ -188,22 +202,30 @@ public class PlatformManager : MonoBehaviour
 
     ///
     /// Event handler called when ANY platform is placed
-    /// Registers platform in grid and triggers full adjacency computation
+    /// Registers platform in grid and exits preview mode
     ///
     private void HandlePlatformPlaced(GamePlatform platform)
     {
         if (!platform) return;
+        
+        // Exit preview mode
+        _currentlyPickedUpPlatform = null;
+        
+        // Full registration with NavMesh
         RegisterPlatform(platform);
     }
 
 
     ///
     /// Event handler called when ANY platform is picked up
-    /// Unregisters platform from grid for ghost/preview mode
+    /// Unregisters platform from grid and enters preview mode
     ///
     private void OnPlatformPickedUp(GamePlatform platform)
     {
         if (!platform) return;
+        
+        // Track for preview mode
+        _currentlyPickedUpPlatform = platform;
         
         // Unregister from grid - platform enters ghost/preview mode
         UnregisterPlatform(platform);
@@ -335,8 +357,8 @@ public class PlatformManager : MonoBehaviour
 
 
     ///
-    /// Register platform and occupy grid cells
-    /// Updates platform's occupied cells in the grid and triggers adjacency computation
+    /// Register platform and occupy grid cells (placed mode only)
+    /// Updates platform's occupied cells in the grid and triggers full adjacency computation
     ///
     public void RegisterPlatform(GamePlatform platform)
     {
@@ -345,7 +367,6 @@ public class PlatformManager : MonoBehaviour
         // Remove old occupancy if any
         if (_allPlatforms.TryGetValue(platform, out var oldData))
         {
-            // Remove from WorldGrid and reverse lookup
             foreach (Vector2Int cell in oldData.cells)
             {
                 _worldGrid.TryRemoveFlag(cell, WorldGrid.CellFlag.Occupied);
@@ -371,11 +392,8 @@ public class PlatformManager : MonoBehaviour
             _cellToPlatform[cell] = platform;
         }
         
-        // Build NavMesh only for placed platforms (not being dragged)
-        if (!platform.IsPickedUp)
-        {
-            platform.BuildLocalNavMesh();
-        }
+        // Build NavMesh for newly placed platform
+        platform.BuildLocalNavMesh();
         
         // Invoke UnityEvent for platform placed
         OnPlatformPlaced?.Invoke(platform);
@@ -420,9 +438,7 @@ public class PlatformManager : MonoBehaviour
     #region Adjacency System (Grid-Based)
 
     ///
-    /// Check if two platforms are adjacent by comparing their grid cells
-    /// Two platforms are adjacent if any of their cells share an edge (not just a corner)
-    /// Creates socket connections and NavMesh links where cells are adjacent
+    /// Check if two platforms are adjacent and update their socket/railing connections
     /// Used by editor tools and runtime systems
     ///
     public void ConnectPlatformsIfAdjacent(GamePlatform a, GamePlatform b, bool rebuildNavMesh)
@@ -440,28 +456,51 @@ public class PlatformManager : MonoBehaviour
         b.BuildSockets();
 
         // Quick check: are any cells edge-adjacent
-        bool hasAdjacentCells = false;
+        bool hasAdjacentCells = CheckCellsAdjacent(cellsA, cellsB);
+        if (!hasAdjacentCells) return;
+
+        // Find matching sockets at connection boundary
+        var aSocketIndices = new HashSet<int>();
+        var bSocketIndices = new HashSet<int>();
+        FindMatchingSockets(a, b, aSocketIndices, bSocketIndices);
+
+        if (aSocketIndices.Count == 0) return;
+
+        // Apply connection visuals (railings)
+        a.ApplyConnectionVisuals(aSocketIndices, true);
+        b.ApplyConnectionVisuals(bSocketIndices, true);
+
+        // Only rebuild NavMesh and create links in placed mode
+        if (rebuildNavMesh)
+        {
+            RebuildNavMeshForConnection(a, b, aSocketIndices, bSocketIndices);
+        }
+    }
+
+
+    ///
+    /// Check if two cell lists have any edge-adjacent cells
+    ///
+    private bool CheckCellsAdjacent(List<Vector2Int> cellsA, List<Vector2Int> cellsB)
+    {
         foreach (var cellA in cellsA)
         {
             List<Vector2Int> neighbors = _worldGrid.GetNeighbors4(cellA);
             foreach (var neighbor in neighbors)
             {
                 if (cellsB.Contains(neighbor))
-                {
-                    hasAdjacentCells = true;
-                    break;
-                }
+                    return true;
             }
-            if (hasAdjacentCells) break;
         }
+        return false;
+    }
 
-        if (!hasAdjacentCells) return;
 
-        // Find matching sockets at connection boundary
-        var aSocketIndices = new HashSet<int>();
-        var bSocketIndices = new HashSet<int>();
-        
-        // Match sockets by world position (0.5m intervals)
+    ///
+    /// Find sockets on two platforms that match at connection boundary
+    ///
+    private void FindMatchingSockets(GamePlatform a, GamePlatform b, HashSet<int> aSocketIndices, HashSet<int> bSocketIndices)
+    {
         const float socketMatchDistance = 0.1f;
         
         for (int i = 0; i < a.SocketCount; i++)
@@ -481,34 +520,30 @@ public class PlatformManager : MonoBehaviour
                 }
             }
         }
+    }
 
-        if (aSocketIndices.Count == 0 && bSocketIndices.Count == 0) return;
 
-        // Apply connection visuals (railings)
-        if (aSocketIndices.Count > 0)
-            a.ApplyConnectionVisuals(aSocketIndices, true);
-        if (bSocketIndices.Count > 0)
-            b.ApplyConnectionVisuals(bSocketIndices, true);
+    ///
+    /// Rebuild NavMesh and create links for connected platforms
+    /// Only called in placed mode
+    ///
+    private void RebuildNavMeshForConnection(GamePlatform a, GamePlatform b, HashSet<int> aSocketIndices, HashSet<int> bSocketIndices)
+    {
+        a.QueueRebuild();
+        b.QueueRebuild();
+        
+        // Create NavMesh link at average connection position
+        Vector3 avgPosA = Vector3.zero;
+        foreach (int idx in aSocketIndices)
+            avgPosA += a.GetSocketWorldPosition(idx);
+        avgPosA /= aSocketIndices.Count;
 
-        // Only rebuild NavMesh and create links if platforms are placed
-        if (rebuildNavMesh && !a.IsPickedUp && !b.IsPickedUp)
-        {
-            a.QueueRebuild();
-            b.QueueRebuild();
-            
-            // Create NavMesh link at average connection position
-            Vector3 avgPosA = Vector3.zero;
-            foreach (int idx in aSocketIndices)
-                avgPosA += a.GetSocketWorldPosition(idx);
-            avgPosA /= aSocketIndices.Count;
+        Vector3 avgPosB = Vector3.zero;
+        foreach (int idx in bSocketIndices)
+            avgPosB += b.GetSocketWorldPosition(idx);
+        avgPosB /= bSocketIndices.Count;
 
-            Vector3 avgPosB = Vector3.zero;
-            foreach (int idx in bSocketIndices)
-                avgPosB += b.GetSocketWorldPosition(idx);
-            avgPosB /= bSocketIndices.Count;
-
-            CreateNavLinkBetween(a, avgPosA, b, avgPosB);
-        }
+        CreateNavLinkBetween(a, avgPosA, b, avgPosB);
     }
 
 
@@ -557,25 +592,44 @@ public class PlatformManager : MonoBehaviour
 
 
     ///
-    /// Recomputes connections for ALL registered platforms
-    /// Only processes placed platforms (IsPickedUp = false)
-    /// Preview platforms are handled separately without full registration
-    /// This is batched to run once per frame maximum via LateUpdate
+    /// Preview mode: Lightweight railing update for picked-up platform
+    /// Only updates socket/railing visibility, no NavMesh, no links
     ///
-    private void RecomputeAllAdjacency()
+    private void UpdatePreviewMode(GamePlatform previewPlatform)
     {
-        // Prevent recursive calls during adjacency computation
-        if (_isRecomputingAdjacency) return;
         _isRecomputingAdjacency = true;
+        
+        // Reset preview platform connections
+        previewPlatform.EditorResetAllConnections();
+        
+        // Check adjacency with all placed platforms (lightweight)
+        foreach (var placedPlatform in _allPlatforms.Keys)
+        {
+            if (!placedPlatform) continue;
+            if (!placedPlatform.isActiveAndEnabled) continue;
+            
+            ConnectPlatformsIfAdjacent(previewPlatform, placedPlatform, rebuildNavMesh: false);
+        }
+        
+        _isRecomputingAdjacency = false;
+    }
 
+
+    ///
+    /// Placed mode: Full adjacency update with NavMesh rebuild
+    /// Processes all registered platforms and creates NavMesh links
+    ///
+    private void UpdatePlacedMode()
+    {
+        _isRecomputingAdjacency = true;
+        
         var placedPlatforms = new List<GamePlatform>();
         
-        // Only process registered placed platforms
+        // Collect all registered platforms
         foreach (var gp in _allPlatforms.Keys)
         {
             if (!gp) continue;
             if (!gp.isActiveAndEnabled) continue;
-            
             placedPlatforms.Add(gp);
         }
 
@@ -586,7 +640,7 @@ public class PlatformManager : MonoBehaviour
             p.EnsureChildrenRailingsRegistered();
         }
 
-        // Reset all connections first so rails reappear when platforms separate
+        // Reset all connections first
         foreach (var p in placedPlatforms)
             p.EditorResetAllConnections();
 
@@ -598,31 +652,23 @@ public class PlatformManager : MonoBehaviour
                 ConnectPlatformsIfAdjacent(placedPlatforms[i], placedPlatforms[j], rebuildNavMesh: true);
             }
         }
-
+        
         _isRecomputingAdjacency = false;
     }
 
 
     ///
-    /// Updates railing preview for a ghost/preview platform
-    /// Lightweight - only updates socket/railing visibility without grid registration
-    /// Called during platform placement to show connection preview
+    /// Public API for external systems to update preview platform railings
+    /// Used by BuildModeManager during placement
     ///
     public void UpdatePreviewPlatformRailings(GamePlatform previewPlatform)
     {
         if (!previewPlatform) return;
         
-        // Reset preview platform connections
-        previewPlatform.EditorResetAllConnections();
-        
-        // Check adjacency with all placed platforms (lightweight, no NavMesh)
-        foreach (var placedPlatform in _allPlatforms.Keys)
-        {
-            if (!placedPlatform) continue;
-            if (!placedPlatform.isActiveAndEnabled) continue;
-            
-            ConnectPlatformsIfAdjacent(previewPlatform, placedPlatform, rebuildNavMesh: false);
-        }
+        // Just mark dirty - will be processed in LateUpdate
+        // Set preview platform so LateUpdate knows to use preview mode
+        _currentlyPickedUpPlatform = previewPlatform;
+        MarkAdjacencyDirty();
     }
     
     #endregion
