@@ -132,6 +132,7 @@ public class PlatformManager : MonoBehaviour
         if (_adjacencyDirty && _currentlyPickedUpPlatform != null)
         {
             _adjacencyDirty = false;
+            Debug.Log($"[PlatformManager] UpdatePreview called for {_currentlyPickedUpPlatform.name}");
             UpdatePreview(_currentlyPickedUpPlatform);
         }
     }
@@ -413,9 +414,9 @@ public class PlatformManager : MonoBehaviour
         
         if (cellsA.Count == 0 || cellsB.Count == 0) return;
         
-        // Build sockets if needed
-        a.BuildSockets();
-        b.BuildSockets();
+        // Sockets are lazily initialized via SocketCount property
+        // Don't call BuildSockets() here - it rebuilds from scratch!
+        if (a.SocketCount == 0 || b.SocketCount == 0) return;
 
         // Quick check: are any cells edge-adjacent
         bool hasAdjacentCells = false;
@@ -541,6 +542,8 @@ public class PlatformManager : MonoBehaviour
     ///
     private void UpdatePreview(GamePlatform previewPlatform)
     {
+        Debug.Log($"[PlatformManager] UpdatePreview START for {previewPlatform.name} at {previewPlatform.transform.position}");
+        
         // Reset connections on preview platform
         // Note: Socket world positions are auto-updated via cache invalidation on transform change
         previewPlatform.ResetConnections();
@@ -555,6 +558,8 @@ public class PlatformManager : MonoBehaviour
             placedPlatforms.Add(gp);
         }
         
+        Debug.Log($"[PlatformManager] Found {placedPlatforms.Count} placed platforms (excluding preview)");
+        
         // Update connections between placed platforms (no NavMesh)
         for (int i = 0; i < placedPlatforms.Count; i++)
         {
@@ -566,7 +571,13 @@ public class PlatformManager : MonoBehaviour
         
         // Get cells the preview platform would occupy
         List<Vector2Int> previewCells = GetCellsForPlatform(previewPlatform);
-        if (previewCells == null || previewCells.Count == 0) return;
+        if (previewCells == null || previewCells.Count == 0)
+        {
+            Debug.LogWarning($"[PlatformManager] Preview platform {previewPlatform.name} has no cells!");
+            return;
+        }
+        
+        Debug.Log($"[PlatformManager] Preview platform occupies {previewCells.Count} cells");
         
         // Find adjacent platforms via cell lookup (optimization for preview platform)
         var adjacentPlatforms = new HashSet<GamePlatform>();
@@ -583,11 +594,16 @@ public class PlatformManager : MonoBehaviour
             }
         }
         
+        Debug.Log($"[PlatformManager] Found {adjacentPlatforms.Count} adjacent platforms to preview");
+        
         // Update connections between preview and adjacent placed platforms (no NavMesh)
         foreach (var adjacentPlatform in adjacentPlatforms)
         {
+            Debug.Log($"[PlatformManager] Checking adjacency between {previewPlatform.name} and {adjacentPlatform.name}");
             ConnectPlatformsIfAdjacent(previewPlatform, adjacentPlatform, rebuildNavMesh: false);
         }
+        
+        Debug.Log($"[PlatformManager] UpdatePreview END");
     }
     
     #endregion
