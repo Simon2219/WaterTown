@@ -46,20 +46,11 @@ public class PlatformManager : MonoBehaviour
     private const int ROTATION_MODULO_MASK = 3; // 0-3 for 4 cardinal directions (0°, 90°, 180°, 270°)
     
     
-    // Platform Game Data
-    
-    /// Holds all runtime data for a registered platform
-    private class PlatformGameData
-    {
-        public List<Vector2Int> cells = new(); // Grid cells this platform occupies
-    }
-
-    /// Single source of truth for all registered platforms and their data
-    /// Maps each platform to its runtime game data (cells, occupancy state, etc)
-    private readonly Dictionary<GamePlatform, PlatformGameData> _allPlatforms = new();
+    /// Single source of truth for all registered platforms
+    private readonly HashSet<GamePlatform> _allPlatforms = new();
     
     /// Read-only access to all registered platforms
-    public IReadOnlyCollection<GamePlatform> AllPlatforms => _allPlatforms.Keys;
+    public IReadOnlyCollection<GamePlatform> AllPlatforms => _allPlatforms;
     
     /// Reverse lookup: which platform occupies a given cell
     private readonly Dictionary<Vector2Int, GamePlatform> _cellToPlatform = new();
@@ -116,7 +107,7 @@ public class PlatformManager : MonoBehaviour
     private void Start()
     {
         // Ensure all existing platforms in the scene are registered into the grid
-        foreach (GamePlatform platform in _allPlatforms.Keys)
+        foreach (GamePlatform platform in _allPlatforms)
         {
             if (!platform) continue;
             if (!platform.isActiveAndEnabled) continue;
@@ -200,9 +191,9 @@ public class PlatformManager : MonoBehaviour
         if (!platform) return;
         
         // Clear grid cells to free the space
-        if (_allPlatforms.TryGetValue(platform, out PlatformGameData data))
+        if (_allPlatforms.Contains(platform) && platform.occupiedCells != null)
         {
-            foreach (Vector2Int cell in data.cells)
+            foreach (Vector2Int cell in platform.occupiedCells)
             {
                 _worldGrid.TryRemoveFlag(cell, WorldGrid.CellFlag.Occupied);
                 _cellToPlatform.Remove(cell);
@@ -294,25 +285,17 @@ public class PlatformManager : MonoBehaviour
         if (!platform || platform.occupiedCells == null || platform.occupiedCells.Count == 0) return;
 
         // Remove old occupancy if any
-        if (_allPlatforms.TryGetValue(platform, out var oldData))
+        if (_allPlatforms.Contains(platform))
         {
-            // Remove from WorldGrid and reverse lookup
-            foreach (Vector2Int cell in oldData.cells)
+            foreach (Vector2Int cell in platform.occupiedCells)
             {
                 _worldGrid.TryRemoveFlag(cell, WorldGrid.CellFlag.Occupied);
                 _cellToPlatform.Remove(cell);
             }
         }
 
-        // Ensure we have game data
-        if (!_allPlatforms.TryGetValue(platform, out var data))
-        {
-            data = new PlatformGameData();
-            _allPlatforms[platform] = data;
-        }
-        
-        data.cells.Clear();
-        data.cells.AddRange(platform.occupiedCells);
+        // Add to registered platforms
+        _allPlatforms.Add(platform);
 
         // Add to WorldGrid and reverse lookup
         foreach (Vector2Int cell in platform.occupiedCells)
@@ -338,13 +321,16 @@ public class PlatformManager : MonoBehaviour
     public void UnregisterPlatform(GamePlatform platform)
     {
         if (!platform) return;
-        if (!_allPlatforms.TryGetValue(platform, out PlatformGameData data)) return;
+        if (!_allPlatforms.Contains(platform)) return;
 
         // Remove from WorldGrid and reverse lookup
-        foreach (Vector2Int cell in data.cells)
+        if (platform.occupiedCells != null)
         {
-            _worldGrid.TryRemoveFlag(cell, WorldGrid.CellFlag.Occupied);
-            _cellToPlatform.Remove(cell);
+            foreach (Vector2Int cell in platform.occupiedCells)
+            {
+                _worldGrid.TryRemoveFlag(cell, WorldGrid.CellFlag.Occupied);
+                _cellToPlatform.Remove(cell);
+            }
         }
 
         _allPlatforms.Remove(platform);
@@ -512,7 +498,7 @@ public class PlatformManager : MonoBehaviour
         var placedPlatforms = new List<GamePlatform>();
         
         // Collect all registered platforms
-        foreach (var gp in _allPlatforms.Keys)
+        foreach (var gp in _allPlatforms)
         {
             if (!gp) continue;
             if (!gp.isActiveAndEnabled) continue;
