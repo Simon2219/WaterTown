@@ -177,7 +177,7 @@ public class PlatformManager : MonoBehaviour
     
     ///
     /// Event handler called when ANY platform becomes enabled
-    /// Adds the platform to the global registry (without grid occupancy)
+    /// Adds the platform to the global registry and subscribes to pose changes
     ///
     private void OnPlatformEnabled(GamePlatform platform)
     {
@@ -187,6 +187,8 @@ public class PlatformManager : MonoBehaviour
         if (!_allPlatforms.ContainsKey(platform))
         {
             _allPlatforms[platform] = new PlatformGameData();
+            // Subscribe to pose changes so we can track movement in preview/placed modes
+            platform.PoseChanged += OnPlatformPoseChanged;
         }
     }
 
@@ -267,7 +269,7 @@ public class PlatformManager : MonoBehaviour
         data.previousCells.Clear();
         data.previousCells.AddRange(data.cells);
 
-        // Clear old occupancy for this platform
+        // Clear old occupancy for this platform (only if it has cells)
         foreach (Vector2Int cell in data.cells)
         {
             // Remove from WorldGrid
@@ -388,7 +390,7 @@ public class PlatformManager : MonoBehaviour
             }
         }
 
-        // Ensure we have game data and are listening to pose changes
+        // Ensure we have game data (pose change subscription handled in OnPlatformEnabled)
         if (!_allPlatforms.TryGetValue(platform, out var data))
         {
             data = new PlatformGameData();
