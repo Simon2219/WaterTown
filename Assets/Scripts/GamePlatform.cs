@@ -25,12 +25,16 @@ namespace WaterTown.Platforms
         /// Fired whenever this platform moves (position/rotation/scale changes)
         public event Action<GamePlatform> HasMoved;
         
-        /// Instance event fired when this platform is placed (after successful placement)
-        /// Subscribed by PlatformManager to register platform in grid and trigger adjacency
+        /// Fired when this platform becomes enabled (for manager registration)
+        public event Action<GamePlatform> Enabled;
+        
+        /// Fired when this platform becomes disabled (for manager cleanup)
+        public event Action<GamePlatform> Disabled;
+        
+        /// Fired when this platform is placed (after successful placement)
         public event Action<GamePlatform> Placed;
         
-        /// Instance event fired when this platform is picked up (before being moved)
-        /// Subscribed by PlatformManager to update adjacency without full unregister overhead
+        /// Fired when this platform is picked up (before being moved)
         public event Action<GamePlatform> PickedUp;
 
         public List<Vector2Int> occupiedCells = null;
@@ -797,17 +801,35 @@ namespace WaterTown.Platforms
             
             InitializePlatform();
             
-            // Notify PlatformManager directly (no static events needed)
+            // Subscribe PlatformManager to this platform's events
             if (_platformManager)
-                _platformManager.OnPlatformCreated(this);
+            {
+                Enabled += _platformManager.OnPlatformCreated;
+                Disabled += _platformManager.OnPlatformDestroyed;
+                HasMoved += _platformManager.OnPlatformHasMoved;
+                Placed += _platformManager.HandlePlatformPlaced;
+                PickedUp += _platformManager.OnPlatformPickedUp;
+            }
+            
+            // Fire enabled event
+            Enabled?.Invoke(this);
         }
 
 
         private void OnDisable()
         {
-            // Notify PlatformManager directly (no static events needed)
+            // Fire disabled event first
+            Disabled?.Invoke(this);
+            
+            // Unsubscribe PlatformManager from this platform's events
             if (_platformManager)
-                _platformManager.OnPlatformDestroyed(this);
+            {
+                Enabled -= _platformManager.OnPlatformCreated;
+                Disabled -= _platformManager.OnPlatformDestroyed;
+                HasMoved -= _platformManager.OnPlatformHasMoved;
+                Placed -= _platformManager.HandlePlatformPlaced;
+                PickedUp -= _platformManager.OnPlatformPickedUp;
+            }
         }
 
 

@@ -129,16 +129,7 @@ public class PlatformManager : MonoBehaviour
 
     private void OnDisable()
     {
-        // Best-effort cleanup of instance event subscriptions
-        foreach (GamePlatform platform in _allPlatforms.Keys)
-        {
-            if (platform)
-            {
-                platform.HasMoved -= OnPlatformHasMoved;
-                platform.Placed -= HandlePlatformPlaced;
-                platform.PickedUp -= OnPlatformPickedUp;
-            }
-        }
+        // Cleanup handled by GamePlatform.OnDisable unsubscribing
     }
     
     #endregion
@@ -172,7 +163,7 @@ public class PlatformManager : MonoBehaviour
     
     ///
     /// Called by GamePlatform when it becomes enabled
-    /// Adds platform to registry and subscribes to its instance events
+    /// Adds platform to registry (subscriptions handled by GamePlatform itself)
     ///
     public void OnPlatformCreated(GamePlatform platform)
     {
@@ -182,11 +173,6 @@ public class PlatformManager : MonoBehaviour
         if (!_allPlatforms.ContainsKey(platform))
         {
             _allPlatforms[platform] = new PlatformGameData();
-            
-            // Subscribe to this platform's instance events
-            platform.HasMoved += OnPlatformHasMoved;
-            platform.Placed += HandlePlatformPlaced;
-            platform.PickedUp += OnPlatformPickedUp;
         }
     }
 
@@ -409,16 +395,11 @@ public class PlatformManager : MonoBehaviour
             }
         }
 
-        // Ensure we have game data (instance event subscriptions handled in OnPlatformCreated)
+        // Ensure we have game data (instance event subscriptions handled by GamePlatform.OnEnable)
         if (!_allPlatforms.TryGetValue(platform, out var data))
         {
             data = new PlatformGameData();
             _allPlatforms[platform] = data;
-            
-            // Subscribe to instance events if not already done
-            platform.HasMoved += OnPlatformHasMoved;
-            platform.Placed += HandlePlatformPlaced;
-            platform.PickedUp += OnPlatformPickedUp;
         }
         
         data.cells.Clear();
@@ -444,10 +425,7 @@ public class PlatformManager : MonoBehaviour
         if (!platform) return;
         if (!_allPlatforms.TryGetValue(platform, out PlatformGameData data)) return;
 
-        // Unsubscribe from instance events
-        platform.HasMoved -= OnPlatformHasMoved;
-        platform.Placed -= HandlePlatformPlaced;
-        platform.PickedUp -= OnPlatformPickedUp;
+        // Unsubscribe handled by GamePlatform.OnDisable
 
         // Clear cells from WorldGrid and reverse lookup
         foreach (Vector2Int cell in data.cells)
