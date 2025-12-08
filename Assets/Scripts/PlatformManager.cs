@@ -541,16 +541,16 @@ public class PlatformManager : MonoBehaviour
     ///
     private void UpdatePreview(GamePlatform previewPlatform)
     {
-        // Rebuild sockets for preview platform (position/rotation changed)
-        previewPlatform.BuildSockets();
-        
-        // Reset connections on ALL platforms so railings update correctly
+        // Reset connections on preview platform
+        // Note: Socket world positions are auto-updated via cache invalidation on transform change
         previewPlatform.ResetConnections();
         
+        // Reset connections on placed platforms (excluding preview platform)
         var placedPlatforms = new List<GamePlatform>();
         foreach (var gp in _allPlatforms)
         {
             if (!gp || !gp.isActiveAndEnabled) continue;
+            if (gp == previewPlatform) continue; // Skip preview platform!
             gp.ResetConnections();
             placedPlatforms.Add(gp);
         }
