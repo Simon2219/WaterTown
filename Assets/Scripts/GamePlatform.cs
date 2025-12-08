@@ -1018,12 +1018,8 @@ namespace WaterTown.Platforms
                 _originalMaterials = _allRenderers[0].sharedMaterials;
             }
             
-            // If this is an existing object being moved, notify managers
-            // This triggers lightweight adjacency update without full unregister overhead
-            if (!isNewObject)
-            {
-                PlatformPickedUp?.Invoke(this);
-            }
+            // Notify managers for preview mode (both new and existing platforms)
+            PlatformPickedUp?.Invoke(this);
         }
 
 

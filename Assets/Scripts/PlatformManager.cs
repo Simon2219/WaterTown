@@ -129,19 +129,10 @@ public class PlatformManager : MonoBehaviour
     private void LateUpdate()
     {
         // Only update preview for picked-up platform
-        if (_adjacencyDirty)
+        if (_adjacencyDirty && _currentlyPickedUpPlatform != null)
         {
-            if (_currentlyPickedUpPlatform != null)
-            {
-                _adjacencyDirty = false;
-                Debug.Log($"[PlatformManager] LateUpdate: Calling UpdatePreview for {_currentlyPickedUpPlatform.name}");
-                UpdatePreview(_currentlyPickedUpPlatform);
-            }
-            else
-            {
-                Debug.LogWarning("[PlatformManager] LateUpdate: _adjacencyDirty is true but _currentlyPickedUpPlatform is NULL!");
-                _adjacencyDirty = false;
-            }
+            _adjacencyDirty = false;
+            UpdatePreview(_currentlyPickedUpPlatform);
         }
     }
 
@@ -186,17 +177,10 @@ public class PlatformManager : MonoBehaviour
     ///
     private void OnPlatformPickedUp(GamePlatform platform)
     {
-        if (!platform)
-        {
-            Debug.LogWarning("[PlatformManager] OnPlatformPickedUp called with null platform!");
-            return;
-        }
-        
-        Debug.Log($"[PlatformManager] OnPlatformPickedUp: {platform.name}");
+        if (!platform) return;
         
         // Track for preview mode
         _currentlyPickedUpPlatform = platform;
-        Debug.Log($"[PlatformManager] Set _currentlyPickedUpPlatform to {platform.name}");
         
         // Ensure platform components are set up (once)
         platform.EnsureChildrenModulesRegistered();
@@ -211,12 +195,10 @@ public class PlatformManager : MonoBehaviour
                 _worldGrid.TryRemoveFlag(cell, WorldGrid.CellFlag.Occupied);
                 _cellToPlatform.Remove(cell);
             }
-            Debug.Log($"[PlatformManager] Cleared {platform.occupiedCells.Count} grid cells");
         }
         
         // Mark for preview update
         MarkAdjacencyDirty();
-        Debug.Log($"[PlatformManager] Marked adjacency dirty");
     }
     
     #endregion
@@ -287,29 +269,6 @@ public class PlatformManager : MonoBehaviour
     /// Used by BuildModeManager to update railing preview during placement
     public void TriggerAdjacencyUpdate()
     {
-        Debug.Log($"[PlatformManager] TriggerAdjacencyUpdate called. Current picked up: {(_currentlyPickedUpPlatform ? _currentlyPickedUpPlatform.name : "NULL")}");
-        MarkAdjacencyDirty();
-    }
-
-
-    ///
-    /// Public API for BuildModeManager to update preview for a specific platform
-    /// Used for both new platforms (spawning) and existing platforms (moving)
-    ///
-    public void UpdatePreviewPlatformRailings(GamePlatform previewPlatform)
-    {
-        if (!previewPlatform)
-        {
-            Debug.LogWarning("[PlatformManager] UpdatePreviewPlatformRailings called with null platform!");
-            return;
-        }
-        
-        Debug.Log($"[PlatformManager] UpdatePreviewPlatformRailings called for {previewPlatform.name}");
-        
-        // Track as currently picked up platform
-        _currentlyPickedUpPlatform = previewPlatform;
-        
-        // Mark for preview update in LateUpdate
         MarkAdjacencyDirty();
     }
 
@@ -325,7 +284,6 @@ public class PlatformManager : MonoBehaviour
         // Clear picked up platform reference if this is being placed
         if (_currentlyPickedUpPlatform == platform)
         {
-            Debug.Log($"[PlatformManager] RegisterPlatform: Clearing _currentlyPickedUpPlatform for {platform.name}");
             _currentlyPickedUpPlatform = null;
         }
 
@@ -455,9 +413,9 @@ public class PlatformManager : MonoBehaviour
         
         if (cellsA.Count == 0 || cellsB.Count == 0) return;
         
-        // Sockets are lazily initialized via SocketCount property
-        // Don't call BuildSockets() here - it rebuilds from scratch!
-        if (a.SocketCount == 0 || b.SocketCount == 0) return;
+        // Build sockets if needed
+        a.BuildSockets();
+        b.BuildSockets();
 
         // Quick check: are any cells edge-adjacent
         bool hasAdjacentCells = false;
@@ -583,8 +541,6 @@ public class PlatformManager : MonoBehaviour
     ///
     private void UpdatePreview(GamePlatform previewPlatform)
     {
-        Debug.Log($"[PlatformManager] UpdatePreview START for {previewPlatform.name} at {previewPlatform.transform.position}");
-        
         // Reset connections on preview platform
         // Note: Socket world positions are auto-updated via cache invalidation on transform change
         previewPlatform.ResetConnections();
@@ -599,8 +555,6 @@ public class PlatformManager : MonoBehaviour
             placedPlatforms.Add(gp);
         }
         
-        Debug.Log($"[PlatformManager] Found {placedPlatforms.Count} placed platforms (excluding preview)");
-        
         // Update connections between placed platforms (no NavMesh)
         for (int i = 0; i < placedPlatforms.Count; i++)
         {
@@ -612,13 +566,7 @@ public class PlatformManager : MonoBehaviour
         
         // Get cells the preview platform would occupy
         List<Vector2Int> previewCells = GetCellsForPlatform(previewPlatform);
-        if (previewCells == null || previewCells.Count == 0)
-        {
-            Debug.LogWarning($"[PlatformManager] Preview platform {previewPlatform.name} has no cells!");
-            return;
-        }
-        
-        Debug.Log($"[PlatformManager] Preview platform occupies {previewCells.Count} cells");
+        if (previewCells == null || previewCells.Count == 0) return;
         
         // Find adjacent platforms via cell lookup (optimization for preview platform)
         var adjacentPlatforms = new HashSet<GamePlatform>();
@@ -635,16 +583,11 @@ public class PlatformManager : MonoBehaviour
             }
         }
         
-        Debug.Log($"[PlatformManager] Found {adjacentPlatforms.Count} adjacent platforms to preview");
-        
         // Update connections between preview and adjacent placed platforms (no NavMesh)
         foreach (var adjacentPlatform in adjacentPlatforms)
         {
-            Debug.Log($"[PlatformManager] Checking adjacency between {previewPlatform.name} and {adjacentPlatform.name}");
             ConnectPlatformsIfAdjacent(previewPlatform, adjacentPlatform, rebuildNavMesh: false);
         }
-        
-        Debug.Log($"[PlatformManager] UpdatePreview END");
     }
     
     #endregion
