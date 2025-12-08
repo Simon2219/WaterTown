@@ -26,27 +26,29 @@ namespace WaterTown.Platforms
         public event Action<GamePlatform> HasMoved;
         
         /// Static event fired when ANY platform is created (for initial discovery)
-        /// Used by managers to subscribe to this platform's instance events
+        /// Used by managers to subscribe to this platform's EVENT |s
         public static event Action<GamePlatform> Created;
         
         /// Static event fired when ANY platform is destroyed (for cleanup)
-        /// Used by managers to unsubscribe from this platform's instance events
+        /// Used by managers to unsubscribe from this platform's EVENT |s
         public static event Action<GamePlatform> Destroyed;
         
-        /// Instance event fired when this platform becomes enabled
+        /// EVENT | fired when this platform becomes enabled
         public event Action<GamePlatform> Enabled;
         
-        /// Instance event fired when this platform becomes disabled
+        /// EVENT | fired when this platform becomes disabled
         public event Action<GamePlatform> Disabled;
         
-        /// Instance event fired when this platform is placed (after successful placement)
+        /// EVENT | fired when this platform is placed (after successful placement)
         public event Action<GamePlatform> Placed;
         
-        /// Instance event fired when this platform is picked up (before being moved)
+        /// EVENT | fired when this platform is picked up (before being moved)
         public event Action<GamePlatform> PickedUp;
 
-        public List<Vector2Int> occupiedCells = null;
-        public List<Vector2Int> previousOccupiedCells = null;
+        
+        public List<Vector2Int> occupiedCells = new();
+        public List<Vector2Int> previousOccupiedCells = new();
+        
         
         #endregion
 
@@ -774,7 +776,7 @@ namespace WaterTown.Platforms
 
         private void Awake()
         {
-            // Fire static creation event for managers to subscribe to instance events
+            // Fire static creation event for managers to subscribe to EVENT |s
             Created?.Invoke(this);
             
             try
@@ -813,14 +815,14 @@ namespace WaterTown.Platforms
             
             InitializePlatform();
             
-            // Fire instance event
+            // Fire EVENT |
             Enabled?.Invoke(this);
         }
 
 
         private void OnDisable()
         {
-            // Fire instance event
+            // Fire EVENT |
             Disabled?.Invoke(this);
         }
 
@@ -834,18 +836,21 @@ namespace WaterTown.Platforms
 
         private void LateUpdate()
         {
-            if (transform.position != _lastPos ||
-                transform.rotation != _lastRot ||
-                transform.localScale != _lastScale)
+            if (IsPickedUp)
             {
-                _lastPos = transform.position;
-                _lastRot = transform.rotation;
-                _lastScale = transform.localScale;
+                if (transform.position != _lastPos ||
+                    transform.rotation != _lastRot ||
+                    transform.localScale != _lastScale)
+                {
+                    _lastPos = transform.position;
+                    _lastRot = transform.rotation;
+                    _lastScale = transform.localScale;
 
-                // Invalidate world position cache on transform change
-                _worldPositionsCacheValid = false;
+                    // Invalidate world position cache on transform change
+                    _worldPositionsCacheValid = false;
 
-                HasMoved?.Invoke(this);
+                    HasMoved?.Invoke(this);
+                }
             }
         }
 

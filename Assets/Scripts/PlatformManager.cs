@@ -185,15 +185,10 @@ public class PlatformManager : MonoBehaviour
         
         // Add to registry immediately
         _registeredPlatforms.Add(platform);
-        
-        // Initialize platform's cell tracking
-        if (platform.occupiedCells == null)
-            platform.occupiedCells = new List<Vector2Int>();
-        if (platform.previousOccupiedCells == null)
-            platform.previousOccupiedCells = new List<Vector2Int>();
     }
 
 
+    
     ///
     /// Event handler for static Destroyed event
     /// Unsubscribes from all instance events and cleans up
@@ -216,6 +211,7 @@ public class PlatformManager : MonoBehaviour
         }
     }
 
+    
 
     ///
     /// Instance event handler when a platform becomes enabled
@@ -228,6 +224,7 @@ public class PlatformManager : MonoBehaviour
     }
 
 
+    
     ///
     /// Instance event handler when a platform becomes disabled
     /// Removes the platform from the grid
@@ -267,14 +264,6 @@ public class PlatformManager : MonoBehaviour
     {
         if (!platform) return;
         
-        // Store current cells as previous before clearing
-        if (platform.previousOccupiedCells == null)
-            platform.previousOccupiedCells = new List<Vector2Int>();
-        
-        platform.previousOccupiedCells.Clear();
-        if (platform.occupiedCells != null)
-            platform.previousOccupiedCells.AddRange(platform.occupiedCells);
-        
         // Clear Occupied flags and cell ownership for cells this platform was occupying
         if (platform.occupiedCells != null)
         {
@@ -296,33 +285,13 @@ public class PlatformManager : MonoBehaviour
     }
 
 
+    
     ///
     /// Called when a platform reports its transform changed
     /// Lightweight update for runtime platform movement
     ///
     private void OnPlatformHasMoved(GamePlatform platform)
     {
-        if (!platform) return;
-        
-        // Use lightweight MovePlatform for movement (called every frame when transform changes)
-        MovePlatform(platform);
-    }
-
-
-    ///
-    /// Lightweight platform movement update (for runtime pose changes)
-    /// Uses OccupyPreview flag for preview platforms, Occupied for placed
-    ///
-    private void MovePlatform(GamePlatform platform)
-    {
-        if (!platform) return;
-        
-        // Initialize cell lists if needed
-        if (platform.occupiedCells == null)
-            platform.occupiedCells = new List<Vector2Int>();
-        if (platform.previousOccupiedCells == null)
-            platform.previousOccupiedCells = new List<Vector2Int>();
-
         // Store current cells as previous for the next update
         platform.previousOccupiedCells.Clear();
         platform.previousOccupiedCells.AddRange(platform.occupiedCells);
@@ -340,13 +309,12 @@ public class PlatformManager : MonoBehaviour
 
         // Compute new footprint cells from current transform (rotation-aware)
         List<Vector2Int> newCells = GetCellsForPlatform(platform);
-
         platform.occupiedCells.Clear();
         platform.occupiedCells.AddRange(newCells);
 
-        // Set appropriate flag based on whether platform is placed or in preview
+        // Different Flag based on if Preview or Placed
         WorldGrid.CellFlag flagToUse = platform.IsPickedUp ? WorldGrid.CellFlag.OccupyPreview : WorldGrid.CellFlag.Occupied;
-
+        
         // Update grid occupancy with proper flags
         foreach (Vector2Int cell in platform.occupiedCells)
         {
@@ -360,47 +328,48 @@ public class PlatformManager : MonoBehaviour
         // Mark adjacency as dirty for batched recomputation (no NavMesh rebuild during movement)
         MarkAdjacencyDirty();
     }
+
+    
     
     #endregion
 
     #region Public API (Platform Registration & Queries)
 
-    ///
+
     /// Get the platform occupying a specific cell, if any
     /// Returns null if cell is empty or out of bounds
-    /// O(1) lookup via reverse dictionary
     ///
     public GamePlatform GetPlatformAtCell(Vector2Int cell)
     {
         return _cellToPlatform.GetValueOrDefault(cell);
     }
+    
 
-
-    ///
-    /// Get the platform occupying a specific cell (3D grid cell converted to 2D)
-    /// Returns null if cell is empty or out of bounds
-    /// O(1) lookup via reverse dictionary
-    ///
+    
+    // Vector3Int Override
     public GamePlatform GetPlatformAtCell(Vector3Int cell)
     {
         return GetPlatformAtCell(new Vector2Int(cell.x, cell.y));
     }
 
 
+
+    /// Check if cell is occupied by any platform
+    /// OPTIONAL BOOL: Include similar Flags other than Occupied (Preview)
     ///
-    /// Check if a specific cell is occupied by any platform (placed or preview)
-    /// Uses cell flags for accurate state (consistent with IsAreaFree)
-    ///
-    public bool IsCellOccupied(Vector2Int cell)
+    public bool IsCellOccupied(Vector2Int cell, bool includeAllOccupation = true)
     {
-        return _worldGrid.CellHasAnyFlag(cell, WorldGrid.CellFlag.Occupied | WorldGrid.CellFlag.OccupyPreview);
+        return
+            includeAllOccupation ?
+                _worldGrid.CellHasAnyFlag(cell, WorldGrid.CellFlag.Occupied | WorldGrid.CellFlag.OccupyPreview)
+                :
+                _worldGrid.CellHasAnyFlag(cell, WorldGrid.CellFlag.Occupied);
     }
 
 
-    ///
-    /// True if all given 2D cells are inside the grid and not Occupied
-    /// OccupyPreview cells are considered free (allows placement over preview)
-    ///
+
+    /// TRUE IF: All cells inside Area are FLAG Empty
+    /// OccupyPreview -> considered free (allows placement over preview)
     public bool IsAreaFree(List<Vector2Int> cells)
     {
         foreach (Vector2Int cell in cells)
@@ -408,9 +377,7 @@ public class PlatformManager : MonoBehaviour
             if (!_worldGrid.CellInBounds(cell))
                 return false;
             
-            // Only reject if cell has Occupied flag (placed platforms)
-            // OccupyPreview is allowed (preview platforms don't block placement)
-            if (_worldGrid.CellHasAnyFlag(cell, WorldGrid.CellFlag.Occupied))
+            if (IsCellOccupied(cell, false))
                 return false;
         }
         return true;
@@ -767,7 +734,7 @@ public class PlatformManager : MonoBehaviour
         foreach (var neighborCell in neighborCells)
         {
             // Check if cell is occupied or preview occupied
-            if (_worldGrid.CellHasAnyFlag(neighborCell, WorldGrid.CellFlag.Occupied | WorldGrid.CellFlag.OccupyPreview))
+            if (IsCellOccupied(neighborCell))
             {
                 // Find which platform occupies this cell
                 if (_cellToPlatform.TryGetValue(neighborCell, out var neighborPlatform))

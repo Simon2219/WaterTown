@@ -42,6 +42,7 @@ namespace WaterTown.Building
         
         // Reusable lists (avoid allocations)
         private readonly List<Vector2Int> _tempCellList = new List<Vector2Int>();
+
         
         #endregion
 
@@ -190,7 +191,7 @@ namespace WaterTown.Building
             _selectedBlueprint = blueprint;
             _currentRotation = 0f;
 
-            SpawnPlatformForPlacement(blueprint);
+            SpawnPlatform(blueprint);
         }
         
         #endregion
@@ -200,7 +201,7 @@ namespace WaterTown.Building
         /// <summary>
         /// Spawns a new platform for placement (build mode).
         /// </summary>
-        private void SpawnPlatformForPlacement(PlatformBlueprint blueprint)
+        private void SpawnPlatform(PlatformBlueprint blueprint)
         {
             if (blueprint.RuntimePrefab == null)
             {
@@ -300,6 +301,7 @@ namespace WaterTown.Building
             _currentPickup.OnPlaced();
             _currentPickup = null;
             _selectedBlueprint = null;
+            
         }
 
         /// <summary>
