@@ -315,7 +315,7 @@ public class PlatformManager : MonoBehaviour
         platform.EnsureChildrenRailingsRegistered();
         
         // Reset connections first
-        platform.EditorResetAllConnections();
+        platform.ResetConnections();
         
         // Update adjacency for this platform with all other placed platforms
         foreach (var other in _allPlatforms)
@@ -371,14 +371,14 @@ public class PlatformManager : MonoBehaviour
 
         // Clear connections on this platform (only if active)
         if (platform.gameObject.activeInHierarchy)
-            platform.EditorResetAllConnections();
+            platform.ResetConnections();
 
         // Update adjacency for affected platforms (railings should reappear)
         foreach (var adjacentPlatform in adjacentPlatforms)
         {
             if (adjacentPlatform.isActiveAndEnabled)
             {
-                adjacentPlatform.EditorResetAllConnections();
+                adjacentPlatform.ResetConnections();
                 foreach (var other in _allPlatforms)
                 {
                     if (other != adjacentPlatform && other.isActiveAndEnabled)
@@ -541,14 +541,17 @@ public class PlatformManager : MonoBehaviour
     ///
     private void UpdatePreview(GamePlatform previewPlatform)
     {
+        // Rebuild sockets for preview platform (position/rotation changed)
+        previewPlatform.BuildSockets();
+        
         // Reset connections on ALL platforms so railings update correctly
-        previewPlatform.EditorResetAllConnections();
+        previewPlatform.ResetConnections();
         
         var placedPlatforms = new List<GamePlatform>();
         foreach (var gp in _allPlatforms)
         {
             if (!gp || !gp.isActiveAndEnabled) continue;
-            gp.EditorResetAllConnections();
+            gp.ResetConnections();
             placedPlatforms.Add(gp);
         }
         
