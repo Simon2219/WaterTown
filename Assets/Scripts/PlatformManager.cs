@@ -57,7 +57,6 @@ public class PlatformManager : MonoBehaviour
 
     // Adjacency recomputation batching (performance optimization)
     private bool _adjacencyDirty = false;
-    private bool _isRecomputingAdjacency = false;
     
     // Track currently picked-up platform for preview mode
     private GamePlatform _currentlyPickedUpPlatform = null;
@@ -129,22 +128,11 @@ public class PlatformManager : MonoBehaviour
 
     private void LateUpdate()
     {
-        // Batch adjacency recomputation to once per frame if dirty
-        if (_adjacencyDirty && !_isRecomputingAdjacency)
+        // Only update preview for picked-up platform
+        if (_adjacencyDirty && _currentlyPickedUpPlatform != null)
         {
             _adjacencyDirty = false;
-            
-            // Check if we're in preview mode (platform being moved) or placed mode
-            if (_currentlyPickedUpPlatform != null)
-            {
-                // Lightweight preview update - railings only, no NavMesh
-                UpdatePreview(_currentlyPickedUpPlatform);
-            }
-            else
-            {
-                // Full update with NavMesh for placed platforms
-                UpdatePlacedPlatforms();
-            }
+            UpdatePreview(_currentlyPickedUpPlatform);
         }
     }
 
@@ -317,11 +305,24 @@ public class PlatformManager : MonoBehaviour
         // Build NavMesh for placed platform
         platform.BuildLocalNavMesh();
         
+        // Ensure components are registered
+        platform.EnsureChildrenModulesRegistered();
+        platform.EnsureChildrenRailingsRegistered();
+        
+        // Reset connections first
+        platform.EditorResetAllConnections();
+        
+        // Update adjacency for this platform with all other placed platforms
+        foreach (var other in _allPlatforms)
+        {
+            if (other != platform && other.isActiveAndEnabled)
+            {
+                ConnectPlatformsIfAdjacent(platform, other, rebuildNavMesh: true);
+            }
+        }
+        
         // Invoke UnityEvent for platform placed
         OnPlatformPlaced?.Invoke(platform);
-
-        // Mark adjacency for batched recomputation
-        MarkAdjacencyDirty();
     }
 
 
@@ -332,6 +333,24 @@ public class PlatformManager : MonoBehaviour
     {
         if (!platform) return;
         if (!_allPlatforms.Contains(platform)) return;
+
+        // Find platforms that were adjacent before removal
+        var adjacentPlatforms = new HashSet<GamePlatform>();
+        if (platform.occupiedCells != null)
+        {
+            foreach (Vector2Int cell in platform.occupiedCells)
+            {
+                List<Vector2Int> neighbors = _worldGrid.GetNeighbors4(cell);
+                foreach (var neighbor in neighbors)
+                {
+                    GamePlatform adjacentPlatform = GetPlatformAtCell(neighbor);
+                    if (adjacentPlatform != null && adjacentPlatform != platform)
+                    {
+                        adjacentPlatforms.Add(adjacentPlatform);
+                    }
+                }
+            }
+        }
 
         // Remove from WorldGrid and reverse lookup
         if (platform.occupiedCells != null)
@@ -349,11 +368,24 @@ public class PlatformManager : MonoBehaviour
         if (platform.gameObject.activeInHierarchy)
             platform.EditorResetAllConnections();
 
+        // Update adjacency for affected platforms (railings should reappear)
+        foreach (var adjacentPlatform in adjacentPlatforms)
+        {
+            if (adjacentPlatform.isActiveAndEnabled)
+            {
+                adjacentPlatform.EditorResetAllConnections();
+                foreach (var other in _allPlatforms)
+                {
+                    if (other != adjacentPlatform && other.isActiveAndEnabled)
+                    {
+                        ConnectPlatformsIfAdjacent(adjacentPlatform, other, rebuildNavMesh: true);
+                    }
+                }
+            }
+        }
+
         // Invoke UnityEvent for platform removed
         OnPlatformRemoved?.Invoke(platform);
-
-        // Mark adjacency for batched recomputation
-        MarkAdjacencyDirty();
     }
     
     #endregion
@@ -498,56 +530,12 @@ public class PlatformManager : MonoBehaviour
 
 
     ///
-    /// Full adjacency update for all placed platforms with NavMesh rebuild
-    /// Processes all registered platforms and creates NavMesh links
-    ///
-    private void UpdatePlacedPlatforms()
-    {
-        _isRecomputingAdjacency = true;
-
-        var placedPlatforms = new List<GamePlatform>();
-        
-        // Collect all registered platforms
-        foreach (var gp in _allPlatforms)
-        {
-            if (!gp) continue;
-            if (!gp.isActiveAndEnabled) continue;
-            placedPlatforms.Add(gp);
-        }
-
-        // Ensure all components are registered
-        foreach (var p in placedPlatforms)
-        {
-            p.EnsureChildrenModulesRegistered();
-            p.EnsureChildrenRailingsRegistered();
-        }
-
-        // Reset all connections first so rails reappear when platforms separate
-        foreach (var p in placedPlatforms)
-            p.EditorResetAllConnections();
-
-        // Compute pairwise connections with full NavMesh rebuild
-        for (int i = 0; i < placedPlatforms.Count; i++)
-        {
-            for (int j = i + 1; j < placedPlatforms.Count; j++)
-            {
-                ConnectPlatformsIfAdjacent(placedPlatforms[i], placedPlatforms[j], rebuildNavMesh: true);
-            }
-        }
-
-        _isRecomputingAdjacency = false;
-    }
-
-
-    ///
     /// Lightweight preview update for picked-up platform
     /// Only checks adjacency with platforms occupying neighbor cells
     /// Updates railings only, no NavMesh or links
     ///
     private void UpdatePreview(GamePlatform previewPlatform)
     {
-        _isRecomputingAdjacency = true;
-        
         // Ensure preview platform components are registered
         previewPlatform.EnsureChildrenModulesRegistered();
         previewPlatform.EnsureChildrenRailingsRegistered();
@@ -557,11 +545,7 @@ public class PlatformManager : MonoBehaviour
         
         // Get cells the preview platform would occupy
         List<Vector2Int> previewCells = GetCellsForPlatform(previewPlatform);
-        if (previewCells == null || previewCells.Count == 0)
-        {
-            _isRecomputingAdjacency = false;
-            return;
-        }
+        if (previewCells == null || previewCells.Count == 0) return;
         
         // Find adjacent platforms via cell lookup (optimization!)
         var adjacentPlatforms = new HashSet<GamePlatform>();
@@ -578,13 +562,11 @@ public class PlatformManager : MonoBehaviour
             }
         }
         
-        // Only check adjacency with platforms in neighbor cells
+        // Only check adjacency with platforms in neighbor cells (no NavMesh)
         foreach (var adjacentPlatform in adjacentPlatforms)
         {
             ConnectPlatformsIfAdjacent(previewPlatform, adjacentPlatform, rebuildNavMesh: false);
         }
-        
-        _isRecomputingAdjacency = false;
     }
     
     #endregion
