@@ -115,22 +115,7 @@ public class PlatformManager : MonoBehaviour
 
     private void Start()
     {
-        // Ensure all existing platforms in the scene are registered into the grid
-        foreach (GamePlatform platform in _allPlatforms.Keys)
-        {
-            if (!platform) continue;
-            if (!platform.isActiveAndEnabled) continue;
-
-            List<Vector2Int> tmpCells = GetCellsForPlatform(platform);
-            platform.occupiedCells = tmpCells;
-            
-            
-            if (tmpCells.Count > 0)
-            {
-                // Registers occupancy AND triggers adjacency for all platforms
-                RegisterPlatform(platform);
-            }
-        }
+        SpawnStartupPlatforms();
     }
 
 
@@ -140,7 +125,7 @@ public class PlatformManager : MonoBehaviour
         if (_adjacencyDirty && !_isRecomputingAdjacency)
         {
             _adjacencyDirty = false;
-            RecomputeAllAdjacency();
+            RecomputeAllAdjacency();                                                 
         }
     }
 
@@ -164,6 +149,31 @@ public class PlatformManager : MonoBehaviour
 
     #region Platform Lifecycle Event Handlers
 
+    private void SpawnStartupPlatforms()
+    {
+        // Later implementation for an Asset defining Starting Setups for the Town
+        
+        // Ensure all existing platforms in the scene are registered into the grid
+        foreach (GamePlatform platform in _allPlatforms.Keys)
+        {
+            if (!platform) continue;
+            if (!platform.isActiveAndEnabled) continue;
+
+            List<Vector2Int> tmpCells = GetCellsForPlatform(platform);
+            platform.occupiedCells = tmpCells;
+            
+            
+            if (tmpCells.Count > 0)
+            {
+                // Registers occupancy AND triggers adjacency for all platforms
+                RegisterPlatform(platform);
+            }
+        }
+    }
+    
+    
+    
+    
     ///
     /// Event handler called when ANY platform becomes enabled
     /// Adds the platform to the global registry (without grid occupancy)
