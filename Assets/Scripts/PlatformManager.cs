@@ -370,7 +370,7 @@ public class PlatformManager : MonoBehaviour
 
     /// TRUE IF: All cells inside Area are FLAG Empty
     /// OccupyPreview -> considered free (allows placement over preview)
-    public bool IsAreaFree(List<Vector2Int> cells)
+    public bool IsAreaEmpty(List<Vector2Int> cells)
     {
         if (cells == null || cells.Count == 0)
             return false;
