@@ -61,12 +61,6 @@ public class PlatformManager : MonoBehaviour
     
     /// Reverse lookup: which platform occupies a given cell
     private readonly Dictionary<Vector2Int, GamePlatform> _cellToPlatform = new();
-    
-    
-
-    // Temp lists
-    private static readonly List<GamePlatform> _tmpPlatforms = new();
-    private readonly List<Vector2Int> _tmpCells = new();
 
     // Adjacency recomputation batching (performance optimization)
     private bool _adjacencyDirty = false;
@@ -106,6 +100,7 @@ public class PlatformManager : MonoBehaviour
         }
     }
 
+
     private void OnEnable()
     {
         // Subscribe to platform lifecycle events
@@ -114,6 +109,7 @@ public class PlatformManager : MonoBehaviour
         GamePlatform.PlatformPlaced += HandlePlatformPlaced;
         GamePlatform.PlatformPickedUp += OnPlatformPickedUp;
     }
+
 
     private void Start()
     {
@@ -135,6 +131,7 @@ public class PlatformManager : MonoBehaviour
         }
     }
 
+
     private void LateUpdate()
     {
         // Batch adjacency recomputation to once per frame if dirty
@@ -144,6 +141,7 @@ public class PlatformManager : MonoBehaviour
             RecomputeAllAdjacency();
         }
     }
+
 
     private void OnDisable()
     {
@@ -163,7 +161,7 @@ public class PlatformManager : MonoBehaviour
     #endregion
 
     #region Platform Lifecycle Event Handlers
-    
+
     ///
     /// Event handler called when ANY platform becomes enabled
     /// Adds the platform to the global registry (without grid occupancy)
@@ -178,7 +176,8 @@ public class PlatformManager : MonoBehaviour
             _allPlatforms[platform] = new PlatformGameData();
         }
     }
-    
+
+
     ///
     /// Event handler called when ANY platform becomes disabled
     /// Removes the platform from the global registry and unregisters from grid
@@ -188,7 +187,8 @@ public class PlatformManager : MonoBehaviour
         if (!platform) return;
         UnregisterPlatform(platform);
     }
-    
+
+
     ///
     /// Event handler called when ANY platform is placed
     /// Registers platform in grid and triggers full adjacency computation
@@ -198,7 +198,8 @@ public class PlatformManager : MonoBehaviour
         if (!platform) return;
         RegisterPlatform(platform);
     }
-    
+
+
     ///
     /// Event handler called when ANY platform is picked up
     /// Triggers lightweight adjacency update without unregistering from grid
@@ -211,7 +212,8 @@ public class PlatformManager : MonoBehaviour
         // Don't unregister - that's expensive and unnecessary
         MarkAdjacencyDirty();
     }
-    
+
+
     ///
     /// Called when a platform reports its transform changed
     /// Lightweight update for runtime platform movement
@@ -223,7 +225,8 @@ public class PlatformManager : MonoBehaviour
         // Use lightweight MovePlatform for pose changes (called every frame)
         MovePlatform(platform);
     }
-    
+
+
     ///
     /// Lightweight platform movement update (for runtime pose changes)
     /// Updates grid occupancy and marks adjacency dirty without full rebuild
@@ -267,7 +270,6 @@ public class PlatformManager : MonoBehaviour
     #endregion
 
     #region Public API (Platform Registration & Queries)
-    
 
     ///
     /// Get the platform occupying a specific cell, if any
@@ -278,7 +280,8 @@ public class PlatformManager : MonoBehaviour
     {
         return _cellToPlatform.GetValueOrDefault(cell);
     }
-    
+
+
     ///
     /// Get the platform occupying a specific cell (3D grid cell converted to 2D)
     /// Returns null if cell is empty or out of bounds
@@ -288,7 +291,8 @@ public class PlatformManager : MonoBehaviour
     {
         return GetPlatformAtCell(new Vector2Int(cell.x, cell.y));
     }
-    
+
+
     ///
     /// Check if a specific cell is occupied by any platform
     /// O(1) lookup via reverse dictionary
@@ -297,9 +301,8 @@ public class PlatformManager : MonoBehaviour
     {
         return _cellToPlatform.ContainsKey(cell);
     }
-    
 
-    
+
     ///
     /// True if all given 2D cells are inside the grid and not Occupied (level 0)
     /// Used by BuildModeManager as placement validation
@@ -319,7 +322,6 @@ public class PlatformManager : MonoBehaviour
     }
 
 
-    
     /// Marks adjacency as needing recomputation
     /// Batched to LateUpdate for performance
     /// Multiple pose changes in the same frame will only trigger one recomputation
@@ -329,7 +331,6 @@ public class PlatformManager : MonoBehaviour
     }
 
 
-    
     /// Public API for external systems to trigger adjacency recomputation
     /// Used by BuildModeManager to update railing preview during placement
     public void TriggerAdjacencyUpdate()
@@ -338,7 +339,6 @@ public class PlatformManager : MonoBehaviour
     }
 
 
-    
     ///
     /// Register platform and occupy grid cells
     /// Updates platform's occupied cells in the grid and triggers adjacency computation
@@ -385,9 +385,8 @@ public class PlatformManager : MonoBehaviour
         // Mark adjacency for batched recomputation
         MarkAdjacencyDirty();
     }
-     
-     
-     
+
+
     ///
     /// Removes platform occupancy from the grid and clears its connections
     ///
@@ -421,7 +420,6 @@ public class PlatformManager : MonoBehaviour
     #endregion
 
     #region Adjacency System (Grid-Based)
-    
 
     ///
     /// Public method for checking if two platforms are adjacent using grid cells
@@ -463,6 +461,7 @@ public class PlatformManager : MonoBehaviour
         
         ConnectIfAdjacentByGridCells(platformA, dataA, platformB, dataB);
     }
+
 
     ///
     /// Check if two platforms are adjacent by comparing their grid cells
@@ -609,7 +608,8 @@ public class PlatformManager : MonoBehaviour
             }
         }
     }
-    
+
+
     ///
     /// Creates a NavMesh link between two platforms at specified world positions
     /// Link is attached to platform A
@@ -633,7 +633,8 @@ public class PlatformManager : MonoBehaviour
         link.area = 0;
         link.agentTypeID = platformA.NavSurface ? platformA.NavSurface.agentTypeID : 0;
     }
-    
+
+
     ///
     /// Gets or creates a child transform with the given name
     ///
@@ -666,33 +667,33 @@ public class PlatformManager : MonoBehaviour
         if (_isRecomputingAdjacency) return;
         _isRecomputingAdjacency = true;
 
-            _tmpPlatforms.Clear();
-            GamePlatform pickedUpPlatform = null;
+        var activePlatforms = new List<GamePlatform>();
+        GamePlatform pickedUpPlatform = null;
+        
+        foreach (var gp in _allPlatforms.Keys)
+        {
+            if (!gp) continue;
+            if (!gp.isActiveAndEnabled) continue;
             
-            foreach (var gp in _allPlatforms.Keys)
+            if (gp.IsPickedUp)
             {
-                if (!gp) continue;
-                if (!gp.isActiveAndEnabled) continue;
-                
-                if (gp.IsPickedUp)
-                {
-                    // Track picked-up platform for preview
-                    pickedUpPlatform = gp;
-                    continue;
-                }
-                
-                _tmpPlatforms.Add(gp);
+                // Track picked-up platform for preview
+                pickedUpPlatform = gp;
+                continue;
             }
+            
+            activePlatforms.Add(gp);
+        }
 
         // Ensure registration is always valid
-        foreach (var p in _tmpPlatforms)
+        foreach (var p in activePlatforms)
         {
             p.EnsureChildrenModulesRegistered();
             p.EnsureChildrenRailingsRegistered();
         }
 
         // Reset everything first so rails reappear when platforms separate
-        foreach (var p in _tmpPlatforms)
+        foreach (var p in activePlatforms)
             p.EditorResetAllConnections();
         
         // IMPORTANT: Also reset picked-up platform so preview starts fresh each frame
@@ -700,10 +701,10 @@ public class PlatformManager : MonoBehaviour
             pickedUpPlatform.EditorResetAllConnections();
 
         // Try pairwise connections for currently touching platforms using grid cell adjacency
-        int platformCount = _tmpPlatforms.Count;
+        int platformCount = activePlatforms.Count;
         for (int platformIndexA = 0; platformIndexA < platformCount; platformIndexA++)
         {
-            var platformA = _tmpPlatforms[platformIndexA];
+            var platformA = activePlatforms[platformIndexA];
             if (!_allPlatforms.TryGetValue(platformA, out var dataA))
             {
                 Debug.LogWarning($"[PlatformManager] Platform '{platformA.name}' in scene but NOT registered in _allPlatforms!");
@@ -712,7 +713,7 @@ public class PlatformManager : MonoBehaviour
             
             for (int platformIndexB = platformIndexA + 1; platformIndexB < platformCount; platformIndexB++)
             {
-                var platformB = _tmpPlatforms[platformIndexB];
+                var platformB = activePlatforms[platformIndexB];
                 if (!_allPlatforms.TryGetValue(platformB, out var dataB)) continue;
                 
                 // Check adjacency using grid cells
@@ -725,17 +726,17 @@ public class PlatformManager : MonoBehaviour
         if (pickedUpPlatform != null)
         {
             // Compute cells for preview
-            _tmpCells.Clear();
-            GetCellsForPlatform(pickedUpPlatform, _tmpCells);
+            var previewCells = new List<Vector2Int>();
+            GetCellsForPlatform(pickedUpPlatform, previewCells);
             
-            if (_tmpCells.Count > 0)
+            if (previewCells.Count > 0)
             {
                 // Create temporary data for preview (NOT in permanent registry)
                 var previewData = new PlatformGameData();
-                previewData.cells.AddRange(_tmpCells);
+                previewData.cells.AddRange(previewCells);
                 
                 // Check connections with all placed platforms for preview
-                foreach (var placedPlatform in _tmpPlatforms)
+                foreach (var placedPlatform in activePlatforms)
                 {
                     if (!_allPlatforms.TryGetValue(placedPlatform, out var placedData)) continue;
                     
@@ -751,7 +752,7 @@ public class PlatformManager : MonoBehaviour
     #endregion
 
     #region Helper Methods
-    
+
     ///
     /// Compute which 2D grid cells a platform covers on a given level
     /// assuming its footprint is aligned to the 1x1 world grid AND

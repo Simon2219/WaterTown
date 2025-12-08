@@ -9,15 +9,15 @@ using WaterTown.Platforms;
 
 namespace WaterTown.Building
 {
-    /// <summary>
-    /// Manages build mode: spawning/moving pickupable objects, validating placement, and handling placement/cancellation.
-    /// Unified system for both building NEW platforms and moving EXISTING ones using IPickupable interface.
-    /// </summary>
+    ///
+    /// Manages build mode: spawning/moving pickupable objects, validating placement, and handling placement/cancellation
+    /// Unified system for both building NEW platforms and moving EXISTING ones using IPickupable interface
+    ///
     [DisallowMultipleComponent]
     public class BuildModeManager : MonoBehaviour
     {
         #region Configuration & Dependencies
-        
+
         [Header("References")]
         [SerializeField] private TownManager townManager;
         [SerializeField] private WorldGrid grid;
@@ -45,7 +45,7 @@ namespace WaterTown.Building
         #endregion
 
         #region Unity Lifecycle
-        
+
         private void Awake()
         {
             try

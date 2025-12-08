@@ -15,15 +15,12 @@ using WaterTown.Platforms;
 public class TownManager : MonoBehaviour
 {
     #region Configuration & Dependencies
-    
-    
+
     [Header("Core Systems")]
     
     private WorldGrid _worldGrid;
     private PlatformManager _platformManager;
-    
 
-    
     [Header("Town-Level Events")]
     
     [Tooltip("Invoked when a platform is successfully placed (designer-facing).")]
@@ -31,9 +28,7 @@ public class TownManager : MonoBehaviour
     
     [Tooltip("Invoked when a platform is removed (designer-facing).")]
     public UnityEvent OnPlatformRemoved;
-    
-    
-    
+
     // Cached reference to last placed/removed platform for event handlers/UI
     public GamePlatform LastPlacedPlatform { get; private set; }
     public GamePlatform LastRemovedPlatform { get; private set; }
@@ -41,7 +36,7 @@ public class TownManager : MonoBehaviour
     #endregion
 
     #region Unity Lifecycle
-    
+
     private void Awake()
     {
         try
@@ -53,7 +48,8 @@ public class TownManager : MonoBehaviour
             ErrorHandler.LogAndDisable(ex, this);
         }
     }
-    
+
+
     ///
     /// Finds and validates all required dependencies
     /// Throws InvalidOperationException if any critical dependency is missing
@@ -81,14 +77,14 @@ public class TownManager : MonoBehaviour
         }
     }
 
-    
-    
+
     private void OnEnable()
     {
         // Subscribe to PlatformManager events to propagate town-level feedback
         _platformManager.OnPlatformPlaced.AddListener(HandlePlatformPlaced);
         _platformManager.OnPlatformRemoved.AddListener(HandlePlatformRemoved);
     }
+
 
     private void OnDisable()
     {
@@ -100,12 +96,13 @@ public class TownManager : MonoBehaviour
     #endregion
 
     #region Event Handlers
-    
+
     private void HandlePlatformPlaced(GamePlatform platform)
     {
         LastPlacedPlatform = platform;
         OnPlatformPlaced?.Invoke();
     }
+
 
     private void HandlePlatformRemoved(GamePlatform platform)
     {
@@ -116,7 +113,7 @@ public class TownManager : MonoBehaviour
     #endregion
 
     #region Public API (Delegation to Subsystems)
-    
+
     // Convenience API that delegates to PlatformManager
 
     ///
@@ -126,7 +123,8 @@ public class TownManager : MonoBehaviour
     {
         return _platformManager.IsAreaFree(cells);
     }
-    
+
+
     ///
     /// Register a platform (delegates to PlatformManager)
     ///
@@ -134,13 +132,15 @@ public class TownManager : MonoBehaviour
     {
         _platformManager.RegisterPlatform(platform);
     }
-    
+
+
     public void RegisterPlatformOnArea(GamePlatform platform, List<Vector2Int> occupiedCells)
     {
         platform.occupiedCells = occupiedCells;
         _platformManager.RegisterPlatform(platform);
     }
-    
+
+
     ///
     /// Unregister a platform (delegates to PlatformManager)
     ///
@@ -148,7 +148,7 @@ public class TownManager : MonoBehaviour
     {
         _platformManager.UnregisterPlatform(platform);
     }
-    
+
 
     ///
     /// Trigger adjacency update (delegates to PlatformManager)

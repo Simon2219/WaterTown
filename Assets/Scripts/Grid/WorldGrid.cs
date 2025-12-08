@@ -6,47 +6,40 @@ using UnityEngine;
 
 namespace Grid
 {
-    /// <summary>
-    /// World grid foundation for a water-city builder.
+    ///
+    /// World grid foundation for a water-city builder
     /// • 1×1 m cells (configurable via cellSize)
     /// • Integer levels (z in Vector3Int = level), spaced by levelStep meters
     /// • Dense storage [x, y, level]
     /// • Flags for lightweight state/tags; area operations for stamping/queries
     /// • Version counter increments on any mutating operation (for efficient visuals)
     /// • Lightweight change events for visualizers (optional: visualizers can still poll Version)
-    /// </summary>
+    ///
     [DisallowMultipleComponent]
     public class WorldGrid : MonoBehaviour
     {
         #region Configuration & Data Structures
-        
-        
+
         [Header("Grid Dimensions (cells)")]
         
         [Min(1)] public int sizeX = 128;    // columns (world X)
         [Min(1)] public int sizeY = 128;    // rows (world Z)
         [Min(1)] public int levels = 1;     // decks (0..levels-1)
 
-        
         [Header("Origin")]
         
         [Tooltip("World-space origin of cell (0,0,0) lower-left corner.")]
         public Vector3 worldOrigin { get; private set; } = Vector3.zero;
 
         public const int CellSize = 1;
-        
-        
-        
-        // ---------- Storage [x, y, level] ----------
+
+        // Storage [x, y, level]
         private CellData[,] _cells;
 
-        /// Monotonic version stamp bumped on any mutating API call.
+        /// Monotonic version stamp bumped on any mutating API call
         public int Version { get; private set; }
 
-        
-        
-        
-        // ---------- Change events (optional; visuals can also poll Version) ----------
+        // Change events (optional visuals can also poll Version)
 
         public event Action<Vector2Int> CellChanged;             // single cell modified
         public event Action<Vector2Int, Vector2Int> AreaChanged; // inclusive [min..max] area modified

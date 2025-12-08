@@ -770,7 +770,7 @@ namespace WaterTown.Platforms
         #endregion
 
         #region Lifecycle & Initialization
-        
+
         private void Awake()
         {
             try
@@ -786,20 +786,20 @@ namespace WaterTown.Platforms
             if (!_navSurface) _navSurface = GetComponent<NavMeshSurface>();
             InitializePlatform();
         }
-        
+
+
         ///
         /// Finds and validates all required manager dependencies
         ///
         private void FindDependencies()
         {
-            
-            
             _platformManager = FindFirstObjectByType<PlatformManager>();
             if (!_platformManager)
             {
                 throw ErrorHandler.MissingDependency(typeof(PlatformManager), this);
             }
         }
+
 
         private void OnEnable()
         {
@@ -813,11 +813,13 @@ namespace WaterTown.Platforms
             PlatformEnabled?.Invoke(this);
         }
 
+
         private void OnDisable()
         {
             // Fire static event for any listening managers (e.g., PlatformManager)
             PlatformDisabled?.Invoke(this);
         }
+
 
         private void LateUpdate()
         {
@@ -836,6 +838,7 @@ namespace WaterTown.Platforms
             }
         }
 
+
         private void InitializePlatform()
         {
             if (!_socketsBuilt) BuildSockets();
@@ -843,6 +846,7 @@ namespace WaterTown.Platforms
             EnsureChildrenRailingsRegistered();
             RefreshSocketStatuses();
         }
+
 
         public void ForcePoseChanged()
         {
@@ -852,10 +856,12 @@ namespace WaterTown.Platforms
             PoseChanged?.Invoke(this);
         }
 
+
         public void BuildLocalNavMesh()
         {
             if (NavSurface) NavSurface.BuildNavMesh();
         }
+
 
         public void QueueRebuild()
         {
@@ -869,6 +875,7 @@ namespace WaterTown.Platforms
             _pendingRebuild = StartCoroutine(RebuildAfterDelay(rebuildDebounceSeconds));
         }
 
+
         private IEnumerator RebuildAfterDelay(float delay)
         {
             yield return new WaitForSeconds(delay);
@@ -880,7 +887,7 @@ namespace WaterTown.Platforms
         #endregion
 
         #region Gizmos (Editor Visualization)
-        
+
         public static class GizmoSettings
         {
             public static bool ShowGizmos = true;
@@ -972,12 +979,13 @@ namespace WaterTown.Platforms
         #endregion
 
         #region Child Component Registration
-        
+
         public void EnsureChildrenModulesRegistered()
         {
             var modules = GetComponentsInChildren<PlatformModule>(true);
             foreach (var m in modules) m.EnsureRegistered();
         }
+
 
         public void EnsureChildrenRailingsRegistered()
         {
@@ -989,7 +997,7 @@ namespace WaterTown.Platforms
         #endregion
 
         #region IPickupable Interface Methods
-        
+
         public void OnPickedUp(bool isNewObject)
         {
             IsPickedUp = true;
@@ -1022,6 +1030,7 @@ namespace WaterTown.Platforms
             }
         }
 
+
         public void OnPlaced()
         {
             // Restore colliders
@@ -1050,6 +1059,7 @@ namespace WaterTown.Platforms
             // Fire event for managers to register platform and trigger adjacency
             PlatformPlaced?.Invoke(this);
         }
+
 
         public void OnPlacementCancelled()
         {
@@ -1087,6 +1097,7 @@ namespace WaterTown.Platforms
             }
         }
 
+
         public void UpdateValidityVisuals(bool isValid)
         {
             // Use assigned materials if available, otherwise create auto-generated ones
@@ -1108,7 +1119,8 @@ namespace WaterTown.Platforms
                 }
             }
         }
-        
+
+
         ///
         /// Creates or returns the auto-generated green translucent material for valid placement
         /// AUTO-GENERATED for testing purposes - assign custom materials in inspector for production
@@ -1145,7 +1157,8 @@ namespace WaterTown.Platforms
             }
             return _autoValidMaterial;
         }
-        
+
+
         ///
         /// Creates or returns the auto-generated red translucent material for invalid placement
         /// AUTO-GENERATED for testing purposes - assign custom materials in inspector for production
@@ -1183,6 +1196,7 @@ namespace WaterTown.Platforms
             return _autoInvalidMaterial;
         }
 
+
         private void RestoreOriginalMaterials()
         {
             if (_originalMaterials != null && _originalMaterials.Length > 0)
@@ -1196,6 +1210,7 @@ namespace WaterTown.Platforms
                 }
             }
         }
+
 
         private bool ValidatePlacement()
         {
