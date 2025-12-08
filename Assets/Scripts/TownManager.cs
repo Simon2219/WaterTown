@@ -6,11 +6,11 @@ using UnityEngine.Events;
 using WaterTown.Platforms;
 
 
-/// <summary>
-/// High-level town orchestration manager.
-/// Coordinates specialized subsystems (PlatformManager, etc.) and provides
-/// designer-facing events and feedback.
-/// </summary>
+///
+/// High-level town orchestration manager
+/// Coordinates specialized subsystems (PlatformManager, etc) and provides
+/// designer-facing events and feedback
+///
 [DisallowMultipleComponent]
 public class TownManager : MonoBehaviour
 {
@@ -54,10 +54,10 @@ public class TownManager : MonoBehaviour
         }
     }
     
-    /// <summary>
-    /// Finds and validates all required dependencies.
-    /// Throws InvalidOperationException if any critical dependency is missing.
-    /// </summary>
+    ///
+    /// Finds and validates all required dependencies
+    /// Throws InvalidOperationException if any critical dependency is missing
+    ///
     private void FindDependencies() 
     {
         // Auto-find WorldGrid
@@ -117,42 +117,42 @@ public class TownManager : MonoBehaviour
 
     #region Public API (Delegation to Subsystems)
     
-    // ---------- Convenience API that delegates to PlatformManager ----------
+    // Convenience API that delegates to PlatformManager
 
-    /// <summary>
-    /// Check if an area is free for building (delegates to PlatformManager).
-    /// </summary>
+    ///
+    /// Check if an area is free for building (delegates to PlatformManager)
+    ///
     public bool IsAreaFree(List<Vector2Int> cells)
     {
         return _platformManager.IsAreaFree(cells);
     }
     
-    /// <summary>
-    /// Register a platform (delegates to PlatformManager).
-    /// </summary>
-    public void RegisterPlatform(GamePlatform platform, bool markOccupiedInGrid = true)
+    ///
+    /// Register a platform (delegates to PlatformManager)
+    ///
+    public void RegisterPlatform(GamePlatform platform)
     {
-        _platformManager.RegisterPlatform(platform, markOccupiedInGrid);
+        _platformManager.RegisterPlatform(platform);
     }
     
-    public void RegisterPlatformOnArea(GamePlatform platform, List<Vector2Int> occupiedCells, bool markOccupiedInGrid = true)
+    public void RegisterPlatformOnArea(GamePlatform platform, List<Vector2Int> occupiedCells)
     {
         platform.occupiedCells = occupiedCells;
-        _platformManager.RegisterPlatform(platform, markOccupiedInGrid);
+        _platformManager.RegisterPlatform(platform);
     }
     
-    /// <summary>
-    /// Unregister a platform (delegates to PlatformManager).
-    /// </summary>
+    ///
+    /// Unregister a platform (delegates to PlatformManager)
+    ///
     public void UnregisterPlatform(GamePlatform platform)
     {
         _platformManager.UnregisterPlatform(platform);
     }
     
 
-    /// <summary>
-    /// Trigger adjacency update (delegates to PlatformManager).
-    /// </summary>
+    ///
+    /// Trigger adjacency update (delegates to PlatformManager)
+    ///
     public void TriggerAdjacencyUpdate()
     {
         _platformManager.TriggerAdjacencyUpdate();

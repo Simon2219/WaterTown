@@ -50,7 +50,6 @@ public class PlatformManager : MonoBehaviour
     private class PlatformGameData
     {
         public List<Vector2Int> cells = new(); // Grid cells this platform occupies
-        public bool marksOccupied; // true = writes Occupied flags into WorldGrid (permanent) false = preview only
     }
 
     /// Single source of truth for all registered platforms and their data
@@ -61,7 +60,6 @@ public class PlatformManager : MonoBehaviour
     public IReadOnlyCollection<GamePlatform> AllPlatforms => _allPlatforms.Keys;
     
     /// Reverse lookup: which platform occupies a given cell
-    /// Only contains cells for platforms with marksOccupied = true
     private readonly Dictionary<Vector2Int, GamePlatform> _cellToPlatform = new();
     
     
@@ -132,7 +130,7 @@ public class PlatformManager : MonoBehaviour
             if (tmpCells.Count > 0)
             {
                 // Registers occupancy AND triggers adjacency for all platforms
-                RegisterPlatform(platform, markOccupiedInGrid: true);
+                RegisterPlatform(platform);
             }
         }
     }
@@ -169,19 +167,15 @@ public class PlatformManager : MonoBehaviour
     ///
     /// Event handler called when ANY platform becomes enabled
     /// Adds the platform to the global registry (without grid occupancy)
-    /// Platform must call RegisterPlatform() separately to occupy grid cells
     ///
     private void OnPlatformEnabled(GamePlatform platform)
     {
         if (!platform) return;
         
-        // Add to registry if not already present (without occupying grid)
+        // Add to registry if not already present
         if (!_allPlatforms.ContainsKey(platform))
         {
-            _allPlatforms[platform] = new PlatformGameData
-            {
-                marksOccupied = false // Not occupying grid yet (will be set by RegisterPlatform)
-            };
+            _allPlatforms[platform] = new PlatformGameData();
         }
     }
     
@@ -202,7 +196,7 @@ public class PlatformManager : MonoBehaviour
     private void HandlePlatformPlaced(GamePlatform platform)
     {
         if (!platform) return;
-        RegisterPlatform(platform, markOccupiedInGrid: true);
+        RegisterPlatform(platform);
     }
     
     ///
@@ -240,16 +234,13 @@ public class PlatformManager : MonoBehaviour
         if (!_allPlatforms.TryGetValue(platform, out PlatformGameData data)) return;
 
         // Clear old occupancy for this platform
-        if (data.marksOccupied)
+        foreach (Vector2Int cell in data.cells)
         {
-            foreach (Vector2Int cell in data.cells)
-            {
-                // Remove from WorldGrid
-                _worldGrid.TryRemoveFlag(cell, WorldGrid.CellFlag.Occupied);
-                
-                // Remove from reverse lookup
-                _cellToPlatform.Remove(cell);
-            }
+            // Remove from WorldGrid
+            _worldGrid.TryRemoveFlag(cell, WorldGrid.CellFlag.Occupied);
+            
+            // Remove from reverse lookup
+            _cellToPlatform.Remove(cell);
         }
 
         // Compute new footprint cells from current transform (rotation-aware)
@@ -259,16 +250,14 @@ public class PlatformManager : MonoBehaviour
         data.cells.Clear();
         data.cells.AddRange(tmpCells);
 
-        if (data.marksOccupied)
+        // Update grid occupancy for visual updates and adjacency
+        foreach (Vector2Int cell in data.cells)
         {
-            foreach (Vector2Int cell in data.cells)
-            {
-                // Add to WorldGrid
-                _worldGrid.TryAddFlag(cell, WorldGrid.CellFlag.Occupied);
-                
-                // Add to reverse lookup
-                _cellToPlatform[cell] = platform;
-            }
+            // Add to WorldGrid
+            _worldGrid.TryAddFlag(cell, WorldGrid.CellFlag.Occupied);
+            
+            // Add to reverse lookup
+            _cellToPlatform[cell] = platform;
         }
         
         // Mark adjacency as dirty for batched recomputation
@@ -350,32 +339,22 @@ public class PlatformManager : MonoBehaviour
 
 
     
-     ///
-    /// Register platform
-    /// markOccupiedInGrid controls ghost vs permanent platforms:
-    /// - false (GHOST): Participates in adjacency for railing previews
-    ///                          but does NOT block placement in WorldGrid
-    /// - true (PERMANENT): Reserves cells and fully participates in the game world
-    /// 
-    /// This dual-mode design enables live preview of connections before placement
     ///
-    public void RegisterPlatform(
-        GamePlatform platform,
-        bool markOccupiedInGrid = true)
+    /// Register platform and occupy grid cells
+    /// Updates platform's occupied cells in the grid and triggers adjacency computation
+    ///
+    public void RegisterPlatform(GamePlatform platform)
     {
         if (!platform || platform.occupiedCells == null || platform.occupiedCells.Count == 0) return;
 
         // Remove old occupancy if any
         if (_allPlatforms.TryGetValue(platform, out var oldData))
         {
-            if (oldData.marksOccupied)
+            // Remove from WorldGrid and reverse lookup
+            foreach (Vector2Int cell in oldData.cells)
             {
-                // Remove from WorldGrid and reverse lookup
-                foreach (Vector2Int cell in oldData.cells)
-                {
-                    _worldGrid.TryRemoveFlag(cell, WorldGrid.CellFlag.Occupied);
-                    _cellToPlatform.Remove(cell);
-                }
+                _worldGrid.TryRemoveFlag(cell, WorldGrid.CellFlag.Occupied);
+                _cellToPlatform.Remove(cell);
             }
         }
 
@@ -387,26 +366,21 @@ public class PlatformManager : MonoBehaviour
             platform.PoseChanged += OnPlatformPoseChanged;
         }
         
-        data.marksOccupied = markOccupiedInGrid;
         data.cells.Clear();
         data.cells.AddRange(platform.occupiedCells);
 
-        if (markOccupiedInGrid)
+        // Add to WorldGrid and reverse lookup
+        foreach (Vector2Int cell in platform.occupiedCells)
         {
-            // Add to WorldGrid and reverse lookup
-            foreach (Vector2Int cell in platform.occupiedCells)
-            {
-                _worldGrid.TryAddFlag(cell, WorldGrid.CellFlag.Occupied);
-                _cellToPlatform[cell] = platform;
-            }
-            
-            // Build NavMesh for newly placed permanent platforms
-            // (Skip for preview platforms where markOccupiedInGrid = false)
-            platform.BuildLocalNavMesh();
-            
-            // Invoke UnityEvent for platform placed
-            OnPlatformPlaced?.Invoke(platform);
+            _worldGrid.TryAddFlag(cell, WorldGrid.CellFlag.Occupied);
+            _cellToPlatform[cell] = platform;
         }
+        
+        // Build NavMesh for newly placed platforms
+        platform.BuildLocalNavMesh();
+        
+        // Invoke UnityEvent for platform placed
+        OnPlatformPlaced?.Invoke(platform);
 
         // Mark adjacency for batched recomputation
         MarkAdjacencyDirty();
@@ -414,7 +388,9 @@ public class PlatformManager : MonoBehaviour
      
      
      
+    ///
     /// Removes platform occupancy from the grid and clears its connections
+    ///
     public void UnregisterPlatform(GamePlatform platform)
     {
         if (!platform) return;
@@ -422,14 +398,11 @@ public class PlatformManager : MonoBehaviour
 
         platform.PoseChanged -= OnPlatformPoseChanged;
 
-        if (data.marksOccupied)
+        // Remove from WorldGrid and reverse lookup
+        foreach (Vector2Int cell in data.cells)
         {
-            // Remove from WorldGrid and reverse lookup
-            foreach (Vector2Int cell in data.cells)
-            {
-                _worldGrid.TryRemoveFlag(cell, WorldGrid.CellFlag.Occupied);
-                _cellToPlatform.Remove(cell);
-            }
+            _worldGrid.TryRemoveFlag(cell, WorldGrid.CellFlag.Occupied);
+            _cellToPlatform.Remove(cell);
         }
 
         _allPlatforms.Remove(platform);
@@ -468,7 +441,7 @@ public class PlatformManager : MonoBehaviour
                 if (cells.Count > 0)
                 {
                     platformA.occupiedCells = cells;
-                    RegisterPlatform(platformA, markOccupiedInGrid: false);
+                    RegisterPlatform(platformA);
                     dataA = _allPlatforms[platformA];
                 }
                 else return;
@@ -481,7 +454,7 @@ public class PlatformManager : MonoBehaviour
                 if (cells.Count > 0)
                 {
                     platformB.occupiedCells = cells;
-                    RegisterPlatform(platformB, markOccupiedInGrid: false);
+                    RegisterPlatform(platformB);
                     dataB = _allPlatforms[platformB];
                 }
                 else return;
