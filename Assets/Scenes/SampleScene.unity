@@ -918,6 +918,7 @@ GameObject:
   - component: {fileID: 479294920}
   - component: {fileID: 479294922}
   - component: {fileID: 479294921}
+  - component: {fileID: 479294923}
   m_Layer: 0
   m_Name: MainGameObject
   m_TagString: Untagged
@@ -937,13 +938,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 3c25b106cdfcd4b4894b99060b48608a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Grid.WorldGrid
-  settings: {fileID: 11400000, guid: fdd6843e75aa0e34694350ac8937eda5, type: 2}
   sizeX: 128
   sizeY: 128
   levels: 1
-  cellSize: 1
-  levelStep: 10
-  worldOrigin: {x: 0, y: 0, z: 0}
 --- !u!4 &479294917
 Transform:
   m_ObjectHideFlags: 0
@@ -1063,8 +1060,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f7cdf6afc25aa574b889db797894dbc9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: '::'
-  grid: {fileID: 479294916}
-  defaultLevel: 0
+  OnPlatformPlaced:
+    m_PersistentCalls:
+      m_Calls: []
+  OnPlatformRemoved:
+    m_PersistentCalls:
+      m_Calls: []
 --- !u!114 &479294922
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1077,16 +1078,37 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 45249ed1ea1f4414abbfe7ca04f113b8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: '::'
-  mainCamera: {fileID: 330585545}
-  town: {fileID: 479294921}
+  townManager: {fileID: 479294921}
+  grid: {fileID: 479294916}
   gameUI: {fileID: 928800693}
-  rotateCW: {fileID: 5047978165416925723, guid: 052faaac586de48259a63d0c4782560b, type: 3}
-  rotateCCW: {fileID: -8065153930510576921, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+  mainCamera: {fileID: 330585545}
   placeAction: {fileID: 8856660465207655992, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   cancelAction: {fileID: -5064841578966433523, guid: 052faaac586de48259a63d0c4782560b, type: 3}
-  ghostValidMat: {fileID: 0}
-  ghostInvalidMat: {fileID: 0}
-  ghostAlpha: 0.6
+  rotateCWAction: {fileID: 5047978165416925723, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+  rotateCCWAction: {fileID: -8065153930510576921, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+  raycastLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  rotationStep: 90
+--- !u!114 &479294923
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 479294915}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cd6723bcf190c1640851f95f98984129, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::WaterTown.Town.PlatformManager
+  navLinkWidth: 0.6
+  OnPlatformPlaced:
+    m_PersistentCalls:
+      m_Calls: []
+  OnPlatformRemoved:
+    m_PersistentCalls:
+      m_Calls: []
 --- !u!114 &522639835
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1741,21 +1763,20 @@ MonoBehaviour:
   barCanvasGroup: {fileID: 1484554341}
   showTrigger: Show
   hideTrigger: Hide
-  content: {fileID: 1278685370}
+  toolbarContent: {fileID: 1278685370}
   platformIconPrefab: {fileID: 611961254697831246, guid: cddc2f251c5954f4f89279032adf9f45, type: 3}
-  blueprints:
-  - {fileID: 11400000, guid: 63e6dedb9a040c346bd327416cc30e7c, type: 2}
+  availableBlueprints:
   - {fileID: 11400000, guid: b7e1e063b761eda44aa6bc5c74ecba8a, type: 2}
-  - {fileID: 11400000, guid: 63e6dedb9a040c346bd327416cc30e7c, type: 2}
-  - {fileID: 11400000, guid: 63e6dedb9a040c346bd327416cc30e7c, type: 2}
-  - {fileID: 11400000, guid: 63e6dedb9a040c346bd327416cc30e7c, type: 2}
-  - {fileID: 11400000, guid: 63e6dedb9a040c346bd327416cc30e7c, type: 2}
-  - {fileID: 11400000, guid: 63e6dedb9a040c346bd327416cc30e7c, type: 2}
-  - {fileID: 11400000, guid: 63e6dedb9a040c346bd327416cc30e7c, type: 2}
   iconChildName: Icon
   selectedFrameChildName: SelectionHighlight
   selectedOverlayColor: {r: 1, g: 1, b: 1, a: 0.18}
   clearSelectionOnHide: 1
+  OnBuildBarShown:
+    m_PersistentCalls:
+      m_Calls: []
+  OnBuildBarHidden:
+    m_PersistentCalls:
+      m_Calls: []
 --- !u!1001 &1001569448
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -2111,6 +2132,18 @@ PrefabInstance:
     - target: {fileID: 611961254697831246, guid: cddc2f251c5954f4f89279032adf9f45, type: 3}
       propertyPath: m_Layer
       value: 5
+      objectReference: {fileID: 0}
+    - target: {fileID: 1915091737917911950, guid: cddc2f251c5954f4f89279032adf9f45, type: 3}
+      propertyPath: m_OnClick.m_PersistentCalls.m_Calls.Array.size
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 1915091737917911950, guid: cddc2f251c5954f4f89279032adf9f45, type: 3}
+      propertyPath: m_OnClick.m_PersistentCalls.m_Calls.Array.data[0].m_Mode
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 1915091737917911950, guid: cddc2f251c5954f4f89279032adf9f45, type: 3}
+      propertyPath: m_OnClick.m_PersistentCalls.m_Calls.Array.data[0].m_CallState
+      value: 2
       objectReference: {fileID: 0}
     - target: {fileID: 3964159550741025191, guid: cddc2f251c5954f4f89279032adf9f45, type: 3}
       propertyPath: m_Pivot.x
@@ -2510,10 +2543,6 @@ MonoBehaviour:
     m_ActionName: 'Camera/Zoom[/Mouse/scroll/y]'
   - m_PersistentCalls:
       m_Calls: []
-    m_ActionId: e899c68d-46d0-4b72-8dd9-071d2b0381fc
-    m_ActionName: 'Camera/Pan[/Mouse/middleButton,/Mouse/delta]'
-  - m_PersistentCalls:
-      m_Calls: []
     m_ActionId: e6ea49ee-0990-4fbe-a96b-856e3cf7ffff
     m_ActionName: 'Camera/Rotate[/Mouse/rightButton,/Mouse/delta]'
   - m_PersistentCalls:
@@ -2603,7 +2632,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::CameraMovementController
   moveAction: {fileID: -911741160599184320, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   cinemachineCamera: {fileID: 886180232}
-  moveSpeed: 10
+  moveSpeed: 30
   movementSmoothTime: 0.1
   moveSpeedZoomScale: 0.1
   heightOffset: 2
@@ -2630,9 +2659,14 @@ MonoBehaviour:
   playerMapName: Player
   buildModeMapName: Build Mode
   cameraMapName: Camera
-  uiMapName: UI
   toggleBuildUIActionName: ToggleBuildUI
   gameUI: {fileID: 928800693}
+  OnBuildModeEntered:
+    m_PersistentCalls:
+      m_Calls: []
+  OnBuildModeExited:
+    m_PersistentCalls:
+      m_Calls: []
 --- !u!1001 &1811326647
 PrefabInstance:
   m_ObjectHideFlags: 0

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Grid;
 using UnityEngine;
@@ -5,21 +6,21 @@ using UnityEngine.InputSystem;
 using WaterTown.Building.UI;
 using WaterTown.Interfaces;
 using WaterTown.Platforms;
-using WaterTown.Town;
 
 namespace WaterTown.Building
 {
-    /// <summary>
-    /// Manages build mode: spawning/moving pickupable objects, validating placement, and handling placement/cancellation.
-    /// Unified system for both building NEW platforms and moving EXISTING ones using IPickupable interface.
-    /// </summary>
+    ///
+    /// Manages build mode: spawning/moving pickupable objects, validating placement, and handling placement/cancellation
+    /// Unified system for both building NEW platforms and moving EXISTING ones using IPickupable interface
+    ///
     [DisallowMultipleComponent]
     public class BuildModeManager : MonoBehaviour
     {
         #region Configuration & Dependencies
-        
+
         [Header("References")]
         [SerializeField] private TownManager townManager;
+        [SerializeField] private PlatformManager platformManager;
         [SerializeField] private WorldGrid grid;
         [SerializeField] private GameUIController gameUI;
         [SerializeField] private Camera mainCamera;
@@ -31,7 +32,6 @@ namespace WaterTown.Building
         [SerializeField] private InputActionReference rotateCCWAction;
 
         [Header("Placement Settings")]
-        [SerializeField] private int placementLevel = 0;
         [SerializeField] private LayerMask raycastLayers;
         [SerializeField] private float rotationStep = 90f;
 
@@ -46,22 +46,55 @@ namespace WaterTown.Building
         #endregion
 
         #region Unity Lifecycle
-        
+
         private void Awake()
         {
-            if (!townManager) townManager = FindFirstObjectByType<TownManager>();
-            if (!grid) grid = FindFirstObjectByType<WorldGrid>();
-            if (!mainCamera) mainCamera = Camera.main;
+            try
+            {
+                FindDependencies();
+            }
+            catch (Exception ex)
+            {
+                ErrorHandler.LogAndDisable(ex, this);
+            }
+        }
+        
+        /// <summary>
+        /// Finds and validates all required dependencies.
+        /// Throws InvalidOperationException if any critical dependency is missing.
+        /// </summary>
+        private void FindDependencies()
+        {
+            if (!townManager)
+            {
+                townManager = FindFirstObjectByType<TownManager>();
+                if (!townManager)
+                {
+                    throw ErrorHandler.MissingDependency(typeof(TownManager), this);
+                }
+            }
+            
+            if (!grid)
+            {
+                grid = FindFirstObjectByType<WorldGrid>();
+                if (!grid)
+                {
+                    throw ErrorHandler.MissingDependency(typeof(WorldGrid), this);
+                }
+            }
+            
+            if (!mainCamera)
+            {
+                mainCamera = Camera.main;
+                if (!mainCamera)
+                {
+                    throw ErrorHandler.MissingDependency("Camera.main", this);
+                }
+            }
         }
 
         private void OnEnable()
         {
-            if (townManager == null || grid == null || mainCamera == null)
-            {
-                Debug.LogError("[BuildModeManager] Missing critical references. Disabling component.", this);
-                enabled = false;
-                return;
-            }
 
             if (gameUI != null)
                 gameUI.OnBlueprintSelected += OnBlueprintSelected;
@@ -135,9 +168,11 @@ namespace WaterTown.Building
             bool isValid = _currentPickup.CanBePlaced;
             _currentPickup.UpdateValidityVisuals(isValid);
             
-            // Trigger railing preview update each frame while placing
-            // This ensures railings show/hide based on adjacency to other platforms
-            townManager.TriggerAdjacencyUpdate();
+            // Trigger adjacency update for preview
+            if (_currentPickup is GamePlatform && platformManager != null)
+            {
+                platformManager.TriggerAdjacencyUpdate();
+            }
         }
         
         #endregion
@@ -223,9 +258,9 @@ namespace WaterTown.Building
             // Use new Input System for mouse position
             Vector2 mousePosition = Mouse.current != null ? Mouse.current.position.ReadValue() : Vector2.zero;
             Ray ray = mainCamera.ScreenPointToRay(mousePosition);
-            Vector3Int levelRef = new Vector3Int(0, 0, placementLevel);
+            Vector3Int levelRef = new Vector3Int(0, 0, 0);
 
-            if (grid.RaycastToCell(ray, levelRef, out Vector3Int hoveredCell, out Vector3 hitPoint))
+            if (grid.RaycastToCell(ray, out Vector2Int hoveredCell, out Vector3 hitPoint))
             {
                 // Get footprint
                 Vector2Int footprint = Vector2Int.one;
@@ -242,7 +277,7 @@ namespace WaterTown.Building
                     : footprint;
 
                 // Snap to grid
-                Vector3 snappedPosition = grid.SnapToGridForPlatform(hitPoint, effectiveFootprint, placementLevel);
+                Vector3 snappedPosition = grid.SnapToGridForPlatform(hitPoint, effectiveFootprint);
                 Quaternion rotation = Quaternion.Euler(0f, _currentRotation, 0f);
 
                 _currentPickup.Transform.SetPositionAndRotation(snappedPosition, rotation);
@@ -277,10 +312,6 @@ namespace WaterTown.Building
             _currentPickup.OnPlacementCancelled();
             _currentPickup = null;
             _selectedBlueprint = null;
-            
-            // Force adjacency update to restore railings on existing platforms
-            // This ensures any connections created during preview are cleared
-            townManager.TriggerAdjacencyUpdate();
         }
         
         #endregion

@@ -432,15 +432,6 @@ public partial class @BaseControls: IInputActionCollection2, IDisposable
                     ""initialStateCheck"": true
                 },
                 {
-                    ""name"": ""Pan"",
-                    ""type"": ""Value"",
-                    ""id"": ""e899c68d-46d0-4b72-8dd9-071d2b0381fc"",
-                    ""expectedControlType"": ""Vector2"",
-                    ""processors"": """",
-                    ""interactions"": """",
-                    ""initialStateCheck"": true
-                },
-                {
                     ""name"": ""Rotate"",
                     ""type"": ""Value"",
                     ""id"": ""e6ea49ee-0990-4fbe-a96b-856e3cf7ffff"",
@@ -562,39 +553,6 @@ public partial class @BaseControls: IInputActionCollection2, IDisposable
                     ""isPartOfComposite"": false
                 },
                 {
-                    ""name"": ""Hold Middle Mouse"",
-                    ""id"": ""18af0405-ea0f-48c1-ba03-8829329549c5"",
-                    ""path"": ""OneModifier(overrideModifiersNeedToBePressedFirst=true)"",
-                    ""interactions"": """",
-                    ""processors"": """",
-                    ""groups"": """",
-                    ""action"": ""Pan"",
-                    ""isComposite"": true,
-                    ""isPartOfComposite"": false
-                },
-                {
-                    ""name"": ""modifier"",
-                    ""id"": ""422e7d73-2c86-413a-a481-51cf80418eac"",
-                    ""path"": ""<Mouse>/middleButton"",
-                    ""interactions"": """",
-                    ""processors"": """",
-                    ""groups"": "";Keyboard&Mouse"",
-                    ""action"": ""Pan"",
-                    ""isComposite"": false,
-                    ""isPartOfComposite"": true
-                },
-                {
-                    ""name"": ""binding"",
-                    ""id"": ""16d93cfc-94c0-48a4-89ee-0b291aa1d027"",
-                    ""path"": ""<Mouse>/delta"",
-                    ""interactions"": """",
-                    ""processors"": """",
-                    ""groups"": "";Keyboard&Mouse"",
-                    ""action"": ""Pan"",
-                    ""isComposite"": false,
-                    ""isPartOfComposite"": true
-                },
-                {
                     ""name"": ""One Modifier"",
                     ""id"": ""3e7f50c8-e54e-41d9-86e6-ae3222f00ad5"",
                     ""path"": ""OneModifier(overrideModifiersNeedToBePressedFirst=true)"",
@@ -608,7 +566,7 @@ public partial class @BaseControls: IInputActionCollection2, IDisposable
                 {
                     ""name"": ""modifier"",
                     ""id"": ""c740f3d8-73b0-4084-911e-e657b5990cb1"",
-                    ""path"": ""<Mouse>/rightButton"",
+                    ""path"": ""<Mouse>/middleButton"",
                     ""interactions"": """",
                     ""processors"": """",
                     ""groups"": "";Keyboard&Mouse"",
@@ -1252,7 +1210,6 @@ public partial class @BaseControls: IInputActionCollection2, IDisposable
         m_Camera = asset.FindActionMap("Camera", throwIfNotFound: true);
         m_Camera_Move = m_Camera.FindAction("Move", throwIfNotFound: true);
         m_Camera_Zoom = m_Camera.FindAction("Zoom", throwIfNotFound: true);
-        m_Camera_Pan = m_Camera.FindAction("Pan", throwIfNotFound: true);
         m_Camera_Rotate = m_Camera.FindAction("Rotate", throwIfNotFound: true);
         // UI
         m_UI = asset.FindActionMap("UI", throwIfNotFound: true);
@@ -1602,7 +1559,6 @@ public partial class @BaseControls: IInputActionCollection2, IDisposable
     private List<ICameraActions> m_CameraActionsCallbackInterfaces = new List<ICameraActions>();
     private readonly InputAction m_Camera_Move;
     private readonly InputAction m_Camera_Zoom;
-    private readonly InputAction m_Camera_Pan;
     private readonly InputAction m_Camera_Rotate;
     /// <summary>
     /// Provides access to input actions defined in input action map "Camera".
@@ -1623,10 +1579,6 @@ public partial class @BaseControls: IInputActionCollection2, IDisposable
         /// Provides access to the underlying input action "Camera/Zoom".
         /// </summary>
         public InputAction @Zoom => m_Wrapper.m_Camera_Zoom;
-        /// <summary>
-        /// Provides access to the underlying input action "Camera/Pan".
-        /// </summary>
-        public InputAction @Pan => m_Wrapper.m_Camera_Pan;
         /// <summary>
         /// Provides access to the underlying input action "Camera/Rotate".
         /// </summary>
@@ -1663,9 +1615,6 @@ public partial class @BaseControls: IInputActionCollection2, IDisposable
             @Zoom.started += instance.OnZoom;
             @Zoom.performed += instance.OnZoom;
             @Zoom.canceled += instance.OnZoom;
-            @Pan.started += instance.OnPan;
-            @Pan.performed += instance.OnPan;
-            @Pan.canceled += instance.OnPan;
             @Rotate.started += instance.OnRotate;
             @Rotate.performed += instance.OnRotate;
             @Rotate.canceled += instance.OnRotate;
@@ -1686,9 +1635,6 @@ public partial class @BaseControls: IInputActionCollection2, IDisposable
             @Zoom.started -= instance.OnZoom;
             @Zoom.performed -= instance.OnZoom;
             @Zoom.canceled -= instance.OnZoom;
-            @Pan.started -= instance.OnPan;
-            @Pan.performed -= instance.OnPan;
-            @Pan.canceled -= instance.OnPan;
             @Rotate.started -= instance.OnRotate;
             @Rotate.performed -= instance.OnRotate;
             @Rotate.canceled -= instance.OnRotate;
@@ -2167,13 +2113,6 @@ public partial class @BaseControls: IInputActionCollection2, IDisposable
         /// <seealso cref="UnityEngine.InputSystem.InputAction.performed" />
         /// <seealso cref="UnityEngine.InputSystem.InputAction.canceled" />
         void OnZoom(InputAction.CallbackContext context);
-        /// <summary>
-        /// Method invoked when associated input action "Pan" is either <see cref="UnityEngine.InputSystem.InputAction.started" />, <see cref="UnityEngine.InputSystem.InputAction.performed" /> or <see cref="UnityEngine.InputSystem.InputAction.canceled" />.
-        /// </summary>
-        /// <seealso cref="UnityEngine.InputSystem.InputAction.started" />
-        /// <seealso cref="UnityEngine.InputSystem.InputAction.performed" />
-        /// <seealso cref="UnityEngine.InputSystem.InputAction.canceled" />
-        void OnPan(InputAction.CallbackContext context);
         /// <summary>
         /// Method invoked when associated input action "Rotate" is either <see cref="UnityEngine.InputSystem.InputAction.started" />, <see cref="UnityEngine.InputSystem.InputAction.performed" /> or <see cref="UnityEngine.InputSystem.InputAction.canceled" />.
         /// </summary>

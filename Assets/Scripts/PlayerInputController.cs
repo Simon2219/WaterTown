@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.InputSystem;
@@ -48,37 +49,39 @@ namespace WaterTown.Building.UI
 
         private void Awake()
         {
-            if (!ValidateReferences())
+            try
             {
-                enabled = false;
-                return;
+                ValidateReferences();
+                InitializeInputMaps();
             }
-
-            if (!InitializeInputMaps())
+            catch (Exception ex)
             {
-                enabled = false;
-                return;
+                ErrorHandler.LogAndDisable(ex, this);
             }
         }
 
-        private bool ValidateReferences()
+        /// <summary>
+        /// Validates all required references are assigned.
+        /// Throws InvalidOperationException if any critical reference is missing.
+        /// </summary>
+        private void ValidateReferences()
         {
             if (baseControls == null)
             {
-                Debug.LogError("[PlayerInputController] baseControls InputActionAsset is not assigned.", this);
-                return false;
+                throw ErrorHandler.MissingDependency("baseControls InputActionAsset", this);
             }
             
             if (gameUI == null)
             {
-                Debug.LogError("[PlayerInputController] GameUIController reference is missing.", this);
-                return false;
+                throw ErrorHandler.MissingDependency("GameUIController", this);
             }
-
-            return true;
         }
 
-        private bool InitializeInputMaps()
+        /// <summary>
+        /// Initializes all input action maps and actions.
+        /// Throws InvalidOperationException if any map or action is not found.
+        /// </summary>
+        private void InitializeInputMaps()
         {
             _mapGlobal    = baseControls.FindActionMap(globalMapName,    throwIfNotFound: false);
             _mapPlayer    = baseControls.FindActionMap(playerMapName,    throwIfNotFound: false);
@@ -86,23 +89,21 @@ namespace WaterTown.Building.UI
             _mapCamera    = baseControls.FindActionMap(cameraMapName,    throwIfNotFound: false);
 
             // Validate all maps exist
-            bool allValid = true;
-            if (_mapGlobal == null)    { Debug.LogError($"[PlayerInputController] Action map '{globalMapName}' not found.", this);    allValid = false; }
-            if (_mapPlayer == null)    { Debug.LogError($"[PlayerInputController] Action map '{playerMapName}' not found.", this);    allValid = false; }
-            if (_mapBuildMode == null) { Debug.LogError($"[PlayerInputController] Action map '{buildModeMapName}' not found.", this); allValid = false; }
-            if (_mapCamera == null)    { Debug.LogError($"[PlayerInputController] Action map '{cameraMapName}' not found.", this);    allValid = false; }
-
-            if (!allValid) return false;
+            if (_mapGlobal == null)
+                throw ErrorHandler.InvalidConfiguration($"Action map '{globalMapName}' not found in InputActionAsset.", this);
+            if (_mapPlayer == null)
+                throw ErrorHandler.InvalidConfiguration($"Action map '{playerMapName}' not found in InputActionAsset.", this);
+            if (_mapBuildMode == null)
+                throw ErrorHandler.InvalidConfiguration($"Action map '{buildModeMapName}' not found in InputActionAsset.", this);
+            if (_mapCamera == null)
+                throw ErrorHandler.InvalidConfiguration($"Action map '{cameraMapName}' not found in InputActionAsset.", this);
 
             // Find toggle action
             _actToggleBuildUI = _mapGlobal.FindAction(toggleBuildUIActionName, throwIfNotFound: false);
             if (_actToggleBuildUI == null)
             {
-                Debug.LogError($"[PlayerInputController] Action '{toggleBuildUIActionName}' not found in '{globalMapName}' map.", this);
-                return false;
+                throw ErrorHandler.InvalidConfiguration($"Action '{toggleBuildUIActionName}' not found in '{globalMapName}' map.", this);
             }
-
-            return true;
         }
 
         private void OnEnable()

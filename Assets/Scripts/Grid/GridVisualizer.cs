@@ -47,7 +47,6 @@ namespace Grid
         private Mesh _quadMesh;
         private Texture2D _colorMap;
         private Vector2Int _cachedSize;
-        private int _cachedCellSize;
         private Vector3 _cachedOrigin;
         private int _cachedLevels;
 
@@ -104,7 +103,6 @@ namespace Grid
             if (grid != null)
             {
                 needsRebuild |= _cachedSize.x != grid.sizeX || _cachedSize.y != grid.sizeY;
-                needsRebuild |= _cachedCellSize != grid.cellSize;
                 needsRebuild |= _cachedOrigin != grid.worldOrigin;
                 needsRebuild |= _cachedLevels != grid.levels;
             }
@@ -156,7 +154,7 @@ namespace Grid
         }
 
         // ----- Color Map API -----
-        public void SetCellColor(Vector3Int cell, Color color)
+        public void SetCellColor(Vector2Int cell, Color color)
         {
             if (!grid || !grid.CellInBounds(cell)) return;
             EnsureColorMap();
@@ -181,8 +179,7 @@ namespace Grid
         {
             if (grid == null) return;
             EnsureColorMap();
-
-            int z = Mathf.Clamp(level, 0, Mathf.Max(0, grid.levels - 1));
+            
             int w = Mathf.Max(1, grid.sizeX);
             int h = Mathf.Max(1, grid.sizeY);
 
@@ -194,7 +191,7 @@ namespace Grid
                 int row = y * w;
                 for (int x = 0; x < w; x++)
                 {
-                    var cell = new Vector3Int(x, y, z);
+                    var cell = new Vector2Int(x, y);
                     grid.TryGetCell(cell, out var cd);
 
                     var flags = cd.flags;
@@ -260,19 +257,17 @@ namespace Grid
             if (grid)
             {
                 _cachedSize     = new Vector2Int(Mathf.Max(1, grid.sizeX), Mathf.Max(1, grid.sizeY));
-                _cachedCellSize = Mathf.Max(1, grid.cellSize);
                 _cachedOrigin   = grid.worldOrigin;
                 _cachedLevels   = Mathf.Max(1, grid.levels);
             }
             else
             {
                 _cachedSize     = new Vector2Int(1, 1);
-                _cachedCellSize = 1;
                 _cachedOrigin   = transform.position;
                 _cachedLevels   = 1;
             }
 
-            BuildQuadMeshLocal(_cachedSize.x * _cachedCellSize, _cachedSize.y * _cachedCellSize);
+            BuildQuadMeshLocal(_cachedSize.x * WorldGrid.CellSize, _cachedSize.y * WorldGrid.CellSize);
 
             if (grid) transform.position = new Vector3(_cachedOrigin.x, 0f, _cachedOrigin.z);
 
@@ -374,9 +369,9 @@ namespace Grid
 
             var sizeX   = Mathf.Max(1, _cachedSize.x);
             var sizeY   = Mathf.Max(1, _cachedSize.y);
-            var cellSz  = Mathf.Max(1, _cachedCellSize);
+            var cellSz = WorldGrid.CellSize;
             var origin  = grid ? grid.worldOrigin : transform.position;
-            var levelY  = grid ? grid.GetLevelWorldY(Mathf.Clamp(level, 0, Mathf.Max(grid.levels - 1, 0))) : 0f;
+            var levelY = 0;
 
             // Write everything through MPB (safe regardless of shared/instanced material).
             _mpb.Clear();
