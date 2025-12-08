@@ -716,15 +716,13 @@ namespace WaterTown.Platforms
             ConnectionsChanged?.Invoke(this);
         }
 
-        /// Editor-only convenience to clear links and show all modules/railings
-        /// /// IMPORTANT FIX:
-        /// We must restore EVERY module & railing (even ones that were hidden
-        /// and unregistered before) so that socket statuses and visuals are
-        /// in a consistent "no connections" baseline before recomputing links
         ///
-        public void EditorResetAllConnections()
+        /// Runtime method to reset all socket connections
+        /// Shows all railings and clears connection tracking
+        ///
+        public void ResetConnections()
         {
-            // Show all PlatformModules under this platform (active or inactive)
+            // Show all PlatformModules (railings)
             var allModules = GetComponentsInChildren<PlatformModule>(true);
             foreach (var m in allModules)
             {
@@ -734,35 +732,35 @@ namespace WaterTown.Platforms
 
             // Clear connection bookkeeping
             _connectedSockets.Clear();
+            
+            // Refresh rail visibility and socket statuses
+            RefreshAllRailingsVisibility();
+            RefreshSocketStatuses();
+            
+            ConnectionsChanged?.Invoke(this);
+        }
+
+
+        ///
+        /// Editor-only method to reset connections and clean up NavMesh links with Undo support
+        ///
+        public void EditorResetAllConnections()
+        {
+            ResetConnections();
 
 #if UNITY_EDITOR
-            // Destroy all NavMeshLink GameObjects under "Links" in the editor,
-            // using Undo so changes are revertible
+            // Destroy all NavMeshLink GameObjects under "Links" in the editor with Undo
             var linksParent = transform.Find("Links");
             if (linksParent)
             {
                 for (int i = linksParent.childCount - 1; i >= 0; i--)
                     UnityEditor.Undo.DestroyObjectImmediate(linksParent.GetChild(i).gameObject);
             }
-#else
-            // Runtime: just destroy children under "Links"
-            var linksParent = transform.Find("Links");
-            if (linksParent)
-            {
-                for (int i = linksParent.childCount - 1; i >= 0; i--)
-                    Destroy(linksParent.GetChild(i).gameObject);
-            }
-#endif
-
-            // Recompute rail visibility and socket statuses in the clean state
-            RefreshAllRailingsVisibility();
-            RefreshSocketStatuses();
             
             // Only queue rebuild if we're active (skip during shutdown)
             if (gameObject.activeInHierarchy)
                 QueueRebuild();
-            
-            ConnectionsChanged?.Invoke(this);
+#endif
         }
         
         #endregion
@@ -1020,12 +1018,10 @@ namespace WaterTown.Platforms
                 _originalMaterials = _allRenderers[0].sharedMaterials;
             }
             
-            // If this is an existing object being moved, notify managers
-            // This triggers lightweight adjacency update without full unregister overhead
-            if (!isNewObject)
-            {
-                PlatformPickedUp?.Invoke(this);
-            }
+            // Notify managers for preview mode (both new and existing platforms)
+            Debug.Log($"[GamePlatform.OnPickedUp] Firing PlatformPickedUp event for {name}, isNewObject={isNewObject}");
+            PlatformPickedUp?.Invoke(this);
+            Debug.Log($"[GamePlatform.OnPickedUp] Event fired. Subscribers: {(PlatformPickedUp != null ? PlatformPickedUp.GetInvocationList().Length : 0)}");
         }
 
 

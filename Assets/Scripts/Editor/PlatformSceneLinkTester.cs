@@ -50,7 +50,7 @@ namespace Editor
                     for (int j = i + 1; j < all.Length; j++)
                     {
                         var b = all[j];
-                        platformManager.ConnectPlatformsIfAdjacent(a, b);
+                        platformManager.ConnectPlatformsIfAdjacent(a, b, rebuildNavMesh: true);
                     }
                 }
             }

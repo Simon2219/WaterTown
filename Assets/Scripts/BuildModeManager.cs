@@ -20,6 +20,7 @@ namespace WaterTown.Building
 
         [Header("References")]
         [SerializeField] private TownManager townManager;
+        [SerializeField] private PlatformManager platformManager;
         [SerializeField] private WorldGrid grid;
         [SerializeField] private GameUIController gameUI;
         [SerializeField] private Camera mainCamera;
@@ -167,9 +168,11 @@ namespace WaterTown.Building
             bool isValid = _currentPickup.CanBePlaced;
             _currentPickup.UpdateValidityVisuals(isValid);
             
-            // Trigger railing preview update each frame while placing
-            // This ensures railings show/hide based on adjacency to other platforms
-            townManager.TriggerAdjacencyUpdate();
+            // Trigger adjacency update for preview
+            if (_currentPickup is GamePlatform && platformManager != null)
+            {
+                platformManager.TriggerAdjacencyUpdate();
+            }
         }
         
         #endregion
@@ -309,10 +312,6 @@ namespace WaterTown.Building
             _currentPickup.OnPlacementCancelled();
             _currentPickup = null;
             _selectedBlueprint = null;
-            
-            // Force adjacency update to restore railings on existing platforms
-            // This ensures any connections created during preview are cleared
-            townManager.TriggerAdjacencyUpdate();
         }
         
         #endregion
