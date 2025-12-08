@@ -46,6 +46,7 @@ namespace WaterTown.Platforms
         public event Action<GamePlatform> PickedUp;
 
         public List<Vector2Int> occupiedCells = null;
+        public List<Vector2Int> previousOccupiedCells = null;
         
         #endregion
 
