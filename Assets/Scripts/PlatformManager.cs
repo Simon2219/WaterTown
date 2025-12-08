@@ -59,6 +59,9 @@ public class PlatformManager : MonoBehaviour
     private bool _adjacencyDirty = false;
     private bool _isRecomputingAdjacency = false;
     
+    // Track currently picked-up platform for preview mode
+    private GamePlatform _currentlyPickedUpPlatform = null;
+    
     #endregion
 
     #region Unity Lifecycle
@@ -97,7 +100,6 @@ public class PlatformManager : MonoBehaviour
     private void OnEnable()
     {
         // Subscribe to platform lifecycle events
-        GamePlatform.PlatformEnabled += OnPlatformEnabled;
         GamePlatform.PlatformDisabled += OnPlatformDisabled;
         GamePlatform.PlatformPlaced += HandlePlatformPlaced;
         GamePlatform.PlatformPickedUp += OnPlatformPickedUp;
@@ -127,11 +129,22 @@ public class PlatformManager : MonoBehaviour
 
     private void LateUpdate()
     {
-        // Batch adjacency recomputation for placed platforms
+        // Batch adjacency recomputation to once per frame if dirty
         if (_adjacencyDirty && !_isRecomputingAdjacency)
         {
             _adjacencyDirty = false;
-            UpdatePlacedPlatforms();
+            
+            // Check if we're in preview mode (platform being moved) or placed mode
+            if (_currentlyPickedUpPlatform != null)
+            {
+                // Lightweight preview update - railings only, no NavMesh
+                UpdatePreview(_currentlyPickedUpPlatform);
+            }
+            else
+            {
+                // Full update with NavMesh for placed platforms
+                UpdatePlacedPlatforms();
+            }
         }
     }
 
@@ -139,7 +152,6 @@ public class PlatformManager : MonoBehaviour
     private void OnDisable()
     {
         // Unsubscribe from platform lifecycle events
-        GamePlatform.PlatformEnabled -= OnPlatformEnabled;
         GamePlatform.PlatformDisabled -= OnPlatformDisabled;
         GamePlatform.PlatformPlaced -= HandlePlatformPlaced;
         GamePlatform.PlatformPickedUp -= OnPlatformPickedUp;
@@ -148,17 +160,6 @@ public class PlatformManager : MonoBehaviour
     #endregion
 
     #region Platform Lifecycle Event Handlers
-
-    ///
-    /// Event handler called when ANY platform becomes enabled
-    /// Platforms are only registered when placed, not on enable
-    ///
-    private void OnPlatformEnabled(GamePlatform platform)
-    {
-        // Platform will be registered when placed via PlatformPlaced event
-        // No auto-registration needed here
-    }
-
 
     ///
     /// Event handler called when ANY platform becomes disabled
@@ -184,11 +185,14 @@ public class PlatformManager : MonoBehaviour
 
     ///
     /// Event handler called when ANY platform is picked up
-    /// Clears grid cells and updates preview immediately
+    /// Clears grid cells and enters preview mode
     ///
     private void OnPlatformPickedUp(GamePlatform platform)
     {
         if (!platform) return;
+        
+        // Track for preview mode
+        _currentlyPickedUpPlatform = platform;
         
         // Clear grid cells to free the space
         if (_allPlatforms.Contains(platform) && platform.occupiedCells != null)
@@ -200,8 +204,8 @@ public class PlatformManager : MonoBehaviour
             }
         }
         
-        // Immediately update preview (lightweight, no NavMesh)
-        UpdatePreview(platform);
+        // Mark for preview update
+        MarkAdjacencyDirty();
     }
     
     #endregion
@@ -284,7 +288,13 @@ public class PlatformManager : MonoBehaviour
     {
         if (!platform || platform.occupiedCells == null || platform.occupiedCells.Count == 0) return;
 
-        // Remove old occupancy if any
+        // Clear picked up platform reference if this is being placed
+        if (_currentlyPickedUpPlatform == platform)
+        {
+            _currentlyPickedUpPlatform = null;
+        }
+
+        // Remove old occupancy if already registered
         if (_allPlatforms.Contains(platform))
         {
             foreach (Vector2Int cell in platform.occupiedCells)
@@ -575,17 +585,6 @@ public class PlatformManager : MonoBehaviour
         }
         
         _isRecomputingAdjacency = false;
-    }
-
-
-    ///
-    /// Public API for BuildModeManager to update preview during movement
-    /// Updates adjacency immediately for the picked-up platform
-    ///
-    public void UpdateMovingPlatformPreview(GamePlatform platform)
-    {
-        if (!platform) return;
-        UpdatePreview(platform);
     }
     
     #endregion
