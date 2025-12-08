@@ -130,9 +130,15 @@ public class TownManager : MonoBehaviour
     /// <summary>
     /// Register a platform (delegates to PlatformManager).
     /// </summary>
-    public void RegisterPlatform(GamePlatform platform, List<Vector2Int> cells, bool markOccupiedInGrid = true)
+    public void RegisterPlatform(GamePlatform platform, bool markOccupiedInGrid = true)
     {
-        _platformManager.RegisterPlatform(platform, cells, markOccupiedInGrid);
+        _platformManager.RegisterPlatform(platform, markOccupiedInGrid);
+    }
+    
+    public void RegisterPlatformOnArea(GamePlatform platform, List<Vector2Int> occupiedCells, bool markOccupiedInGrid = true)
+    {
+        platform.occupiedCells = occupiedCells;
+        _platformManager.RegisterPlatform(platform, markOccupiedInGrid);
     }
     
     /// <summary>

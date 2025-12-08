@@ -113,7 +113,7 @@ public class PlatformManager : MonoBehaviour
         // Subscribe to platform lifecycle events
         GamePlatform.PlatformEnabled += OnPlatformEnabled;
         GamePlatform.PlatformDisabled += OnPlatformDisabled;
-        GamePlatform.PlatformPlaced += OnPlatformPlaced;
+        GamePlatform.PlatformPlaced += HandlePlatformPlaced;
         GamePlatform.PlatformPickedUp += OnPlatformPickedUp;
     }
 
@@ -152,7 +152,7 @@ public class PlatformManager : MonoBehaviour
         // Unsubscribe from platform lifecycle events
         GamePlatform.PlatformEnabled -= OnPlatformEnabled;
         GamePlatform.PlatformDisabled -= OnPlatformDisabled;
-        GamePlatform.PlatformPlaced -= OnPlatformPlaced;
+        GamePlatform.PlatformPlaced -= HandlePlatformPlaced;
         GamePlatform.PlatformPickedUp -= OnPlatformPickedUp;
         
         // Best-effort cleanup of pose subscriptions
@@ -199,7 +199,7 @@ public class PlatformManager : MonoBehaviour
     /// Event handler called when ANY platform is placed
     /// Registers platform in grid and triggers full adjacency computation
     ///
-    private void OnPlatformPlaced(GamePlatform platform)
+    private void HandlePlatformPlaced(GamePlatform platform)
     {
         if (!platform) return;
         RegisterPlatform(platform, markOccupiedInGrid: true);
@@ -331,11 +331,29 @@ public class PlatformManager : MonoBehaviour
 
 
     
-    ///
-    /// Register a platform at a set of grid cells on a given level
-    /// 
+    /// Marks adjacency as needing recomputation
+    /// Batched to LateUpdate for performance
+    /// Multiple pose changes in the same frame will only trigger one recomputation
+    private void MarkAdjacencyDirty()
+    {
+        _adjacencyDirty = true;
+    }
+
+
+    
+    /// Public API for external systems to trigger adjacency recomputation
+    /// Used by BuildModeManager to update railing preview during placement
+    public void TriggerAdjacencyUpdate()
+    {
+        MarkAdjacencyDirty();
+    }
+
+
+    
+     ///
+    /// Register platform
     /// markOccupiedInGrid controls ghost vs permanent platforms:
-    /// - false (GHOST/PREVIEW): Participates in adjacency for railing previews
+    /// - false (GHOST): Participates in adjacency for railing previews
     ///                          but does NOT block placement in WorldGrid
     /// - true (PERMANENT): Reserves cells and fully participates in the game world
     /// 
@@ -393,32 +411,9 @@ public class PlatformManager : MonoBehaviour
         // Mark adjacency for batched recomputation
         MarkAdjacencyDirty();
     }
-
-
-    
-    ///
-    /// Marks adjacency as needing recomputation
-    /// Batched to LateUpdate for performance
-    /// Multiple pose changes in the same frame will only trigger one recomputation
-    ///
-    private void MarkAdjacencyDirty()
-    {
-        _adjacencyDirty = true;
-    }
-
-
-    
-    ///
-    /// Public API for external systems to trigger adjacency recomputation
-    /// Used by BuildModeManager to update railing preview during placement
-    ///
-    public void TriggerAdjacencyUpdate()
-    {
-        MarkAdjacencyDirty();
-    }
-
-
-    
+     
+     
+     
     /// Removes platform occupancy from the grid and clears its connections
     public void UnregisterPlatform(GamePlatform platform)
     {
@@ -468,11 +463,11 @@ public class PlatformManager : MonoBehaviour
             // If platforms aren't registered, compute their cells
             if (!_allPlatforms.TryGetValue(platformA, out dataA))
             {
-                _tmpCells.Clear();
-                GetCellsForPlatform(platformA, _tmpCells);
-                if (_tmpCells.Count > 0)
+                var cells = new List<Vector2Int>();
+                GetCellsForPlatform(platformA, cells);
+                if (cells.Count > 0)
                 {
-                    platformA.occupiedCells = _tmpCells;
+                    platformA.occupiedCells = cells;
                     RegisterPlatform(platformA, markOccupiedInGrid: false);
                     dataA = _allPlatforms[platformA];
                 }
@@ -481,11 +476,11 @@ public class PlatformManager : MonoBehaviour
             
             if (!_allPlatforms.TryGetValue(platformB, out dataB))
             {
-                _tmpCells.Clear();
-                GetCellsForPlatform(platformB, _tmpCells);
-                if (_tmpCells.Count > 0)
+                var cells = new List<Vector2Int>();
+                GetCellsForPlatform(platformB, cells);
+                if (cells.Count > 0)
                 {
-                    platformB.occupiedCells = _tmpCells;
+                    platformB.occupiedCells = cells;
                     RegisterPlatform(platformB, markOccupiedInGrid: false);
                     dataB = _allPlatforms[platformB];
                 }

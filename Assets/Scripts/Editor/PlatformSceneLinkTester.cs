@@ -56,18 +56,6 @@ namespace Editor
             }
             else
             {
-                // Fallback to old distance-based method (deprecated)
-                #pragma warning disable 0618
-                for (int i = 0; i < all.Length; i++)
-                {
-                    var a = all[i];
-                    for (int j = i + 1; j < all.Length; j++)
-                    {
-                        var b = all[j];
-                        GamePlatform.ConnectIfAdjacent(a, b);
-                    }
-                }
-                #pragma warning restore 0618
             }
         }
     }
