@@ -122,9 +122,12 @@ public class PlatformManager : MonoBehaviour
 
     private void LateUpdate()
     {
+        Debug.Log($"[PlatformManager.LateUpdate] Running. _adjacencyDirty: {_adjacencyDirty}, _isRecomputingAdjacency: {_isRecomputingAdjacency}");
+        
         // Batch adjacency recomputation to once per frame if dirty
         if (_adjacencyDirty && !_isRecomputingAdjacency)
         {
+            Debug.Log("[PlatformManager.LateUpdate] Adjacency dirty, recomputing!");
             _adjacencyDirty = false;
             RecomputeAllAdjacency();                                                 
         }
@@ -212,12 +215,16 @@ public class PlatformManager : MonoBehaviour
     {
         if (!platform) return;
         
+        Debug.Log($"[PlatformManager.HandlePlatformPlaced] Platform {platform.name} placed. IsPickedUp: {platform.IsPickedUp}");
+        
         // Register platform in grid
         RegisterPlatform(platform);
         
         // Mark adjacency dirty so it recalculates using the same logic as preview
         // This ensures consistent behavior between preview and placement
         MarkAdjacencyDirty();
+        
+        Debug.Log($"[PlatformManager.HandlePlatformPlaced] Marked adjacency dirty. _adjacencyDirty: {_adjacencyDirty}");
         
         // Rebuild NavMesh for this platform and all affected neighbors
         RebuildNavMeshForPlatformAndNeighbors(platform);
@@ -256,7 +263,12 @@ public class PlatformManager : MonoBehaviour
         // Placed platforms have permanent occupancy set by RegisterPlatform
         if (platform.IsPickedUp)
         {
+            Debug.Log($"[PlatformManager.OnPlatformPoseChanged] Platform {platform.name} pose changed (IsPickedUp=true), calling MovePlatform");
             MovePlatform(platform);
+        }
+        else
+        {
+            Debug.Log($"[PlatformManager.OnPlatformPoseChanged] Platform {platform.name} pose changed but IsPickedUp=false, skipping MovePlatform");
         }
     }
 
@@ -375,6 +387,7 @@ public class PlatformManager : MonoBehaviour
     /// Multiple pose changes in the same frame will only trigger one recomputation
     private void MarkAdjacencyDirty()
     {
+        Debug.Log($"[PlatformManager.MarkAdjacencyDirty] Setting _adjacencyDirty = true");
         _adjacencyDirty = true;
     }
 
@@ -393,11 +406,18 @@ public class PlatformManager : MonoBehaviour
     ///
     public void RegisterPlatform(GamePlatform platform)
     {
-        if (!platform || platform.occupiedCells == null || platform.occupiedCells.Count == 0) return;
+        if (!platform || platform.occupiedCells == null || platform.occupiedCells.Count == 0)
+        {
+            Debug.LogWarning($"[PlatformManager.RegisterPlatform] Cannot register platform: platform={platform}, occupiedCells={(platform?.occupiedCells?.Count ?? 0)}");
+            return;
+        }
+
+        Debug.Log($"[PlatformManager.RegisterPlatform] Registering platform {platform.name} with {platform.occupiedCells.Count} cells. IsPickedUp: {platform.IsPickedUp}");
 
         // Remove old occupancy if any
         if (_allPlatforms.TryGetValue(platform, out var oldData))
         {
+            Debug.Log($"[PlatformManager.RegisterPlatform] Removing old occupancy: {oldData.cells.Count} cells");
             // Remove from WorldGrid and reverse lookup
             foreach (Vector2Int cell in oldData.cells)
             {
@@ -423,6 +443,8 @@ public class PlatformManager : MonoBehaviour
             _worldGrid.TryAddFlag(cell, WorldGrid.CellFlag.Occupied);
             _cellToPlatform[cell] = platform;
         }
+        
+        Debug.Log($"[PlatformManager.RegisterPlatform] Platform {platform.name} registered successfully. Total platforms: {_allPlatforms.Count}");
         
         // Invoke UnityEvent for platform placed
         OnPlatformPlaced?.Invoke(platform);
