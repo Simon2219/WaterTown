@@ -119,9 +119,9 @@ public class TownManager : MonoBehaviour
     ///
     /// Check if an area is free for building (delegates to PlatformManager)
     ///
-    public bool IsAreaFree(List<Vector2Int> cells, GamePlatform ignorePlatform = null)
+    public bool IsAreaFree(List<Vector2Int> cells)
     {
-        return _platformManager.IsAreaFree(cells, ignorePlatform);
+        return _platformManager.IsAreaFree(cells);
     }
 
 

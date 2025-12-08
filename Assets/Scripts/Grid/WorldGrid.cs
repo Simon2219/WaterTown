@@ -61,11 +61,12 @@ namespace Grid
         [Flags]
         public enum CellFlag
         {
-            Empty     = 0,
-            Locked    = 1 << 0,
-            Buildable = 1 << 1,
-            Occupied  = 1 << 2,
-            // Extend as needed: Preview = 1<<3, ServiceZone = 1<<4, etc.
+            Empty         = 0,
+            Locked        = 1 << 0,
+            Buildable     = 1 << 1,
+            Occupied      = 1 << 2,
+            OccupyPreview = 1 << 3,
+            // Extend as needed: ServiceZone = 1<<4, etc.
         }
         
         #endregion
@@ -159,6 +160,58 @@ namespace Grid
         {
             return (uint)cell.x < (uint)sizeX
                 && (uint)cell.y < (uint)sizeY;
+        }
+
+
+        ///
+        /// Get all 8-directional neighbor cells for a given cell (only in-bounds neighbors)
+        ///
+        public List<Vector2Int> GetNeighborCells(Vector2Int cell)
+        {
+            var neighbors = new List<Vector2Int>(8);
+            
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                for (int dy = -1; dy <= 1; dy++)
+                {
+                    if (dx == 0 && dy == 0) continue; // Skip the cell itself
+                    
+                    var neighborCell = new Vector2Int(cell.x + dx, cell.y + dy);
+                    if (CellInBounds(neighborCell))
+                        neighbors.Add(neighborCell);
+                }
+            }
+            
+            return neighbors;
+        }
+
+
+        ///
+        /// Get all neighboring cells around a list of cells (8-directional ring, excluding the cells themselves)
+        ///
+        public HashSet<Vector2Int> GetNeighborCellsAround(List<Vector2Int> cells)
+        {
+            var neighbors = new HashSet<Vector2Int>();
+            var cellSet = new HashSet<Vector2Int>(cells);
+            
+            foreach (var cell in cells)
+            {
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    for (int dy = -1; dy <= 1; dy++)
+                    {
+                        if (dx == 0 && dy == 0) continue; // Skip the cell itself
+                        
+                        var neighborCell = new Vector2Int(cell.x + dx, cell.y + dy);
+                        
+                        // Only add if it's in bounds and not part of the original cells
+                        if (CellInBounds(neighborCell) && !cellSet.Contains(neighborCell))
+                            neighbors.Add(neighborCell);
+                    }
+                }
+            }
+            
+            return neighbors;
         }
         
 
@@ -387,6 +440,64 @@ namespace Grid
             CellChanged?.Invoke(cell);
         }
 
+        
+        ///
+        /// Set cell status with priority enforcement
+        /// Priority: Locked > Occupied > OccupyPreview > Buildable > Empty
+        /// Higher priority flags prevent lower priority flags from being set
+        ///
+        public bool SetCellStatus(Vector2Int cell, CellFlag newFlag)
+        {
+            if (!CellInBounds(cell)) return false;
+            
+            var cd = _cells[cell.x, cell.y];
+            
+            // Locked cells cannot change (highest priority)
+            if (cd.HasFlag(CellFlag.Locked) && newFlag != CellFlag.Locked)
+                return false;
+            
+            // When setting a new flag, enforce mutual exclusivity based on priority
+            if (newFlag == CellFlag.Locked)
+            {
+                // Locked removes all other flags
+                cd.flags = CellFlag.Locked;
+            }
+            else if (newFlag == CellFlag.Occupied)
+            {
+                // Occupied removes preview and buildable
+                cd.flags &= ~(CellFlag.OccupyPreview | CellFlag.Buildable);
+                cd.flags |= CellFlag.Occupied;
+            }
+            else if (newFlag == CellFlag.OccupyPreview)
+            {
+                // Preview cannot overwrite Occupied
+                if (cd.HasFlag(CellFlag.Occupied))
+                    return false;
+                
+                cd.flags &= ~CellFlag.Buildable;
+                cd.flags |= CellFlag.OccupyPreview;
+            }
+            else if (newFlag == CellFlag.Buildable)
+            {
+                // Buildable cannot overwrite Occupied or Preview
+                if (cd.HasFlag(CellFlag.Occupied) || cd.HasFlag(CellFlag.OccupyPreview))
+                    return false;
+                
+                cd.flags |= CellFlag.Buildable;
+            }
+            else if (newFlag == CellFlag.Empty)
+            {
+                // Empty clears all flags
+                cd.flags = CellFlag.Empty;
+            }
+            
+            _cells[cell.x, cell.y] = cd;
+            Version++;
+            CellChanged?.Invoke(cell);
+            
+            return true;
+        }
+        
         
         /// Add a flag to a single cell (in-bounds).
         /// Returns true on success;

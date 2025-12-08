@@ -226,21 +226,30 @@ public class PlatformManager : MonoBehaviour
 
     ///
     /// Event handler called when ANY platform is picked up
-    /// Triggers lightweight adjacency update without unregistering from grid
+    /// Clears Occupied flags and marks adjacency dirty
     ///
     private void OnPlatformPickedUp(GamePlatform platform)
     {
         if (!platform) return;
         
-        // Store current cells as previous for the next move operation
+        // Clear Occupied flags from cells this platform was occupying
         if (_allPlatforms.TryGetValue(platform, out var data))
         {
             data.previousCells.Clear();
             data.previousCells.AddRange(data.cells);
+            
+            // Clear Occupied flags (cells will remain in _cellToPlatform for adjacency updates)
+            foreach (Vector2Int cell in data.cells)
+            {
+                if (_cellToPlatform.TryGetValue(cell, out var owner) && owner == platform)
+                {
+                    _worldGrid.SetCellStatus(cell, WorldGrid.CellFlag.Empty);
+                }
+            }
         }
         
-        // Calculate adjacency for this platform and neighbors immediately
-        CalculateAdjacencyForPlatform(platform);
+        // Mark adjacency dirty so neighbors update in LateUpdate
+        MarkAdjacencyDirty();
     }
 
 
@@ -259,8 +268,7 @@ public class PlatformManager : MonoBehaviour
 
     ///
     /// Lightweight platform movement update (for runtime pose changes)
-    /// Updates grid occupancy and marks adjacency dirty without full rebuild
-    /// Preview platforms do NOT overwrite cells occupied by placed platforms
+    /// Uses OccupyPreview flag for preview platforms, Occupied for placed
     ///
     private void MovePlatform(GamePlatform platform)
     {
@@ -270,13 +278,13 @@ public class PlatformManager : MonoBehaviour
         data.previousCells.Clear();
         data.previousCells.AddRange(data.cells);
 
-        // Clear old occupancy for this platform only where it was the owner
+        // Clear old preview/occupied flags for this platform's old cells
         foreach (Vector2Int cell in data.cells)
         {
-            // Only clear if this platform owns the cell (don't clear cells owned by other platforms)
+            // Only clear if this platform owns the cell
             if (_cellToPlatform.TryGetValue(cell, out var owner) && owner == platform)
             {
-                _worldGrid.TryRemoveFlag(cell, WorldGrid.CellFlag.Occupied);
+                _worldGrid.SetCellStatus(cell, WorldGrid.CellFlag.Empty);
                 _cellToPlatform.Remove(cell);
             }
         }
@@ -287,23 +295,17 @@ public class PlatformManager : MonoBehaviour
         data.cells.Clear();
         data.cells.AddRange(newCells);
 
-        // Update grid occupancy
-        // IMPORTANT: Preview platforms (IsPickedUp) do NOT overwrite placed platforms
+        // Set appropriate flag based on whether platform is placed or in preview
+        WorldGrid.CellFlag flagToUse = platform.IsPickedUp ? WorldGrid.CellFlag.OccupyPreview : WorldGrid.CellFlag.Occupied;
+
+        // Update grid occupancy with proper flags
         foreach (Vector2Int cell in data.cells)
         {
-            // Check if cell is already occupied by a different PLACED platform
-            if (_cellToPlatform.TryGetValue(cell, out var existingPlatform))
+            // SetCellStatus will enforce priority (won't overwrite Occupied with OccupyPreview)
+            if (_worldGrid.SetCellStatus(cell, flagToUse))
             {
-                // Don't overwrite if it's a different platform that's NOT picked up (placed platform)
-                if (existingPlatform != platform && !existingPlatform.IsPickedUp)
-                {
-                    continue; // Skip this cell - it's occupied by a placed platform
-                }
+                _cellToPlatform[cell] = platform;
             }
-            
-            // Safe to mark this cell as occupied by this platform
-            _worldGrid.TryAddFlag(cell, WorldGrid.CellFlag.Occupied);
-            _cellToPlatform[cell] = platform;
         }
         
         // Mark adjacency as dirty for batched recomputation (no NavMesh rebuild during movement)
@@ -347,30 +349,20 @@ public class PlatformManager : MonoBehaviour
 
 
     ///
-    /// True if all given 2D cells are inside the grid and not Occupied (level 0)
-    /// Used by BuildModeManager as placement validation
-    /// Can optionally ignore a specific platform (useful for validating while moving a platform)
+    /// True if all given 2D cells are inside the grid and not Occupied
+    /// OccupyPreview cells are considered free (allows placement over preview)
     ///
-    public bool IsAreaFree(List<Vector2Int> cells, GamePlatform ignorePlatform = null)
+    public bool IsAreaFree(List<Vector2Int> cells)
     {
         foreach (Vector2Int cell in cells)
         {
-            
             if (!_worldGrid.CellInBounds(cell))
                 return false;
             
-            // If this cell is occupied, check if it's occupied by the platform we're ignoring
+            // Only reject if cell has Occupied flag (placed platforms)
+            // OccupyPreview is allowed (preview platforms don't block placement)
             if (_worldGrid.CellHasAnyFlag(cell, WorldGrid.CellFlag.Occupied))
-            {
-                // If we have an ignore platform, check if this cell belongs to it
-                if (ignorePlatform != null && _cellToPlatform.TryGetValue(cell, out var occupyingPlatform))
-                {
-                    if (occupyingPlatform == ignorePlatform)
-                        continue; // Ignore this cell since it's occupied by the platform we're moving
-                }
-                
                 return false;
-            }
         }
         return true;
     }
@@ -394,8 +386,8 @@ public class PlatformManager : MonoBehaviour
 
 
     ///
-    /// Register platform and occupy grid cells
-    /// Updates platform's occupied cells in the grid and triggers adjacency computation
+    /// Register platform and occupy grid cells with Occupied flag
+    /// Called when a platform is successfully placed
     ///
     public void RegisterPlatform(GamePlatform platform)
     {
@@ -404,11 +396,14 @@ public class PlatformManager : MonoBehaviour
         // Remove old occupancy if any
         if (_allPlatforms.TryGetValue(platform, out var oldData))
         {
-            // Remove from WorldGrid and reverse lookup
+            // Clear old cells
             foreach (Vector2Int cell in oldData.cells)
             {
-                _worldGrid.TryRemoveFlag(cell, WorldGrid.CellFlag.Occupied);
-                _cellToPlatform.Remove(cell);
+                if (_cellToPlatform.TryGetValue(cell, out var owner) && owner == platform)
+                {
+                    _worldGrid.SetCellStatus(cell, WorldGrid.CellFlag.Empty);
+                    _cellToPlatform.Remove(cell);
+                }
             }
         }
 
@@ -423,10 +418,10 @@ public class PlatformManager : MonoBehaviour
         data.cells.Clear();
         data.cells.AddRange(platform.occupiedCells);
 
-        // Add to WorldGrid and reverse lookup
+        // Mark cells as Occupied (placed platform)
         foreach (Vector2Int cell in platform.occupiedCells)
         {
-            _worldGrid.TryAddFlag(cell, WorldGrid.CellFlag.Occupied);
+            _worldGrid.SetCellStatus(cell, WorldGrid.CellFlag.Occupied);
             _cellToPlatform[cell] = platform;
         }
         
@@ -445,11 +440,14 @@ public class PlatformManager : MonoBehaviour
 
         platform.PoseChanged -= OnPlatformPoseChanged;
 
-        // Remove from WorldGrid and reverse lookup
+        // Clear cells from WorldGrid and reverse lookup
         foreach (Vector2Int cell in data.cells)
         {
-            _worldGrid.TryRemoveFlag(cell, WorldGrid.CellFlag.Occupied);
-            _cellToPlatform.Remove(cell);
+            if (_cellToPlatform.TryGetValue(cell, out var owner) && owner == platform)
+            {
+                _worldGrid.SetCellStatus(cell, WorldGrid.CellFlag.Empty);
+                _cellToPlatform.Remove(cell);
+            }
         }
 
         _allPlatforms.Remove(platform);
@@ -740,8 +738,8 @@ public class PlatformManager : MonoBehaviour
 
 
     ///
-    /// Recomputes adjacency for all platforms
-    /// Only updates socket connections - NavMesh and setup handled separately
+    /// Recomputes adjacency for all platforms using cell-based detection
+    /// Each platform checks its neighboring cells and updates its own sockets
     /// This is batched to run once per frame maximum via LateUpdate
     ///
     private void RecomputeAllAdjacency()
@@ -764,17 +762,48 @@ public class PlatformManager : MonoBehaviour
         foreach (var p in allActivePlatforms)
             ResetPlatformConnections(p);
 
-        // Calculate socket connections for all platform pairs
-        // This works the same whether platforms are placed or being moved
-        for (int i = 0; i < allActivePlatforms.Count; i++)
+        // Update each platform's connections based on neighboring cells
+        foreach (var platform in allActivePlatforms)
         {
-            for (int j = i + 1; j < allActivePlatforms.Count; j++)
-            {
-                UpdateSocketConnections(allActivePlatforms[i], allActivePlatforms[j]);
-            }
+            UpdatePlatformConnectionsFromNeighbors(platform);
         }
 
         _isRecomputingAdjacency = false;
+    }
+
+
+    ///
+    /// Updates a platform's socket connections by checking neighboring cells
+    /// Cell-based approach: checks if adjacent cells are occupied/preview and updates sockets
+    ///
+    private void UpdatePlatformConnectionsFromNeighbors(GamePlatform platform)
+    {
+        if (!platform || !_allPlatforms.TryGetValue(platform, out var data)) return;
+
+        // Get all neighboring cells around this platform's footprint
+        HashSet<Vector2Int> neighborCells = _worldGrid.GetNeighborCellsAround(data.cells);
+
+        // Find all platforms occupying those neighboring cells
+        var neighborPlatforms = new HashSet<GamePlatform>();
+        foreach (var neighborCell in neighborCells)
+        {
+            // Check if cell is occupied or preview occupied
+            if (_worldGrid.CellHasAnyFlag(neighborCell, WorldGrid.CellFlag.Occupied | WorldGrid.CellFlag.OccupyPreview))
+            {
+                // Find which platform occupies this cell
+                if (_cellToPlatform.TryGetValue(neighborCell, out var neighborPlatform))
+                {
+                    if (neighborPlatform != platform)
+                        neighborPlatforms.Add(neighborPlatform);
+                }
+            }
+        }
+
+        // Update socket connections with each neighbor
+        foreach (var neighbor in neighborPlatforms)
+        {
+            UpdateSocketConnections(platform, neighbor);
+        }
     }
 
 
