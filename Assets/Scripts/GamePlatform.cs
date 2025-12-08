@@ -1033,8 +1033,6 @@ namespace WaterTown.Platforms
 
         public void OnPlaced()
         {
-            Debug.Log($"[GamePlatform.OnPlaced] Platform {name} placed");
-            
             // Restore colliders
             foreach (var col in GetComponentsInChildren<Collider>(true))
                 col.enabled = true;
@@ -1046,16 +1044,12 @@ namespace WaterTown.Platforms
             List<Vector2Int> cells = _platformManager.GetCellsForPlatform(this);
             occupiedCells = cells;
             
-            Debug.Log($"[GamePlatform.OnPlaced] Platform {name} has {occupiedCells.Count} occupied cells");
-            
             // Set IsPickedUp to false before firing event
             // This ensures managers see the platform in correct state
             IsPickedUp = false;
             
             // Fire event for managers to register platform and trigger adjacency
-            Debug.Log($"[GamePlatform.OnPlaced] Firing PlatformPlaced event. Subscribers: {(PlatformPlaced?.GetInvocationList()?.Length ?? 0)}");
             PlatformPlaced?.Invoke(this);
-            Debug.Log($"[GamePlatform.OnPlaced] PlatformPlaced event fired");
         }
 
 
