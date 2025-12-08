@@ -652,6 +652,23 @@ namespace Grid
             return false;
         }
 
+
+        
+        /// True if area is completely free (no Occupied flags)
+        /// Used for platform placement validation
+        public bool AreaIsEmpty(Vector2Int a, Vector2Int b)
+        {
+            ClampAreaInclusive(a, b, out var min, out var max);
+            
+            for (int y = min.y; y <= max.y; y++)
+            for (int x = min.x; x <= max.x; x++)
+            {
+                if ((_cells[x, y].flags & CellFlag.Occupied) != 0) return false;
+            }
+
+            return true;
+        }
+
         
         
         /// Returns List with all cells inside area.

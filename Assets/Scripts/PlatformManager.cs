@@ -372,15 +372,26 @@ public class PlatformManager : MonoBehaviour
     /// OccupyPreview -> considered free (allows placement over preview)
     public bool IsAreaFree(List<Vector2Int> cells)
     {
+        if (cells == null || cells.Count == 0)
+            return false;
+        
+        // Calculate bounding box of the area
+        Vector2Int min = cells[0];
+        Vector2Int max = cells[0];
+        
         foreach (Vector2Int cell in cells)
         {
             if (!_worldGrid.CellInBounds(cell))
                 return false;
             
-            if (IsCellOccupied(cell, false))
-                return false;
+            min.x = Mathf.Min(min.x, cell.x);
+            min.y = Mathf.Min(min.y, cell.y);
+            max.x = Mathf.Max(max.x, cell.x);
+            max.y = Mathf.Max(max.y, cell.y);
         }
-        return true;
+        
+        // Use WorldGrid's optimized area check
+        return _worldGrid.AreaIsEmpty(min, max);
     }
 
 
