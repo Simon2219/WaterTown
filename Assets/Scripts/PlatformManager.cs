@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 using Grid;
+using Unity.AI.Navigation;
+using Unity.Entities.UniversalDelegates;
 using UnityEngine;
 using UnityEngine.Events;
 using WaterTown.Platforms;
@@ -119,9 +121,9 @@ public class PlatformManager : MonoBehaviour
             if (!platform) continue;
             if (!platform.isActiveAndEnabled) continue;
 
-            var tmpCells = new List<Vector2Int>();
+            List<Vector2Int> tmpCells = GetCellsForPlatform(platform);
             platform.occupiedCells = tmpCells;
-            GetCellsForPlatform(platform, tmpCells);
+            
             
             if (tmpCells.Count > 0)
             {
@@ -247,8 +249,7 @@ public class PlatformManager : MonoBehaviour
         }
 
         // Compute new footprint cells from current transform (rotation-aware)
-        var tmpCells = new List<Vector2Int>();
-        GetCellsForPlatform(platform, tmpCells);
+        List<Vector2Int> tmpCells = GetCellsForPlatform(platform);
 
         data.cells.Clear();
         data.cells.AddRange(tmpCells);
@@ -393,7 +394,7 @@ public class PlatformManager : MonoBehaviour
     public void UnregisterPlatform(GamePlatform platform)
     {
         if (!platform) return;
-        if (!_allPlatforms.TryGetValue(platform, out var data)) return;
+        if (!_allPlatforms.TryGetValue(platform, out PlatformGameData data)) return;
 
         platform.PoseChanged -= OnPlatformPoseChanged;
 
@@ -426,16 +427,13 @@ public class PlatformManager : MonoBehaviour
     /// Used by editor tools and runtime systems
     ///
     public void ConnectPlatformsIfAdjacent(GamePlatform platformA, GamePlatform platformB)
-    {
-        if (!platformA || !platformB) return;
-        
+    { 
         if (!_allPlatforms.TryGetValue(platformA, out var dataA) || !_allPlatforms.TryGetValue(platformB, out var dataB))
         {
             // If platforms aren't registered, compute their cells
             if (!_allPlatforms.TryGetValue(platformA, out dataA))
             {
-                var cells = new List<Vector2Int>();
-                GetCellsForPlatform(platformA, cells);
+                List<Vector2Int> cells = GetCellsForPlatform(platformA);
                 if (cells.Count > 0)
                 {
                     platformA.occupiedCells = cells;
@@ -447,8 +445,7 @@ public class PlatformManager : MonoBehaviour
             
             if (!_allPlatforms.TryGetValue(platformB, out dataB))
             {
-                var cells = new List<Vector2Int>();
-                GetCellsForPlatform(platformB, cells);
+                List<Vector2Int> cells = GetCellsForPlatform(platformB);
                 if (cells.Count > 0)
                 {
                     platformB.occupiedCells = cells;
@@ -726,8 +723,7 @@ public class PlatformManager : MonoBehaviour
         if (pickedUpPlatform != null)
         {
             // Compute cells for preview
-            var previewCells = new List<Vector2Int>();
-            GetCellsForPlatform(pickedUpPlatform, previewCells);
+            List<Vector2Int> previewCells = GetCellsForPlatform(pickedUpPlatform);
             
             if (previewCells.Count > 0)
             {
@@ -759,10 +755,10 @@ public class PlatformManager : MonoBehaviour
     /// that rotation is in 90° steps (0, 90, 180, 270)
     /// This is the single source of truth for runtime footprint
     ///
-    public void GetCellsForPlatform(GamePlatform platform, List<Vector2Int> outputCells)
+    public List<Vector2Int> GetCellsForPlatform(GamePlatform platform)
     {
-        outputCells.Clear();
-        if (!platform) return;
+        var outputCells = new List<Vector2Int>();
+        if (!platform) return null;
 
         // Use platform's world position to find center cell on the desired level
         Vector3 worldPosition = platform.transform.position;
@@ -797,6 +793,7 @@ public class PlatformManager : MonoBehaviour
                 outputCells.Add(new Vector2Int(gridX, gridY));
             }
         }
+        return outputCells;
     }
     
     #endregion

@@ -717,15 +717,13 @@ namespace WaterTown.Platforms
         }
 
         /// Editor-only convenience to clear links and show all modules/railings
+        /// /// IMPORTANT FIX:
+        /// We must restore EVERY module & railing (even ones that were hidden
+        /// and unregistered before) so that socket statuses and visuals are
+        /// in a consistent "no connections" baseline before recomputing links
+        ///
         public void EditorResetAllConnections()
         {
-            ///
-            /// IMPORTANT FIX:
-            /// We must restore EVERY module & railing (even ones that were hidden
-            /// and unregistered before) so that socket statuses and visuals are
-            /// in a consistent "no connections" baseline before recomputing links
-            ///
-
             // Show all PlatformModules under this platform (active or inactive)
             var allModules = GetComponentsInChildren<PlatformModule>(true);
             foreach (var m in allModules)
@@ -1048,8 +1046,7 @@ namespace WaterTown.Platforms
             EnsureChildrenRailingsRegistered();
             
             // Compute cells for placement
-            var cells = new List<Vector2Int>();
-            _platformManager.GetCellsForPlatform(this, cells);
+            List<Vector2Int> cells = _platformManager.GetCellsForPlatform(this);
             occupiedCells = cells;
             
             // Set IsPickedUp to false before firing event
@@ -1089,8 +1086,7 @@ namespace WaterTown.Platforms
                 
                 // Compute cells and fire placement event to re-register at original position
                 // This triggers adjacency recomputation so railings/NavMesh links update
-                var cells = new List<Vector2Int>();
-                _platformManager.GetCellsForPlatform(this, cells);
+                List<Vector2Int> cells = _platformManager.GetCellsForPlatform(this);
                 occupiedCells = cells;
                 
                 PlatformPlaced?.Invoke(this);
@@ -1217,8 +1213,7 @@ namespace WaterTown.Platforms
             if (!IsPickedUp) return true; // Not being placed
             
             // Compute cells this platform would occupy
-            var cells = new List<Vector2Int>();
-            _platformManager.GetCellsForPlatform(this, cells);
+            List<Vector2Int> cells = _platformManager.GetCellsForPlatform(this);
             
             if (cells.Count == 0) return false;
             
