@@ -206,7 +206,7 @@ public class PlatformManager : MonoBehaviour
 
     ///
     /// Event handler called when ANY platform is placed
-    /// Registers platform in grid, calculates adjacency, and rebuilds NavMesh
+    /// Registers platform in grid, marks adjacency dirty, and rebuilds NavMesh
     ///
     private void HandlePlatformPlaced(GamePlatform platform)
     {
@@ -215,8 +215,9 @@ public class PlatformManager : MonoBehaviour
         // Register platform in grid
         RegisterPlatform(platform);
         
-        // Calculate adjacency for this platform and neighbors
-        CalculateAdjacencyForPlatform(platform);
+        // Mark adjacency dirty so it recalculates using the same logic as preview
+        // This ensures consistent behavior between preview and placement
+        MarkAdjacencyDirty();
         
         // Rebuild NavMesh for this platform and all affected neighbors
         RebuildNavMeshForPlatformAndNeighbors(platform);
