@@ -106,7 +106,9 @@ public class PlatformManager : MonoBehaviour
 
     private void OnEnable()
     {
-        // No static event subscriptions needed - GamePlatform calls us directly
+        // Subscribe to static platform creation/destruction events (for discovery and cleanup)
+        GamePlatform.Created += OnPlatformCreated;
+        GamePlatform.Destroyed += OnPlatformDestroyed;
     }
 
 
@@ -129,7 +131,22 @@ public class PlatformManager : MonoBehaviour
 
     private void OnDisable()
     {
-        // Cleanup handled by GamePlatform.OnDisable unsubscribing
+        // Unsubscribe from static platform creation/destruction events
+        GamePlatform.Created -= OnPlatformCreated;
+        GamePlatform.Destroyed -= OnPlatformDestroyed;
+        
+        // Best-effort cleanup of instance event subscriptions
+        foreach (GamePlatform platform in _allPlatforms.Keys)
+        {
+            if (platform)
+            {
+                platform.HasMoved -= OnPlatformHasMoved;
+                platform.Enabled -= OnPlatformEnabled;
+                platform.Disabled -= OnPlatformDisabled;
+                platform.Placed -= HandlePlatformPlaced;
+                platform.PickedUp -= OnPlatformPickedUp;
+            }
+        }
     }
     
     #endregion
@@ -162,14 +179,21 @@ public class PlatformManager : MonoBehaviour
     
     
     ///
-    /// Called by GamePlatform when it becomes enabled
-    /// Adds platform to registry (subscriptions handled by GamePlatform itself)
+    /// Event handler for static Created event
+    /// Subscribes to all instance events for this platform
     ///
-    public void OnPlatformCreated(GamePlatform platform)
+    private void OnPlatformCreated(GamePlatform platform)
     {
         if (!platform) return;
         
-        // Add to registry if not already present
+        // Subscribe to all instance events for this platform
+        platform.HasMoved += OnPlatformHasMoved;
+        platform.Enabled += OnPlatformEnabled;
+        platform.Disabled += OnPlatformDisabled;
+        platform.Placed += HandlePlatformPlaced;
+        platform.PickedUp += OnPlatformPickedUp;
+        
+        // Add to registry immediately
         if (!_allPlatforms.ContainsKey(platform))
         {
             _allPlatforms[platform] = new PlatformGameData();
@@ -178,10 +202,44 @@ public class PlatformManager : MonoBehaviour
 
 
     ///
-    /// Called by GamePlatform when it becomes disabled
-    /// Removes the platform from the global registry and unregisters from grid
+    /// Event handler for static Destroyed event
+    /// Unsubscribes from all instance events and cleans up
     ///
-    public void OnPlatformDestroyed(GamePlatform platform)
+    private void OnPlatformDestroyed(GamePlatform platform)
+    {
+        if (!platform) return;
+        
+        // Unsubscribe from instance events
+        platform.HasMoved -= OnPlatformHasMoved;
+        platform.Enabled -= OnPlatformEnabled;
+        platform.Disabled -= OnPlatformDisabled;
+        platform.Placed -= HandlePlatformPlaced;
+        platform.PickedUp -= OnPlatformPickedUp;
+        
+        // Clean up platform data if it exists
+        if (_allPlatforms.ContainsKey(platform))
+        {
+            UnregisterPlatform(platform);
+        }
+    }
+
+
+    ///
+    /// Instance event handler when a platform becomes enabled
+    /// No additional action needed (platform already in registry from Created event)
+    ///
+    private void OnPlatformEnabled(GamePlatform platform)
+    {
+        // Platform was already added to registry in OnPlatformCreated
+        // This event can be used for future per-enable logic if needed
+    }
+
+
+    ///
+    /// Instance event handler when a platform becomes disabled
+    /// Removes the platform from the grid
+    ///
+    private void OnPlatformDisabled(GamePlatform platform)
     {
         if (!platform) return;
         UnregisterPlatform(platform);
@@ -395,7 +453,7 @@ public class PlatformManager : MonoBehaviour
             }
         }
 
-        // Ensure we have game data (instance event subscriptions handled by GamePlatform.OnEnable)
+        // Ensure we have game data (instance event subscriptions handled in OnPlatformCreated)
         if (!_allPlatforms.TryGetValue(platform, out var data))
         {
             data = new PlatformGameData();
@@ -419,13 +477,12 @@ public class PlatformManager : MonoBehaviour
 
     ///
     /// Removes platform occupancy from the grid and clears its connections
+    /// Does NOT unsubscribe from events (handled by OnPlatformDestroyed)
     ///
     public void UnregisterPlatform(GamePlatform platform)
     {
         if (!platform) return;
         if (!_allPlatforms.TryGetValue(platform, out PlatformGameData data)) return;
-
-        // Unsubscribe handled by GamePlatform.OnDisable
 
         // Clear cells from WorldGrid and reverse lookup
         foreach (Vector2Int cell in data.cells)

@@ -25,16 +25,24 @@ namespace WaterTown.Platforms
         /// Fired whenever this platform moves (position/rotation/scale changes)
         public event Action<GamePlatform> HasMoved;
         
-        /// Fired when this platform becomes enabled (for manager registration)
+        /// Static event fired when ANY platform is created (for initial discovery)
+        /// Used by managers to subscribe to this platform's instance events
+        public static event Action<GamePlatform> Created;
+        
+        /// Static event fired when ANY platform is destroyed (for cleanup)
+        /// Used by managers to unsubscribe from this platform's instance events
+        public static event Action<GamePlatform> Destroyed;
+        
+        /// Instance event fired when this platform becomes enabled
         public event Action<GamePlatform> Enabled;
         
-        /// Fired when this platform becomes disabled (for manager cleanup)
+        /// Instance event fired when this platform becomes disabled
         public event Action<GamePlatform> Disabled;
         
-        /// Fired when this platform is placed (after successful placement)
+        /// Instance event fired when this platform is placed (after successful placement)
         public event Action<GamePlatform> Placed;
         
-        /// Fired when this platform is picked up (before being moved)
+        /// Instance event fired when this platform is picked up (before being moved)
         public event Action<GamePlatform> PickedUp;
 
         public List<Vector2Int> occupiedCells = null;
@@ -765,6 +773,9 @@ namespace WaterTown.Platforms
 
         private void Awake()
         {
+            // Fire static creation event for managers to subscribe to instance events
+            Created?.Invoke(this);
+            
             try
             {
                 FindDependencies();
@@ -801,35 +812,22 @@ namespace WaterTown.Platforms
             
             InitializePlatform();
             
-            // Subscribe PlatformManager to this platform's events
-            if (_platformManager)
-            {
-                Enabled += _platformManager.OnPlatformCreated;
-                Disabled += _platformManager.OnPlatformDestroyed;
-                HasMoved += _platformManager.OnPlatformHasMoved;
-                Placed += _platformManager.HandlePlatformPlaced;
-                PickedUp += _platformManager.OnPlatformPickedUp;
-            }
-            
-            // Fire enabled event
+            // Fire instance event
             Enabled?.Invoke(this);
         }
 
 
         private void OnDisable()
         {
-            // Fire disabled event first
+            // Fire instance event
             Disabled?.Invoke(this);
-            
-            // Unsubscribe PlatformManager from this platform's events
-            if (_platformManager)
-            {
-                Enabled -= _platformManager.OnPlatformCreated;
-                Disabled -= _platformManager.OnPlatformDestroyed;
-                HasMoved -= _platformManager.OnPlatformHasMoved;
-                Placed -= _platformManager.HandlePlatformPlaced;
-                PickedUp -= _platformManager.OnPlatformPickedUp;
-            }
+        }
+
+
+        private void OnDestroy()
+        {
+            // Fire static destruction event for managers to unsubscribe
+            Destroyed?.Invoke(this);
         }
 
 
