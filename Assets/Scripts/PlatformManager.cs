@@ -75,12 +75,15 @@ public class PlatformManager : MonoBehaviour
     
     private void Awake()
     {
+        Debug.Log("[PlatformManager.Awake] Starting Awake");
         try
         {
             FindDependencies();
+            Debug.Log("[PlatformManager.Awake] Dependencies found successfully");
         }
         catch (MissingReferenceException ex)
         {
+            Debug.LogError($"[PlatformManager.Awake] Exception: {ex.Message}");
             ErrorHandler.LogAndDisable(ex, this);
         }
     }
@@ -106,17 +109,23 @@ public class PlatformManager : MonoBehaviour
 
     private void OnEnable()
     {
+        Debug.Log("[PlatformManager.OnEnable] Subscribing to platform lifecycle events");
+        
         // Subscribe to platform lifecycle events
         GamePlatform.PlatformEnabled += OnPlatformEnabled;
         GamePlatform.PlatformDisabled += OnPlatformDisabled;
         GamePlatform.PlatformPlaced += HandlePlatformPlaced;
         GamePlatform.PlatformPickedUp += OnPlatformPickedUp;
+        
+        Debug.Log("[PlatformManager.OnEnable] Event subscriptions complete");
     }
 
 
     private void Start()
     {
+        Debug.Log("[PlatformManager.Start] Starting");
         SpawnStartupPlatforms();
+        Debug.Log("[PlatformManager.Start] Complete");
     }
 
 
