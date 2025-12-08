@@ -246,14 +246,18 @@ public class PlatformManager : MonoBehaviour
 
     ///
     /// Called when a platform reports its transform changed
-    /// Lightweight update for runtime platform movement
+    /// Lightweight update for runtime platform movement (preview mode only)
     ///
     private void OnPlatformPoseChanged(GamePlatform platform)
     {
         if (!platform) return;
         
-        // Use lightweight MovePlatform for pose changes (called every frame)
-        MovePlatform(platform);
+        // Only update grid occupancy for platforms in preview mode (being moved)
+        // Placed platforms have permanent occupancy set by RegisterPlatform
+        if (platform.IsPickedUp)
+        {
+            MovePlatform(platform);
+        }
     }
 
 
