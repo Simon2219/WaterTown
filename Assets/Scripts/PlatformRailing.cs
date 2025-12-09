@@ -78,6 +78,10 @@ namespace WaterTown.Platforms
             if (_isHidden == hidden) return;
             _isHidden = hidden;
             gameObject.SetActive(!hidden);
+            
+            // Notify platform of visibility change (for post visibility optimization)
+            if (type == RailingType.Rail && platform)
+                platform.OnRailVisibilityChanged(this, hidden);
         }
 
         public bool IsHidden => _isHidden;
