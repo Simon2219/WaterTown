@@ -370,25 +370,22 @@ public class PlatformManager : MonoBehaviour
 
     /// TRUE IF: All cells inside Area are FLAG Empty
     /// OccupyPreview -> considered free (allows placement over preview)
+    /// Assumes cells are sorted (from GetCellsForPlatform)
     public bool IsAreaFree(List<Vector2Int> cells)
     {
         if (cells == null || cells.Count == 0)
             return false;
         
-        // Calculate bounding box of the area
-        Vector2Int min = cells[0];
-        Vector2Int max = cells[0];
-        
+        // Verify all cells are in bounds
         foreach (Vector2Int cell in cells)
         {
             if (!_worldGrid.CellInBounds(cell))
                 return false;
-            
-            min.x = Mathf.Min(min.x, cell.x);
-            min.y = Mathf.Min(min.y, cell.y);
-            max.x = Mathf.Max(max.x, cell.x);
-            max.y = Mathf.Max(max.y, cell.y);
         }
+        
+        // Cells are sorted: first = min (bottom-left), last = max (top-right)
+        Vector2Int min = cells[0];
+        Vector2Int max = cells[cells.Count - 1];
         
         // Use WorldGrid's optimized area check
         return _worldGrid.AreaIsEmpty(min, max);
@@ -782,6 +779,9 @@ public class PlatformManager : MonoBehaviour
     /// assuming its footprint is aligned to the 1x1 world grid AND
     /// that rotation is in 90° steps (0, 90, 180, 270)
     /// This is the single source of truth for runtime footprint
+    /// 
+    /// IMPORTANT: Returns cells in sorted order (left-to-right, bottom-to-top)
+    /// First element = minimum (bottom-left), Last element = maximum (top-right)
     ///
     public List<Vector2Int> GetCellsForPlatform(GamePlatform platform)
     {
@@ -808,6 +808,8 @@ public class PlatformManager : MonoBehaviour
         int startX = centerX - rotatedWidth / 2;
         int startY = centerY - rotatedHeight / 2;
 
+        // Add cells in sorted order: left-to-right, bottom-to-top
+        // This ensures first element = min, last element = max
         for (int cellY = 0; cellY < rotatedHeight; cellY++)
         {
             for (int cellX = 0; cellX < rotatedWidth; cellX++)
