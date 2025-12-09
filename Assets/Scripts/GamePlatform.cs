@@ -807,44 +807,21 @@ namespace WaterTown.Platforms
         private void Awake()
         {
             // Fire static creation event for managers to subscribe to EVENT |s
+            // PlatformManager will inject itself via SetPlatformManager() in response to this event
             Created?.Invoke(this);
-            
-            try
-            {
-                FindDependencies();
-            }
-            catch (Exception ex)
-            {
-                ErrorHandler.LogAndDisable(ex, this);
-                return;
-            }
             
             // NavMeshSurface is required component, cache it at Awake
             _navSurface = GetComponent<NavMeshSurface>();
             if (!_navSurface)
             {
-                throw ErrorHandler.MissingDependency(typeof(NavMeshSurface), this);
+                ErrorHandler.LogAndDisable(new Exception($"Required dependency '{typeof(NavMeshSurface).Name}' not found."), this);
+                return;
             }
             
             // Cache all child components at initialization
             CacheChildComponents();
             
             InitializePlatform();
-        }
-
-
-        ///
-        /// Finds and validates all required manager dependencies
-        /// PlatformManager should be injected via SetPlatformManager before this is called
-        ///
-        private void FindDependencies()
-        {
-            // PlatformManager is now injected by PlatformManager itself via SetPlatformManager
-            // This ensures proper dependency injection and avoids FindFirstObjectByType
-            if (!_platformManager)
-            {
-                throw ErrorHandler.MissingDependency(typeof(PlatformManager), this);
-            }
         }
         
         /// Called by PlatformManager to inject itself as a dependency
