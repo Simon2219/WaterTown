@@ -777,12 +777,10 @@ namespace WaterTown.Platforms
         /// Each socket checks its adjacent cell - if occupied, the socket becomes Connected
         /// When new connections are detected, requests NavMesh link creation from PlatformManager
         ///
-        public void UpdateSocketStatusesFromGrid(
-            WorldGrid grid, 
-            Dictionary<Vector2Int, GamePlatform> cellToPlatform)
+        public void UpdateSocketStatusesFromGrid()
         {
             if (!_socketsBuilt) BuildSockets();
-            if (!grid || cellToPlatform == null) return;
+            if (!_worldGrid || !_platformManager) return;
 
             var newConnectedSockets = new HashSet<int>();
             var newNeighbors = new HashSet<GamePlatform>();
@@ -856,21 +854,18 @@ namespace WaterTown.Platforms
         /// Gets all sockets that are currently connected to a specific neighbor platform
         /// Useful for NavMesh link positioning
         ///
-        public List<int> GetSocketsConnectedToNeighbor(
-            GamePlatform neighbor,
-            WorldGrid grid,
-            Dictionary<Vector2Int, GamePlatform> cellToPlatform)
+        public List<int> GetSocketsConnectedToNeighbor(GamePlatform neighbor)
         {
             var result = new List<int>();
             if (!_socketsBuilt) BuildSockets();
-            if (!neighbor || !grid || cellToPlatform == null) return result;
+            if (!neighbor || !_platformManager) return result;
 
             for (int i = 0; i < sockets.Count; i++)
             {
                 if (!_connectedSockets.Contains(i)) continue;
 
                 Vector2Int adjacentCell = GetAdjacentCellForSocket(i);
-                if (cellToPlatform.TryGetValue(adjacentCell, out var occupant) && occupant == neighbor)
+                if (_platformManager.GetPlatformAtCell(adjacentCell, out var occupant) && occupant == neighbor)
                 {
                     result.Add(i);
                 }

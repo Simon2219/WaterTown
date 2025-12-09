@@ -567,9 +567,9 @@ public class PlatformManager : MonoBehaviour
         if (!platformA || !platformB) return;
         
         // Get sockets from A that connect to B
-        var aSocketsToB = platformA.GetSocketsConnectedToNeighbor(platformB, _worldGrid, _cellToPlatform);
+        var aSocketsToB = platformA.GetSocketsConnectedToNeighbor(platformB);
         // Get sockets from B that connect to A
-        var bSocketsToA = platformB.GetSocketsConnectedToNeighbor(platformA, _worldGrid, _cellToPlatform);
+        var bSocketsToA = platformB.GetSocketsConnectedToNeighbor(platformA);
         
         if (aSocketsToB.Count == 0 || bSocketsToA.Count == 0) return;
         
@@ -639,8 +639,8 @@ public class PlatformManager : MonoBehaviour
         }
         
         // Each platform updates its own sockets - NavMesh links are requested automatically
-        platformA.UpdateSocketStatusesFromGrid(_worldGrid, _cellToPlatform);
-        platformB.UpdateSocketStatusesFromGrid(_worldGrid, _cellToPlatform);
+        platformA.UpdateSocketStatusesFromGrid();
+        platformB.UpdateSocketStatusesFromGrid();
     }
 
 
@@ -719,7 +719,7 @@ public class PlatformManager : MonoBehaviour
         foreach (var platform in _platformsNeedingAdjacencyUpdate)
         {
             if (!platform || !platform.isActiveAndEnabled) continue;
-            platform.UpdateSocketStatusesFromGrid(_worldGrid, _cellToPlatform);
+            platform.UpdateSocketStatusesFromGrid();
         }
         
         // Clear the set after processing
