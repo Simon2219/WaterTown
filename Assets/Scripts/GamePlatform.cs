@@ -153,7 +153,7 @@ namespace WaterTown.Platforms
         public enum SocketLocation { Edge, Corner }
 
         /// Socket data structure - represents a connection point on the platform perimeter
-        /// Each socket knows its local position and which direction faces outward (for grid-based adjacency)
+        /// Each socket knows its local position, world position, and which direction faces outward
         [System.Serializable]
         public struct SocketData
         {
@@ -162,9 +162,13 @@ namespace WaterTown.Platforms
             [SerializeField, HideInInspector] private Vector2Int outwardOffset; // Grid offset to adjacent cell (e.g., (0,1) for +Z direction)
             [SerializeField, HideInInspector] private SocketLocation location;
             [SerializeField] private SocketStatus status;
+            
+            // World position - updated when platform moves
+            private Vector3 worldPos;
 
             public int Index => index;
             public Vector3 LocalPos => localPos;
+            public Vector3 WorldPos => worldPos;
             public Vector2Int OutwardOffset => outwardOffset;
             public SocketStatus Status => status;
             public bool IsLinkable => status == SocketStatus.Linkable;
@@ -177,18 +181,17 @@ namespace WaterTown.Platforms
                 outwardOffset = outward;
                 location = SocketLocation.Edge;
                 status = defaultStatus;
+                worldPos = Vector3.zero; // Will be set when platform updates world positions
             }
 
             public void SetStatus(SocketStatus s) => status = s;
+            
+            internal void SetWorldPosition(Vector3 pos) => worldPos = pos;
         }
 
         [Header("Sockets (perimeter, 1m spacing)")]
         [SerializeField] private List<SocketData> sockets = new();
         private bool _socketsBuilt;
-        
-        // Cache for socket world positions (invalidated on transform change)
-        private Vector3[] _cachedWorldPositions;
-        private bool _worldPositionsCacheValid;
 
         /// Set of socket indices that are currently part of a connection
         private readonly HashSet<int> _connectedSockets = new();
@@ -229,9 +232,6 @@ namespace WaterTown.Platforms
 
             sockets.Clear();
             _socketsBuilt = false;
-            
-            // Invalidate world position cache when rebuilding sockets
-            _worldPositionsCacheValid = false;
             
             // Invalidate Links parent cache if it existed (will be re-found if needed)
             _linksParentTransform = null;
@@ -293,8 +293,8 @@ namespace WaterTown.Platforms
 
             _socketsBuilt = true;
             
-            // Ensure cache is rebuilt on next access
-            _worldPositionsCacheValid = false;
+            // Calculate initial world positions for all sockets
+            UpdateSocketWorldPositions();
         }
 
         public SocketData GetSocket(int index)
@@ -319,20 +319,22 @@ namespace WaterTown.Platforms
                 return transform.position;
             }
             
-            // Check if cache is valid
-            if (!_worldPositionsCacheValid || _cachedWorldPositions == null || _cachedWorldPositions.Length != sockets.Count)
-            {
-                // Rebuild cache
-                if (_cachedWorldPositions == null || _cachedWorldPositions.Length != sockets.Count)
-                    _cachedWorldPositions = new Vector3[sockets.Count];
-                
-                for (int i = 0; i < sockets.Count; i++)
-                    _cachedWorldPositions[i] = transform.TransformPoint(sockets[i].LocalPos);
-                
-                _worldPositionsCacheValid = true;
-            }
+            return sockets[index].WorldPos;
+        }
+
+
+        /// Updates world positions for all sockets based on current transform
+        /// Called when the platform moves or after sockets are built
+        private void UpdateSocketWorldPositions()
+        {
+            if (!_socketsBuilt) return;
             
-            return _cachedWorldPositions[index];
+            for (int i = 0; i < sockets.Count; i++)
+            {
+                var socket = sockets[i];
+                socket.SetWorldPosition(transform.TransformPoint(socket.LocalPos));
+                sockets[i] = socket;
+            }
         }
 
         public void SetSocketStatus(int index, SocketStatus status)
@@ -1107,8 +1109,8 @@ namespace WaterTown.Platforms
                     _lastRot = transform.rotation;
                     _lastScale = transform.localScale;
 
-                    // Invalidate world position cache on transform change
-                    _worldPositionsCacheValid = false;
+                    // Update socket world positions based on new transform
+                    UpdateSocketWorldPositions();
 
                     HasMoved?.Invoke(this);
                 }
