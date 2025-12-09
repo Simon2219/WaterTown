@@ -16,7 +16,7 @@ namespace WaterTown.Platforms
         #region Configuration & Dependencies
         
         // Instance References to Manager Systems
-        
+        // Set via dependency injection from PlatformManager when platform is created
         private PlatformManager _platformManager;
 
         /// Fired whenever this platform's connection/railing state changes
@@ -98,8 +98,7 @@ namespace WaterTown.Platforms
         {
             get
             {
-                if (!_navSurface)
-                    _navSurface = GetComponent<NavMeshSurface>();
+                // NavMeshSurface is required component, should always exist after Awake
                 return _navSurface;
             }
         }
@@ -445,6 +444,12 @@ namespace WaterTown.Platforms
 
         private readonly Dictionary<GameObject, ModuleReg> _moduleRegs = new();
         private readonly Dictionary<int, List<GameObject>> _socketToModules = new();
+        
+        // Cached lists of all modules and railings (populated at initialization to avoid runtime GetComponentsInChildren)
+        private readonly List<PlatformModule> _cachedModules = new List<PlatformModule>();
+        private readonly List<PlatformRailing> _cachedRailings = new List<PlatformRailing>();
+        private readonly List<Collider> _cachedColliders = new List<Collider>();
+        private bool _childComponentsCached = false;
 
         public void RegisterModuleOnSockets(GameObject moduleGo, bool occupiesSockets, IEnumerable<int> socketIndices)
         {
@@ -452,7 +457,18 @@ namespace WaterTown.Platforms
             if (!_socketsBuilt) BuildSockets();
 
             var list = new List<int>(socketIndices);
-            var pm = moduleGo.GetComponent<PlatformModule>();
+            // Try to find PlatformModule from cached list first, fallback to GetComponent only if not found
+            PlatformModule pm = null;
+            foreach (var cachedModule in _cachedModules)
+            {
+                if (cachedModule && cachedModule.gameObject == moduleGo)
+                {
+                    pm = cachedModule;
+                    break;
+                }
+            }
+            // If not in cache, this shouldn't happen but fallback for safety
+            if (!pm) pm = moduleGo.GetComponent<PlatformModule>();
             bool blocks = pm ? pm.blocksLink : false;
 
             var reg = new ModuleReg { go = moduleGo, socketIndices = list.ToArray(), blocksLink = blocks };
@@ -626,9 +642,11 @@ namespace WaterTown.Platforms
 
         internal void RefreshAllRailingsVisibility()
         {
-            var railings = GetComponentsInChildren<PlatformRailing>(true);
-            foreach (var r in railings)
-                UpdateRailingVisibility(r);
+            // Use cached railings list instead of GetComponentsInChildren
+            foreach (var r in _cachedRailings)
+            {
+                if (r) UpdateRailingVisibility(r);
+            }
         }
 
         /// Recompute every socket's status from current modules + connection state
@@ -678,7 +696,19 @@ namespace WaterTown.Platforms
         {
             if (!moduleGo) return;
 
-            var pm = moduleGo.GetComponent<PlatformModule>();
+            // Try to find PlatformModule from cached list first
+            PlatformModule pm = null;
+            foreach (var cachedModule in _cachedModules)
+            {
+                if (cachedModule && cachedModule.gameObject == moduleGo)
+                {
+                    pm = cachedModule;
+                    break;
+                }
+            }
+            // Fallback if not found in cache (shouldn't happen)
+            if (!pm) pm = moduleGo.GetComponent<PlatformModule>();
+            
             if (pm != null) pm.SetHidden(hidden);
             else moduleGo.SetActive(!hidden);
 
@@ -724,14 +754,13 @@ namespace WaterTown.Platforms
         }
 
         ///
-        /// Runtime method to reset all socket connections
-        /// Shows all railings and clears connection tracking
+        /// Runtime method to reset connections - does not modify NavMesh links (editor-only)
+        /// Shows all PlatformModules and clears connection tracking
         ///
         public void ResetConnections()
         {
-            // Show all PlatformModules (railings)
-            var allModules = GetComponentsInChildren<PlatformModule>(true);
-            foreach (var m in allModules)
+            // Show all PlatformModules using cached list
+            foreach (var m in _cachedModules)
             {
                 if (!m) continue;
                 m.SetHidden(false);
@@ -750,12 +779,13 @@ namespace WaterTown.Platforms
 
         ///
         /// Editor-only method to reset connections and clean up NavMesh links with Undo support
+        /// This should NEVER be called during runtime - use ResetConnections() instead
         ///
+#if UNITY_EDITOR
         public void EditorResetAllConnections()
         {
             ResetConnections();
 
-#if UNITY_EDITOR
             // Destroy all NavMeshLink GameObjects under "Links" in the editor with Undo
             var linksParent = transform.Find("Links");
             if (linksParent)
@@ -767,8 +797,8 @@ namespace WaterTown.Platforms
             // Only queue rebuild if we're active (skip during shutdown)
             if (gameObject.activeInHierarchy)
                 QueueRebuild();
-#endif
         }
+#endif
         
         #endregion
 
@@ -789,21 +819,39 @@ namespace WaterTown.Platforms
                 return;
             }
             
-            if (!_navSurface) _navSurface = GetComponent<NavMeshSurface>();
+            // NavMeshSurface is required component, cache it at Awake
+            _navSurface = GetComponent<NavMeshSurface>();
+            if (!_navSurface)
+            {
+                throw ErrorHandler.MissingDependency(typeof(NavMeshSurface), this);
+            }
+            
+            // Cache all child components at initialization
+            CacheChildComponents();
+            
             InitializePlatform();
         }
 
 
         ///
         /// Finds and validates all required manager dependencies
+        /// PlatformManager should be injected via SetPlatformManager before this is called
         ///
         private void FindDependencies()
         {
-            _platformManager = FindFirstObjectByType<PlatformManager>();
+            // PlatformManager is now injected by PlatformManager itself via SetPlatformManager
+            // This ensures proper dependency injection and avoids FindFirstObjectByType
             if (!_platformManager)
             {
                 throw ErrorHandler.MissingDependency(typeof(PlatformManager), this);
             }
+        }
+        
+        /// Called by PlatformManager to inject itself as a dependency
+        /// This avoids FindFirstObjectByType calls during runtime
+        public void SetPlatformManager(PlatformManager platformManager)
+        {
+            _platformManager = platformManager;
         }
 
 
@@ -1001,18 +1049,41 @@ namespace WaterTown.Platforms
 
         #region Child Component Registration
 
+        /// Caches all child components (modules, railings, colliders) at initialization
+        /// This avoids expensive GetComponentsInChildren calls during runtime
+        private void CacheChildComponents()
+        {
+            if (_childComponentsCached) return;
+            
+            _cachedModules.Clear();
+            _cachedRailings.Clear();
+            _cachedColliders.Clear();
+            
+            // Only do GetComponentsInChildren once at initialization
+            _cachedModules.AddRange(GetComponentsInChildren<PlatformModule>(true));
+            _cachedRailings.AddRange(GetComponentsInChildren<PlatformRailing>(true));
+            _cachedColliders.AddRange(GetComponentsInChildren<Collider>(true));
+            
+            _childComponentsCached = true;
+        }
+
         public void EnsureChildrenModulesRegistered()
         {
-            var modules = GetComponentsInChildren<PlatformModule>(true);
-            foreach (var m in modules) m.EnsureRegistered();
+            // Use cached modules list
+            foreach (var m in _cachedModules)
+            {
+                if (m) m.EnsureRegistered();
+            }
         }
 
 
         public void EnsureChildrenRailingsRegistered()
         {
-            var railings = GetComponentsInChildren<PlatformRailing>(true);
-            foreach (var r in railings)
-                r.EnsureRegistered();
+            // Use cached railings list
+            foreach (var r in _cachedRailings)
+            {
+                if (r) r.EnsureRegistered();
+            }
         }
         
         #endregion
@@ -1028,13 +1099,18 @@ namespace WaterTown.Platforms
             _originalPosition = transform.position;
             _originalRotation = transform.rotation;
             
-            // Disable colliders so we can raycast through the platform
-            foreach (var col in GetComponentsInChildren<Collider>(true))
-                col.enabled = false;
+            // Disable colliders so we can raycast through the platform (use cached list)
+            foreach (var col in _cachedColliders)
+            {
+                if (col) col.enabled = false;
+            }
             
             // Cache renderers and store original materials from all renderers
-            _allRenderers.Clear();
-            _allRenderers.AddRange(GetComponentsInChildren<Renderer>(true));
+            // Renderers are cached on-demand since they're less frequently accessed
+            if (_allRenderers.Count == 0)
+            {
+                _allRenderers.AddRange(GetComponentsInChildren<Renderer>(true));
+            }
             
             // Store all original materials (we'll restore them per-renderer later)
             // Just use the first renderer as reference for now
@@ -1053,9 +1129,11 @@ namespace WaterTown.Platforms
 
         public void OnPlaced()
         {
-            // Restore colliders
-            foreach (var col in GetComponentsInChildren<Collider>(true))
-                col.enabled = true;
+            // Restore colliders (use cached list)
+            foreach (var col in _cachedColliders)
+            {
+                if (col) col.enabled = true;
+            }
             
             // Restore original materials
             RestoreOriginalMaterials();
@@ -1089,9 +1167,11 @@ namespace WaterTown.Platforms
                 transform.position = _originalPosition;
                 transform.rotation = _originalRotation;
                 
-                // Re-enable colliders
-                foreach (var col in GetComponentsInChildren<Collider>(true))
-                    col.enabled = true;
+                // Re-enable colliders (use cached list)
+                foreach (var col in _cachedColliders)
+                {
+                    if (col) col.enabled = true;
+                }
                 
                 // Restore original materials
                 RestoreOriginalMaterials();

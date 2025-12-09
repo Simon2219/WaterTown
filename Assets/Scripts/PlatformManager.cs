@@ -80,17 +80,26 @@ public class PlatformManager : MonoBehaviour
     ///
     /// Finds and validates all required dependencies
     /// Throws InvalidOperationException if any critical dependency is missing
+    /// Note: WorldGrid should be injected via SetWorldGrid before Start
     ///
     private void FindDependencies()
     {
+        // WorldGrid should be injected or found once - prefer dependency injection
         if (!_worldGrid)
         {
+            // Fallback: find once at startup if not injected
             _worldGrid = FindFirstObjectByType<WorldGrid>();
             if (!_worldGrid)
             {
                 throw ErrorHandler.MissingDependency(typeof(WorldGrid), this);
             }
         }
+    }
+    
+    /// Dependency injection method for WorldGrid (avoids FindFirstObjectByType)
+    public void SetWorldGrid(WorldGrid worldGrid)
+    {
+        _worldGrid = worldGrid;
     }
 
 
@@ -170,11 +179,14 @@ public class PlatformManager : MonoBehaviour
     
     ///
     /// Event handler for static Created event
-    /// Subscribes to all instance events for this platform
+    /// Subscribes to all instance events for this platform and injects dependencies
     ///
     private void OnPlatformCreated(GamePlatform platform)
     {
         if (!platform) return;
+        
+        // Inject PlatformManager dependency to avoid FindFirstObjectByType
+        platform.SetPlatformManager(this);
         
         // Subscribe to all instance events for this platform
         platform.HasMoved += OnPlatformHasMoved;
@@ -454,8 +466,9 @@ public class PlatformManager : MonoBehaviour
         _registeredPlatforms.Remove(platform);
 
         // Clear connections on this platform (only if active)
+        // Use runtime method - NavMesh links are cleaned up separately if needed
         if (platform.gameObject.activeInHierarchy)
-            platform.EditorResetAllConnections();
+            platform.ResetConnections();
 
         // Invoke UnityEvent for platform removed
         OnPlatformRemoved?.Invoke(platform);
@@ -513,12 +526,14 @@ public class PlatformManager : MonoBehaviour
 
 
     ///
-    /// Resets all socket connections and visuals for a single platform
+    /// Resets all socket connections and visuals for a single platform (runtime only)
+    /// Does NOT modify NavMesh links (those are handled separately)
     ///
     private void ResetPlatformConnections(GamePlatform platform)
     {
         if (!platform || !platform.gameObject.activeInHierarchy) return;
-        platform.EditorResetAllConnections();
+        // Use runtime method, NOT editor method
+        platform.ResetConnections();
     }
 
 
