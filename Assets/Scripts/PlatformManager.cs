@@ -526,47 +526,74 @@ public class PlatformManager : MonoBehaviour
 
 
     ///
-    /// Resets all socket connections and visuals for a single platform (runtime only)
-    /// Does NOT modify NavMesh links (those are handled separately)
+    /// Computes matching sockets between two platforms and adds them to the tracking dictionary.
+    /// Used during incremental adjacency recomputation.
     ///
-    private void ResetPlatformConnections(GamePlatform platform)
-    {
-        if (!platform || !platform.gameObject.activeInHierarchy) return;
-        // Use runtime method, NOT editor method
-        platform.ResetConnections();
-    }
-
-
-    ///
-    /// Updates socket connections between two platforms
-    /// ONLY sets socket statuses and creates NavMesh links - platforms handle their own visuals
-    /// Optimized to batch socket world position queries (ensures cache is built once per platform)
-    ///
-    private void UpdateSocketConnections(GamePlatform platformA, GamePlatform platformB)
+    private void ComputeMatchingSocketsBetween(
+        GamePlatform platformA, 
+        GamePlatform platformB,
+        Dictionary<GamePlatform, HashSet<int>> platformToConnectedSockets)
     {
         if (!platformA || !platformB || platformA == platformB) return;
         
-        // Get socket counts once (cached, avoids BuildSockets() checks)
         int socketCountA = platformA.SocketCount;
         int socketCountB = platformB.SocketCount;
         
         if (socketCountA == 0 || socketCountB == 0) return;
         
-        // Pre-fetch all socket world positions to ensure cache is valid
-        // This ensures GetSocketWorldPosition() only rebuilds cache once per platform if needed
-        // GetSocketWorldPosition() will rebuild cache for all sockets if invalid, so we trigger it once
-        if (socketCountA > 0) platformA.GetSocketWorldPosition(0); // Trigger cache build for platformA
-        if (socketCountB > 0) platformB.GetSocketWorldPosition(0); // Trigger cache build for platformB
+        // Pre-trigger cache build for both platforms
+        platformA.GetSocketWorldPosition(0);
+        platformB.GetSocketWorldPosition(0);
         
-        // Find matching sockets by world position (socket-by-socket checking)
+        const float socketMatchDistanceSqr = 0.1f * 0.1f; // 10cm tolerance squared
+        
+        // Find matching sockets by world position
+        for (int i = 0; i < socketCountA; i++)
+        {
+            Vector3 worldPosA = platformA.GetSocketWorldPosition(i);
+            
+            for (int j = 0; j < socketCountB; j++)
+            {
+                Vector3 worldPosB = platformB.GetSocketWorldPosition(j);
+                float distSqr = (worldPosA - worldPosB).sqrMagnitude;
+                
+                if (distSqr <= socketMatchDistanceSqr)
+                {
+                    // Add to both platforms' connected socket sets
+                    if (platformToConnectedSockets.TryGetValue(platformA, out var setA))
+                        setA.Add(i);
+                    if (platformToConnectedSockets.TryGetValue(platformB, out var setB))
+                        setB.Add(j);
+                    break; // Only match each socket once
+                }
+            }
+        }
+    }
+    
+    
+    ///
+    /// Updates socket connections between two platforms (used for editor tools and single platform updates).
+    /// Creates NavMesh links between connected sockets.
+    ///
+    private void UpdateSocketConnections(GamePlatform platformA, GamePlatform platformB)
+    {
+        if (!platformA || !platformB || platformA == platformB) return;
+        
+        int socketCountA = platformA.SocketCount;
+        int socketCountB = platformB.SocketCount;
+        
+        if (socketCountA == 0 || socketCountB == 0) return;
+        
+        // Pre-trigger cache build for both platforms
+        platformA.GetSocketWorldPosition(0);
+        platformB.GetSocketWorldPosition(0);
+        
         var aSocketIndices = new HashSet<int>();
         var bSocketIndices = new HashSet<int>();
         
-        const float socketMatchDistance = 0.1f; // 10cm tolerance
-        const float socketMatchDistanceSqr = socketMatchDistance * socketMatchDistance;
+        const float socketMatchDistanceSqr = 0.1f * 0.1f; // 10cm tolerance squared
         
-        // Check each socket on platform A against all sockets on platform B
-        // Now all GetSocketWorldPosition calls will use cached values
+        // Find matching sockets by world position
         for (int i = 0; i < socketCountA; i++)
         {
             Vector3 worldPosA = platformA.GetSocketWorldPosition(i);
@@ -580,16 +607,25 @@ public class PlatformManager : MonoBehaviour
                 {
                     aSocketIndices.Add(i);
                     bSocketIndices.Add(j);
-                    break; // Only match each socket once
+                    break;
                 }
             }
         }
         
-        // Apply socket connections (platforms update their own visuals automatically)
+        // For single platform updates, use UpdateConnections with the computed sockets
+        // merged with existing connections
         if (aSocketIndices.Count > 0)
-            platformA.ApplyConnectionVisuals(aSocketIndices, true);
+        {
+            var newSetA = new HashSet<int>(platformA.ConnectedSockets);
+            foreach (var idx in aSocketIndices) newSetA.Add(idx);
+            platformA.UpdateConnections(newSetA);
+        }
         if (bSocketIndices.Count > 0)
-            platformB.ApplyConnectionVisuals(bSocketIndices, true);
+        {
+            var newSetB = new HashSet<int>(platformB.ConnectedSockets);
+            foreach (var idx in bSocketIndices) newSetB.Add(idx);
+            platformB.UpdateConnections(newSetB);
+        }
         
         // Create NavMesh links if both platforms have connections
         if (aSocketIndices.Count > 0 && bSocketIndices.Count > 0)
@@ -739,9 +775,9 @@ public class PlatformManager : MonoBehaviour
 
 
     ///
-    /// Recomputes adjacency for all platforms using cell-based detection
-    /// Each platform checks its neighboring cells and updates its own sockets
-    /// This is batched to run once per frame maximum via LateUpdate
+    /// Recomputes adjacency for all platforms using cell-based detection.
+    /// Uses incremental updates - only changes sockets that actually changed.
+    /// This is batched to run once per frame maximum via LateUpdate.
     ///
     private void RecomputeAllAdjacency()
     {
@@ -759,28 +795,42 @@ public class PlatformManager : MonoBehaviour
             allActivePlatforms.Add(gp);
         }
 
-        // Reset all connections to baseline
-        foreach (var p in allActivePlatforms)
-            ResetPlatformConnections(p);
-
-        // Update each platform's connections based on neighboring cells
+        // Compute all new connections for each platform, then apply incrementally
+        // This avoids the reset-then-rebuild pattern which was wasteful
+        var platformToConnectedSockets = new Dictionary<GamePlatform, HashSet<int>>();
+        
+        // Initialize empty sets for all platforms
         foreach (var platform in allActivePlatforms)
         {
-            UpdatePlatformConnectionsFromNeighbors(platform);
+            platformToConnectedSockets[platform] = new HashSet<int>();
+        }
+
+        // Compute socket connections between all neighboring platform pairs
+        foreach (var platform in allActivePlatforms)
+        {
+            ComputeSocketConnectionsForPlatform(platform, platformToConnectedSockets);
+        }
+        
+        // Apply updates incrementally to each platform (only changes what actually changed)
+        foreach (var platform in allActivePlatforms)
+        {
+            platform.UpdateConnections(platformToConnectedSockets[platform]);
         }
 
         _isRecomputingAdjacency = false;
     }
-
-
+    
+    
     ///
-    /// Updates a platform's socket connections by checking neighboring cells
-    /// Cell-based approach: checks if adjacent cells are occupied/preview and updates sockets
+    /// Computes which sockets on a platform should be connected based on neighbors.
+    /// Adds results to the provided dictionary for both platforms in each connection.
     ///
-    private void UpdatePlatformConnectionsFromNeighbors(GamePlatform platform)
+    private void ComputeSocketConnectionsForPlatform(
+        GamePlatform platform, 
+        Dictionary<GamePlatform, HashSet<int>> platformToConnectedSockets)
     {
         if (!platform || platform.occupiedCells == null) return;
-
+        
         // Get all neighboring cells around this platform's footprint (8-directional)
         HashSet<Vector2Int> neighborCells = _worldGrid.GetNeighborCells(platform.occupiedCells, include8Directional: true);
 
@@ -788,10 +838,8 @@ public class PlatformManager : MonoBehaviour
         var neighborPlatforms = new HashSet<GamePlatform>();
         foreach (var neighborCell in neighborCells)
         {
-            // Check if cell is occupied or preview occupied
             if (IsCellOccupied(neighborCell))
             {
-                // Find which platform occupies this cell
                 if (_cellToPlatform.TryGetValue(neighborCell, out var neighborPlatform))
                 {
                     if (neighborPlatform != platform)
@@ -800,10 +848,12 @@ public class PlatformManager : MonoBehaviour
             }
         }
 
-        // Update socket connections with each neighbor
+        // Compute socket connections with each neighbor
         foreach (var neighbor in neighborPlatforms)
         {
-            UpdateSocketConnections(platform, neighbor);
+            // Only process each pair once (skip if neighbor was already processed as main platform)
+            // We still need to add to both platforms' sets though
+            ComputeMatchingSocketsBetween(platform, neighbor, platformToConnectedSockets);
         }
     }
 

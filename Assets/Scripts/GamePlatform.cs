@@ -187,6 +187,9 @@ namespace WaterTown.Platforms
 
         /// Set of socket indices that are currently part of a connection
         private readonly HashSet<int> _connectedSockets = new();
+        
+        /// Read-only access to connected sockets for external systems
+        public IReadOnlyCollection<int> ConnectedSockets => _connectedSockets;
 
         public IReadOnlyList<SocketInfo> Sockets
         {
@@ -591,97 +594,45 @@ namespace WaterTown.Platforms
         }
 
         /// True if the given socket index is currently part of a connection
-        internal bool IsSocketConnected(int socketIndex) => _connectedSockets.Contains(socketIndex);
+        public bool IsSocketConnected(int socketIndex) => _connectedSockets.Contains(socketIndex);
 
-        ///
-        /// Compute visibility for a single PlatformRailing (rail or post)
-        /// Rails: Hidden when ALL their socket indices are Connected
-        /// Posts: Hidden when ALL rails connected to the same sockets are hidden
-        ///
-        internal void UpdateRailingVisibility(PlatformRailing railing)
+        /// Helper for posts: checks if there's at least one visible rail on any of the given sockets
+        public bool HasVisibleRailOnSockets(int[] socketIndices)
         {
-            if (!railing) return;
+            if (socketIndices == null || socketIndices.Length == 0) return false;
             
-            var indices = railing.SocketIndices ?? System.Array.Empty<int>();
-            if (indices.Length == 0)
+            foreach (int socketIndex in socketIndices)
             {
-                railing.SetHidden(false);
-                return;
-            }
-
-            // For rails: hide if all sockets are connected
-            if (railing.type == PlatformRailing.RailingType.Rail)
-            {
-                bool allSocketsConnected = true;
-                foreach (int socketIndex in indices)
+                if (_socketToRailings.TryGetValue(socketIndex, out var railingsOnSocket))
                 {
-                    if (!_connectedSockets.Contains(socketIndex))
+                    foreach (var rail in railingsOnSocket)
                     {
-                        allSocketsConnected = false;
-                        break;
-                    }
-                }
-                railing.SetHidden(allSocketsConnected && indices.Length > 0);
-                return;
-            }
-
-            // For posts: hide if all rails on the same sockets are hidden
-            if (railing.type == PlatformRailing.RailingType.Post)
-            {
-                bool hasVisibleRail = false;
-                
-                // Check all sockets this post is bound to
-                foreach (int socketIndex in indices)
-                {
-                    // Check if there's any visible rail on this socket
-                    if (_socketToRailings.TryGetValue(socketIndex, out var railingsOnSocket))
-                    {
-                        foreach (var rail in railingsOnSocket)
+                        if (rail == null) continue;
+                        if (rail.type != PlatformRailing.RailingType.Rail) continue;
+                        
+                        // Check if this rail is visible (not all its sockets are connected)
+                        var railIndices = rail.SocketIndices ?? System.Array.Empty<int>();
+                        if (railIndices.Length == 0)
+                            return true; // No sockets = visible
+                        
+                        foreach (int railSocketIndex in railIndices)
                         {
-                            if (rail == null) continue;
-                            if (rail.type != PlatformRailing.RailingType.Rail) continue;
-                            
-                            // Check if this rail is visible (not all its sockets are connected)
-                            var railIndices = rail.SocketIndices ?? System.Array.Empty<int>();
-                            bool railIsHidden = true;
-                            if (railIndices.Length > 0)
-                            {
-                                foreach (int railSocketIndex in railIndices)
-                                {
-                                    if (!_connectedSockets.Contains(railSocketIndex))
-                                    {
-                                        railIsHidden = false;
-                                        break;
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                railIsHidden = false;
-                            }
-                            
-                            if (!railIsHidden)
-                            {
-                                hasVisibleRail = true;
-                                break;
-                            }
+                            if (!_connectedSockets.Contains(railSocketIndex))
+                                return true; // At least one socket not connected = visible
                         }
                     }
-                    
-                    if (hasVisibleRail) break;
                 }
-                
-                // Hide post if no visible rails are connected to its sockets
-                railing.SetHidden(!hasVisibleRail && indices.Length > 0);
             }
+            return false;
         }
 
+        /// Triggers visibility update on all railings (delegates to each railing's own logic)
         internal void RefreshAllRailingsVisibility()
         {
-            // Use cached railings list instead of GetComponentsInChildren
+            // Use cached railings list - each railing handles its own visibility logic
             foreach (var r in _cachedRailings)
             {
-                if (r) UpdateRailingVisibility(r);
+                if (r) r.UpdateVisibility();
             }
         }
 
@@ -753,45 +704,123 @@ namespace WaterTown.Platforms
         }
 
         ///
-        /// Toggle modules & railings on these sockets and flip sockets to Connected/Linkable
-        /// Updates all railings to ensure posts correctly reflect rail visibility changes
+        /// Incrementally updates connections - only modifies sockets that changed.
+        /// Compares new connected sockets with current state and applies the delta.
+        /// Called by PlatformManager during adjacency recomputation.
         ///
-        public void ApplyConnectionVisuals(IEnumerable<int> socketIndices, bool connected)
+        public void UpdateConnections(HashSet<int> newConnectedSockets)
         {
-            var socketSet = new HashSet<int>(socketIndices);
-            var modulesToToggle = new HashSet<GameObject>();
-
-            // Update connection state and collect affected modules
-            foreach (int socketIndex in socketSet)
+            if (newConnectedSockets == null) newConnectedSockets = new HashSet<int>();
+            
+            // Find sockets to disconnect (were connected, now not)
+            var socketsToDisconnect = new List<int>();
+            foreach (int socketIndex in _connectedSockets)
             {
-                if (connected)
-                    _connectedSockets.Add(socketIndex);
-                else
-                    _connectedSockets.Remove(socketIndex);
-
-                // Collect modules on these sockets
+                if (!newConnectedSockets.Contains(socketIndex))
+                    socketsToDisconnect.Add(socketIndex);
+            }
+            
+            // Find sockets to connect (weren't connected, now are)
+            var socketsToConnect = new List<int>();
+            foreach (int socketIndex in newConnectedSockets)
+            {
+                if (!_connectedSockets.Contains(socketIndex))
+                    socketsToConnect.Add(socketIndex);
+            }
+            
+            // Early exit if nothing changed
+            if (socketsToDisconnect.Count == 0 && socketsToConnect.Count == 0)
+                return;
+            
+            // Apply disconnections - show modules on disconnected sockets
+            foreach (int socketIndex in socketsToDisconnect)
+            {
+                _connectedSockets.Remove(socketIndex);
+                
                 if (_socketToModules.TryGetValue(socketIndex, out var modules))
                 {
                     foreach (var module in modules)
-                        modulesToToggle.Add(module);
+                        SetModuleVisibility(module, visible: true);
                 }
             }
-
-            // Apply module visibility changes
-            foreach (var module in modulesToToggle)
-                SetModuleHidden(module, connected);
-
-            // Update all railings to ensure posts correctly reflect rail visibility
-            // This ensures cascading updates work correctly (rails -> posts)
-            RefreshAllRailingsVisibility();
-
+            
+            // Apply connections - hide modules on connected sockets
+            foreach (int socketIndex in socketsToConnect)
+            {
+                _connectedSockets.Add(socketIndex);
+                
+                if (_socketToModules.TryGetValue(socketIndex, out var modules))
+                {
+                    foreach (var module in modules)
+                        SetModuleVisibility(module, visible: false);
+                }
+            }
+            
+            // Only update railings that might have changed
+            // Railings on affected sockets need visibility update
+            UpdateAffectedRailings(socketsToDisconnect, socketsToConnect);
+            
             RefreshSocketStatuses();
             ConnectionsChanged?.Invoke(this);
         }
+        
+        /// Sets module visibility without triggering full refresh
+        private void SetModuleVisibility(GameObject moduleGo, bool visible)
+        {
+            if (!moduleGo) return;
+            
+            // Try to find PlatformModule from cached list first
+            PlatformModule pm = null;
+            foreach (var cachedModule in _cachedModules)
+            {
+                if (cachedModule && cachedModule.gameObject == moduleGo)
+                {
+                    pm = cachedModule;
+                    break;
+                }
+            }
+            if (!pm) pm = moduleGo.GetComponent<PlatformModule>();
+            
+            if (pm != null) pm.SetHidden(!visible);
+            else moduleGo.SetActive(visible);
+        }
+        
+        /// Updates only railings on affected sockets (not all railings)
+        private void UpdateAffectedRailings(List<int> disconnectedSockets, List<int> connectedSockets)
+        {
+            var affectedRailings = new HashSet<PlatformRailing>();
+            
+            // Collect railings on disconnected sockets
+            foreach (int socketIndex in disconnectedSockets)
+            {
+                if (_socketToRailings.TryGetValue(socketIndex, out var railings))
+                {
+                    foreach (var r in railings)
+                        if (r) affectedRailings.Add(r);
+                }
+            }
+            
+            // Collect railings on connected sockets
+            foreach (int socketIndex in connectedSockets)
+            {
+                if (_socketToRailings.TryGetValue(socketIndex, out var railings))
+                {
+                    foreach (var r in railings)
+                        if (r) affectedRailings.Add(r);
+                }
+            }
+            
+            // Update only affected railings
+            foreach (var railing in affectedRailings)
+            {
+                railing.UpdateVisibility();
+            }
+        }
 
         ///
-        /// Runtime method to reset connections - does not modify NavMesh links (editor-only)
-        /// Shows all PlatformModules and clears connection tracking
+        /// Runtime method to reset all connections to baseline.
+        /// Only used when unregistering platform or during editor operations.
+        /// For normal adjacency updates, use UpdateConnections() instead.
         ///
         public void ResetConnections()
         {
