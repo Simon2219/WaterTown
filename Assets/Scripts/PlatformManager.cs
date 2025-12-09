@@ -80,17 +80,26 @@ public class PlatformManager : MonoBehaviour
     ///
     /// Finds and validates all required dependencies
     /// Throws InvalidOperationException if any critical dependency is missing
+    /// Note: WorldGrid should be injected via SetWorldGrid before Start
     ///
     private void FindDependencies()
     {
+        // WorldGrid should be injected or found once - prefer dependency injection
         if (!_worldGrid)
         {
+            // Fallback: find once at startup if not injected
             _worldGrid = FindFirstObjectByType<WorldGrid>();
             if (!_worldGrid)
             {
                 throw ErrorHandler.MissingDependency(typeof(WorldGrid), this);
             }
         }
+    }
+    
+    /// Dependency injection method for WorldGrid (avoids FindFirstObjectByType)
+    public void SetWorldGrid(WorldGrid worldGrid)
+    {
+        _worldGrid = worldGrid;
     }
 
 
@@ -170,11 +179,14 @@ public class PlatformManager : MonoBehaviour
     
     ///
     /// Event handler for static Created event
-    /// Subscribes to all instance events for this platform
+    /// Subscribes to all instance events for this platform and injects dependencies
     ///
     private void OnPlatformCreated(GamePlatform platform)
     {
         if (!platform) return;
+        
+        // Inject PlatformManager dependency to avoid FindFirstObjectByType
+        platform.SetPlatformManager(this);
         
         // Subscribe to all instance events for this platform
         platform.HasMoved += OnPlatformHasMoved;
@@ -370,25 +382,22 @@ public class PlatformManager : MonoBehaviour
 
     /// TRUE IF: All cells inside Area are FLAG Empty
     /// OccupyPreview -> considered free (allows placement over preview)
+    /// Assumes cells are sorted (from GetCellsForPlatform)
     public bool IsAreaEmpty(List<Vector2Int> cells)
     {
         if (cells == null || cells.Count == 0)
             return false;
         
-        // Calculate bounding box of the area
-        Vector2Int min = cells[0];
-        Vector2Int max = cells[0];
-        
+        // Verify all cells are in bounds
         foreach (Vector2Int cell in cells)
         {
             if (!_worldGrid.CellInBounds(cell))
                 return false;
-            
-            min.x = Mathf.Min(min.x, cell.x);
-            min.y = Mathf.Min(min.y, cell.y);
-            max.x = Mathf.Max(max.x, cell.x);
-            max.y = Mathf.Max(max.y, cell.y);
         }
+        
+        // Cells are sorted: first = min (bottom-left), last = max (top-right)
+        Vector2Int min = cells[0];
+        Vector2Int max = cells[cells.Count - 1];
         
         // Use WorldGrid's optimized area check
         return _worldGrid.AreaIsEmpty(min, max);
@@ -457,8 +466,9 @@ public class PlatformManager : MonoBehaviour
         _registeredPlatforms.Remove(platform);
 
         // Clear connections on this platform (only if active)
+        // Use runtime method - NavMesh links are cleaned up separately if needed
         if (platform.gameObject.activeInHierarchy)
-            platform.EditorResetAllConnections();
+            platform.ResetConnections();
 
         // Invoke UnityEvent for platform removed
         OnPlatformRemoved?.Invoke(platform);
@@ -516,12 +526,14 @@ public class PlatformManager : MonoBehaviour
 
 
     ///
-    /// Resets all socket connections and visuals for a single platform
+    /// Resets all socket connections and visuals for a single platform (runtime only)
+    /// Does NOT modify NavMesh links (those are handled separately)
     ///
     private void ResetPlatformConnections(GamePlatform platform)
     {
         if (!platform || !platform.gameObject.activeInHierarchy) return;
-        platform.EditorResetAllConnections();
+        // Use runtime method, NOT editor method
+        platform.ResetConnections();
     }
 
 
@@ -782,6 +794,9 @@ public class PlatformManager : MonoBehaviour
     /// assuming its footprint is aligned to the 1x1 world grid AND
     /// that rotation is in 90° steps (0, 90, 180, 270)
     /// This is the single source of truth for runtime footprint
+    /// 
+    /// IMPORTANT: Returns cells in sorted order (left-to-right, bottom-to-top)
+    /// First element = minimum (bottom-left), Last element = maximum (top-right)
     ///
     public List<Vector2Int> GetCellsForPlatform(GamePlatform platform)
     {
@@ -808,6 +823,8 @@ public class PlatformManager : MonoBehaviour
         int startX = centerX - rotatedWidth / 2;
         int startY = centerY - rotatedHeight / 2;
 
+        // Add cells in sorted order: left-to-right, bottom-to-top
+        // This ensures first element = min, last element = max
         for (int cellY = 0; cellY < rotatedHeight; cellY++)
         {
             for (int cellX = 0; cellX < rotatedWidth; cellX++)

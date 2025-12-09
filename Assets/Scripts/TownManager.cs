@@ -53,10 +53,11 @@ public class TownManager : MonoBehaviour
     ///
     /// Finds and validates all required dependencies
     /// Throws InvalidOperationException if any critical dependency is missing
+    /// Injects dependencies between systems to avoid FindFirstObjectByType at runtime
     ///
     private void FindDependencies() 
     {
-        // Auto-find WorldGrid
+        // Auto-find WorldGrid (once at startup)
         if (!_worldGrid)
         {
             _worldGrid = FindFirstObjectByType<WorldGrid>();
@@ -66,7 +67,7 @@ public class TownManager : MonoBehaviour
             }
         }
 
-        // Auto-find PlatformManager
+        // Auto-find PlatformManager (once at startup)
         if (!_platformManager)
         {
             _platformManager = FindFirstObjectByType<PlatformManager>();
@@ -75,6 +76,9 @@ public class TownManager : MonoBehaviour
                 throw ErrorHandler.MissingDependency(typeof(PlatformManager), this);
             }
         }
+        
+        // Inject WorldGrid into PlatformManager to avoid FindFirstObjectByType calls
+        _platformManager.SetWorldGrid(_worldGrid);
     }
 
 
