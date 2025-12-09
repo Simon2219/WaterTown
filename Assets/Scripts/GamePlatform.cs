@@ -550,8 +550,8 @@ namespace WaterTown.Platforms
         // Railing registry
         private readonly Dictionary<int, List<PlatformRailing>> _socketToRailings = new();
         
-        // Visible rail count per socket (for O(1) post visibility checks)
-        private readonly Dictionary<int, int> _visibleRailsPerSocket = new();
+        // Counter-based tracking of visible rails per socket (O(1) lookup for post visibility)
+        private readonly Dictionary<int, int> _visibleRailCountPerSocket = new();
 
         /// Called by PlatformRailing to bind itself to given socket indices
         public void RegisterRailing(PlatformRailing railing)
@@ -582,16 +582,16 @@ namespace WaterTown.Platforms
                 }
                 if (!list.Contains(railing)) list.Add(railing);
                 
-                // Initialize visible rail counter for this socket
-                if (!_visibleRailsPerSocket.ContainsKey(sIdx))
-                    _visibleRailsPerSocket[sIdx] = 0;
+                // Initialize counter if needed
+                if (!_visibleRailCountPerSocket.ContainsKey(sIdx))
+                    _visibleRailCountPerSocket[sIdx] = 0;
             }
             
-            // If this is a visible rail, increment counters
+            // If this is a visible Rail, increment counters
             if (railing.type == PlatformRailing.RailingType.Rail && !railing.IsHidden)
             {
                 foreach (int sIdx in indices)
-                    _visibleRailsPerSocket[sIdx]++;
+                    _visibleRailCountPerSocket[sIdx]++;
             }
         }
 
@@ -599,18 +599,16 @@ namespace WaterTown.Platforms
         public void UnregisterRailing(PlatformRailing railing)
         {
             if (!railing) return;
-
-            // If this was a visible rail, decrement counters before removing
-            if (railing.type == PlatformRailing.RailingType.Rail && !railing.IsHidden)
+            
+            var indices = railing.SocketIndices;
+            
+            // If this was a visible Rail, decrement counters before removal
+            if (indices != null && railing.type == PlatformRailing.RailingType.Rail && !railing.IsHidden)
             {
-                var indices = railing.SocketIndices;
-                if (indices != null)
+                foreach (int sIdx in indices)
                 {
-                    foreach (int sIdx in indices)
-                    {
-                        if (_visibleRailsPerSocket.TryGetValue(sIdx, out int count))
-                            _visibleRailsPerSocket[sIdx] = Mathf.Max(0, count - 1);
-                    }
+                    if (_visibleRailCountPerSocket.TryGetValue(sIdx, out int count))
+                        _visibleRailCountPerSocket[sIdx] = Mathf.Max(0, count - 1);
                 }
             }
 
@@ -621,21 +619,21 @@ namespace WaterTown.Platforms
         }
         
         /// Called by PlatformRailing when a Rail's visibility changes
-        /// Updates the visible rail counter for efficient post visibility checks
-        internal void OnRailVisibilityChanged(PlatformRailing rail, bool becameHidden)
+        /// Updates the counter for O(1) post visibility checks
+        internal void OnRailVisibilityChanged(PlatformRailing rail, bool nowHidden)
         {
-            if (rail.type != PlatformRailing.RailingType.Rail) return;
+            if (rail == null || rail.type != PlatformRailing.RailingType.Rail) return;
             
             var indices = rail.SocketIndices;
             if (indices == null) return;
             
-            int delta = becameHidden ? -1 : 1;
+            int delta = nowHidden ? -1 : 1;
             foreach (int sIdx in indices)
             {
-                if (_visibleRailsPerSocket.TryGetValue(sIdx, out int count))
-                    _visibleRailsPerSocket[sIdx] = Mathf.Max(0, count + delta);
-                else if (!becameHidden)
-                    _visibleRailsPerSocket[sIdx] = 1;
+                if (_visibleRailCountPerSocket.TryGetValue(sIdx, out int count))
+                    _visibleRailCountPerSocket[sIdx] = Mathf.Max(0, count + delta);
+                else if (!nowHidden)
+                    _visibleRailCountPerSocket[sIdx] = 1;
             }
         }
 
@@ -643,32 +641,31 @@ namespace WaterTown.Platforms
         public bool IsSocketConnected(int socketIndex) => _connectedSockets.Contains(socketIndex);
 
         /// O(n) check: returns true if any of the given sockets has at least one visible rail
-        /// Uses pre-computed counters instead of iterating through rails
+        /// Uses pre-computed counters instead of iterating through all rails
         public bool HasVisibleRailOnSockets(int[] socketIndices)
         {
             if (socketIndices == null || socketIndices.Length == 0) return false;
             
             foreach (int socketIndex in socketIndices)
             {
-                if (_visibleRailsPerSocket.TryGetValue(socketIndex, out int count) && count > 0)
+                if (_visibleRailCountPerSocket.TryGetValue(socketIndex, out int count) && count > 0)
                     return true;
             }
             return false;
         }
 
         /// Triggers visibility update on all railings
-        /// Updates Rails first, then Posts (posts depend on rail visibility state)
+        /// IMPORTANT: Rails must update FIRST so counters are correct when Posts check visibility
         internal void RefreshAllRailingsVisibility()
         {
-            // First pass: update all Rails (they only depend on socket connection state)
-            // Rails notify platform of visibility changes via OnRailVisibilityChanged
+            // First pass: update all Rails (they update the visibility counters via SetHidden)
             foreach (var r in _cachedRailings)
             {
                 if (r && r.type == PlatformRailing.RailingType.Rail)
                     r.UpdateVisibility();
             }
             
-            // Second pass: update all Posts (they use HasVisibleRailOnSockets which is now O(n))
+            // Second pass: update all Posts (they use HasVisibleRailOnSockets which reads counters)
             foreach (var r in _cachedRailings)
             {
                 if (r && r.type == PlatformRailing.RailingType.Post)
