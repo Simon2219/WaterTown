@@ -597,6 +597,7 @@ namespace WaterTown.Platforms
         public bool IsSocketConnected(int socketIndex) => _connectedSockets.Contains(socketIndex);
 
         /// Helper for posts: checks if there's at least one visible rail on any of the given sockets
+        /// IMPORTANT: This assumes rails have already been updated via RefreshAllRailingsVisibility()
         public bool HasVisibleRailOnSockets(int[] socketIndices)
         {
             if (socketIndices == null || socketIndices.Length == 0) return false;
@@ -607,32 +608,34 @@ namespace WaterTown.Platforms
                 {
                     foreach (var rail in railingsOnSocket)
                     {
-                        if (rail == null) continue;
+                        if (!rail) continue;
                         if (rail.type != PlatformRailing.RailingType.Rail) continue;
                         
-                        // Check if this rail is visible (not all its sockets are connected)
-                        var railIndices = rail.SocketIndices ?? System.Array.Empty<int>();
-                        if (railIndices.Length == 0)
-                            return true; // No sockets = visible
-                        
-                        foreach (int railSocketIndex in railIndices)
-                        {
-                            if (!_connectedSockets.Contains(railSocketIndex))
-                                return true; // At least one socket not connected = visible
-                        }
+                        // Rails already updated their visibility - just check their state
+                        if (!rail.IsHidden)
+                            return true;
                     }
                 }
             }
             return false;
         }
 
-        /// Triggers visibility update on all railings (delegates to each railing's own logic)
+        /// Triggers visibility update on all railings
+        /// Updates Rails first, then Posts (posts depend on rail visibility state)
         internal void RefreshAllRailingsVisibility()
         {
-            // Use cached railings list - each railing handles its own visibility logic
+            // First pass: update all Rails (they only depend on socket connection state)
             foreach (var r in _cachedRailings)
             {
-                if (r) r.UpdateVisibility();
+                if (r && r.type == PlatformRailing.RailingType.Rail)
+                    r.UpdateVisibility();
+            }
+            
+            // Second pass: update all Posts (they depend on rail visibility)
+            foreach (var r in _cachedRailings)
+            {
+                if (r && r.type == PlatformRailing.RailingType.Post)
+                    r.UpdateVisibility();
             }
         }
 
