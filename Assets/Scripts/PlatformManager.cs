@@ -56,7 +56,8 @@ public class PlatformManager : MonoBehaviour
     private readonly Dictionary<Vector2Int, GamePlatform> _cellToPlatform = new();
 
     // Adjacency recomputation batching (performance optimization)
-    private bool _adjacencyDirty = false;
+    // Instead of a boolean, track specific platforms that need updates
+    private readonly HashSet<GamePlatform> _platformsNeedingAdjacencyUpdate = new();
     private bool _isRecomputingAdjacency = false;
     
     #endregion
@@ -119,11 +120,10 @@ public class PlatformManager : MonoBehaviour
 
     private void LateUpdate()
     {
-        // Batch adjacency recomputation to once per frame if dirty
-        if (_adjacencyDirty && !_isRecomputingAdjacency)
+        // Batch adjacency recomputation to once per frame for affected platforms only
+        if (_platformsNeedingAdjacencyUpdate.Count > 0 && !_isRecomputingAdjacency)
         {
-            _adjacencyDirty = false;
-            RecomputeAllAdjacency();                                                 
+            RecomputeAdjacencyForAffectedPlatforms();
         }
     }
 
@@ -260,9 +260,8 @@ public class PlatformManager : MonoBehaviour
         // Register platform in grid
         RegisterPlatform(platform);
         
-        // Mark adjacency dirty so it recalculates
-        // Each platform will detect its neighbors and request NavMesh links automatically
-        MarkAdjacencyDirty();
+        // Mark this platform and its neighbors for adjacency update
+        MarkAdjacencyDirtyForPlatform(platform);
         
         // Rebuild NavMesh for this platform and all affected neighbors
         RebuildNavMeshForPlatformAndNeighbors(platform);
@@ -293,8 +292,8 @@ public class PlatformManager : MonoBehaviour
             platform.occupiedCells.Clear();
         }
         
-        // Mark adjacency dirty so neighbors update in LateUpdate
-        MarkAdjacencyDirty();
+        // Mark affected platforms (neighbors at old position) for adjacency update
+        MarkAdjacencyDirtyForPlatform(platform);
     }
 
 
@@ -338,8 +337,8 @@ public class PlatformManager : MonoBehaviour
             }
         }
         
-        // Mark adjacency as dirty for batched recomputation (no NavMesh rebuild during movement)
-        MarkAdjacencyDirty();
+        // Mark this platform and affected neighbors for adjacency update
+        MarkAdjacencyDirtyForPlatform(platform);
     }
 
     
@@ -405,20 +404,43 @@ public class PlatformManager : MonoBehaviour
     }
 
 
-    /// Marks adjacency as needing recomputation
-    /// Batched to LateUpdate for performance
-    /// Multiple pose changes in the same frame will only trigger one recomputation
-    private void MarkAdjacencyDirty()
+    /// Marks a platform and its neighbors as needing adjacency recomputation
+    /// Only the affected platforms will be updated in LateUpdate
+    private void MarkAdjacencyDirtyForPlatform(GamePlatform platform)
     {
-        _adjacencyDirty = true;
+        if (!platform) return;
+        
+        // Get all affected platforms (the platform + its neighbors at old and new positions)
+        var affected = GetAffectedPlatforms(platform);
+        
+        foreach (var p in affected)
+        {
+            if (p && p.isActiveAndEnabled)
+                _platformsNeedingAdjacencyUpdate.Add(p);
+        }
     }
 
 
-    /// Public API for external systems to trigger adjacency recomputation
-    /// Used by BuildModeManager to update railing preview during placement
-    public void TriggerAdjacencyUpdate()
+    /// Marks all registered platforms as needing adjacency update
+    /// Use sparingly - for full recalculation scenarios
+    private void MarkAllPlatformsAdjacencyDirty()
     {
-        MarkAdjacencyDirty();
+        foreach (var platform in _registeredPlatforms)
+        {
+            if (platform && platform.isActiveAndEnabled)
+                _platformsNeedingAdjacencyUpdate.Add(platform);
+        }
+    }
+
+
+    /// Public API for external systems to trigger adjacency recomputation for a specific platform
+    /// Used by BuildModeManager to update railing preview during placement
+    public void TriggerAdjacencyUpdate(GamePlatform platform = null)
+    {
+        if (platform != null)
+            MarkAdjacencyDirtyForPlatform(platform);
+        else
+            MarkAllPlatformsAdjacencyDirty();
     }
 
 
@@ -474,8 +496,8 @@ public class PlatformManager : MonoBehaviour
         // Invoke UnityEvent for platform removed
         OnPlatformRemoved?.Invoke(platform);
 
-        // Mark adjacency for batched recomputation
-        MarkAdjacencyDirty();
+        // Mark affected platforms (neighbors) for adjacency update
+        MarkAdjacencyDirtyForPlatform(platform);
     }
     
     #endregion
@@ -673,32 +695,25 @@ public class PlatformManager : MonoBehaviour
 
 
     ///
-    /// Recomputes adjacency for all platforms using grid-based detection
-    /// Each platform independently checks its sockets against adjacent grid cells
+    /// Recomputes adjacency only for platforms marked as needing update
+    /// Much more efficient than updating all platforms every frame
     /// This is batched to run once per frame maximum via LateUpdate
     ///
-    private void RecomputeAllAdjacency()
+    private void RecomputeAdjacencyForAffectedPlatforms()
     {
         // Prevent recursive calls during adjacency computation
         if (_isRecomputingAdjacency) return;
         _isRecomputingAdjacency = true;
 
-        var allActivePlatforms = new List<GamePlatform>();
-        
-        // Collect all active platforms (placed and picked up)
-        foreach (var gp in _registeredPlatforms)
+        // Update only the affected platforms
+        foreach (var platform in _platformsNeedingAdjacencyUpdate)
         {
-            if (!gp) continue;
-            if (!gp.isActiveAndEnabled) continue;
-            allActivePlatforms.Add(gp);
-        }
-
-        // Each platform updates its own socket statuses using grid-based detection
-        // This is clean and decoupled - each platform checks its adjacent cells independently
-        foreach (var platform in allActivePlatforms)
-        {
+            if (!platform || !platform.isActiveAndEnabled) continue;
             platform.UpdateSocketStatusesFromGrid(_worldGrid, _cellToPlatform);
         }
+        
+        // Clear the set after processing
+        _platformsNeedingAdjacencyUpdate.Clear();
 
         _isRecomputingAdjacency = false;
     }
@@ -710,7 +725,7 @@ public class PlatformManager : MonoBehaviour
     ///
     public void CalculateAdjacencyForAll()
     {
-        MarkAdjacencyDirty();
+        MarkAllPlatformsAdjacencyDirty();
     }
     
     #endregion

@@ -169,10 +169,10 @@ namespace WaterTown.Building
             bool isValid = _currentPickup.CanBePlaced;
             _currentPickup.UpdateValidityVisuals(isValid);
             
-            // Trigger adjacency update for preview
-            if (_currentPickup is GamePlatform && platformManager != null)
+            // Trigger adjacency update for preview (only for affected platforms, not all)
+            if (_currentPickup is GamePlatform platform && platformManager != null)
             {
-                platformManager.TriggerAdjacencyUpdate();
+                platformManager.TriggerAdjacencyUpdate(platform);
             }
         }
         

@@ -156,10 +156,12 @@ public class TownManager : MonoBehaviour
 
     ///
     /// Trigger adjacency update (delegates to PlatformManager)
+    /// Pass a platform to only update that platform and its neighbors
+    /// Pass null to update all platforms (expensive)
     ///
-    public void TriggerAdjacencyUpdate()
+    public void TriggerAdjacencyUpdate(GamePlatform platform = null)
     {
-        _platformManager.TriggerAdjacencyUpdate();
+        _platformManager.TriggerAdjacencyUpdate(platform);
     }
     
     
