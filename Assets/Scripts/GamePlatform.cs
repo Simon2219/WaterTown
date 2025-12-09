@@ -85,6 +85,9 @@ namespace WaterTown.Platforms
         public Vector2Int Footprint => footprintSize;
 
         private NavMeshSurface _navSurface;
+        
+        // Cached transform for "Links" GameObject to avoid transform.Find() during runtime
+        private Transform _linksParentTransform;
 
         [Header("NavMesh Rebuild")]
         [SerializeField]
@@ -101,6 +104,27 @@ namespace WaterTown.Platforms
                 // NavMeshSurface is required component, should always exist after Awake
                 return _navSurface;
             }
+        }
+        
+        /// Cached Links parent transform (lazily initialized to avoid transform.Find() during runtime)
+        internal Transform LinksParentTransform
+        {
+            get
+            {
+                if (_linksParentTransform == null)
+                {
+                    // Only search once, then cache
+                    _linksParentTransform = transform.Find("Links");
+                }
+                return _linksParentTransform;
+            }
+        }
+        
+        /// Internal method to update the cached Links parent transform
+        /// Called after creating the Links GameObject
+        internal void RefreshLinksParentCache()
+        {
+            _linksParentTransform = transform.Find("Links");
         }
 
         private Vector3 _lastPos;
@@ -169,9 +193,18 @@ namespace WaterTown.Platforms
             get { if (!_socketsBuilt) BuildSockets(); return sockets; }
         }
 
+        /// Socket count is static after initialization (determined by footprint size)
+        /// No need to cache - just ensure sockets are built once, then return count directly
         public int SocketCount
         {
-            get { if (!_socketsBuilt) BuildSockets(); return sockets.Count; }
+            get 
+            { 
+                // Build sockets once if not already built
+                if (!_socketsBuilt) BuildSockets();
+                
+                // Socket count is static after BuildSockets() - footprint size doesn't change at runtime
+                return sockets.Count;
+            }
         }
 
         ///
@@ -194,6 +227,9 @@ namespace WaterTown.Platforms
             
             // Invalidate world position cache when rebuilding sockets
             _worldPositionsCacheValid = false;
+            
+            // Invalidate Links parent cache if it existed (will be re-found if needed)
+            _linksParentTransform = null;
 
             int footprintWidth = Mathf.Max(1, footprintSize.x);
             int footprintLength = Mathf.Max(1, footprintSize.y);
@@ -787,7 +823,8 @@ namespace WaterTown.Platforms
             ResetConnections();
 
             // Destroy all NavMeshLink GameObjects under "Links" in the editor with Undo
-            var linksParent = transform.Find("Links");
+            // Use cached transform if available, otherwise find it (editor-only path)
+            var linksParent = LinksParentTransform ?? transform.Find("Links");
             if (linksParent)
             {
                 for (int i = linksParent.childCount - 1; i >= 0; i--)

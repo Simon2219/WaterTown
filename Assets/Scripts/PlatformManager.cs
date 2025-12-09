@@ -540,28 +540,43 @@ public class PlatformManager : MonoBehaviour
     ///
     /// Updates socket connections between two platforms
     /// ONLY sets socket statuses and creates NavMesh links - platforms handle their own visuals
+    /// Optimized to batch socket world position queries (ensures cache is built once per platform)
     ///
     private void UpdateSocketConnections(GamePlatform platformA, GamePlatform platformB)
     {
         if (!platformA || !platformB || platformA == platformB) return;
+        
+        // Get socket counts once (cached, avoids BuildSockets() checks)
+        int socketCountA = platformA.SocketCount;
+        int socketCountB = platformB.SocketCount;
+        
+        if (socketCountA == 0 || socketCountB == 0) return;
+        
+        // Pre-fetch all socket world positions to ensure cache is valid
+        // This ensures GetSocketWorldPosition() only rebuilds cache once per platform if needed
+        // GetSocketWorldPosition() will rebuild cache for all sockets if invalid, so we trigger it once
+        if (socketCountA > 0) platformA.GetSocketWorldPosition(0); // Trigger cache build for platformA
+        if (socketCountB > 0) platformB.GetSocketWorldPosition(0); // Trigger cache build for platformB
         
         // Find matching sockets by world position (socket-by-socket checking)
         var aSocketIndices = new HashSet<int>();
         var bSocketIndices = new HashSet<int>();
         
         const float socketMatchDistance = 0.1f; // 10cm tolerance
+        const float socketMatchDistanceSqr = socketMatchDistance * socketMatchDistance;
         
         // Check each socket on platform A against all sockets on platform B
-        for (int i = 0; i < platformA.SocketCount; i++)
+        // Now all GetSocketWorldPosition calls will use cached values
+        for (int i = 0; i < socketCountA; i++)
         {
             Vector3 worldPosA = platformA.GetSocketWorldPosition(i);
             
-            for (int j = 0; j < platformB.SocketCount; j++)
+            for (int j = 0; j < socketCountB; j++)
             {
                 Vector3 worldPosB = platformB.GetSocketWorldPosition(j);
                 float distSqr = (worldPosA - worldPosB).sqrMagnitude;
                 
-                if (distSqr <= socketMatchDistance * socketMatchDistance)
+                if (distSqr <= socketMatchDistanceSqr)
                 {
                     aSocketIndices.Add(i);
                     bSocketIndices.Add(j);
@@ -592,6 +607,8 @@ public class PlatformManager : MonoBehaviour
         GamePlatform platformB, HashSet<int> bSocketIndices)
     {
         // Calculate average positions of connected sockets
+        // These positions are already computed in UpdateSocketConnections, but we recalculate here
+        // for clarity (could be optimized to pass positions through if needed)
         Vector3 avgPosA = Vector3.zero;
         foreach (int idx in aSocketIndices)
             avgPosA += platformA.GetSocketWorldPosition(idx);
@@ -670,7 +687,10 @@ public class PlatformManager : MonoBehaviour
     {
         if (!platformA || !platformB) return;
         
-        var parent = GetOrCreateLinksParent(platformA.transform);
+        // Use cached Links parent transform to avoid transform.Find() calls
+        var parent = GetOrCreateLinksParent(platformA);
+        if (!parent) return; // Safety check
+        
         var go = new GameObject($"Link_{platformA.name}_to_{platformB.name}");
         go.transform.SetParent(parent, false);
 
@@ -683,24 +703,36 @@ public class PlatformManager : MonoBehaviour
         link.bidirectional = true;
         link.width = navLinkWidth;
         link.area = 0;
-        link.agentTypeID = platformA.NavSurface ? platformA.NavSurface.agentTypeID : 0;
+        
+        // Cache NavSurface reference to avoid property access (NavSurface is a property getter)
+        NavMeshSurface navSurface = platformA.NavSurface;
+        link.agentTypeID = navSurface ? navSurface.agentTypeID : 0;
     }
 
 
     ///
-    /// Gets or creates a child transform with the given name
+    /// Gets or creates the "Links" child transform for NavMesh links
+    /// Uses cached transform from GamePlatform to avoid transform.Find() calls
     ///
-    private static Transform GetOrCreateLinksParent(Transform parent)
+    private static Transform GetOrCreateLinksParent(GamePlatform platform)
     {
-        var t = parent.Find("Links");
+        if (!platform) return null;
+        
+        // Use cached Links parent transform (avoids transform.Find() during runtime)
+        var t = platform.LinksParentTransform;
+        
         if (!t)
         {
+            // Create Links GameObject if it doesn't exist
             var go = new GameObject("Links");
             t = go.transform;
-            t.SetParent(parent, false);
+            t.SetParent(platform.transform, false);
             t.localPosition = Vector3.zero;
             t.localRotation = Quaternion.identity;
             t.localScale = Vector3.one;
+            
+            // Update the cached reference in the platform
+            platform.RefreshLinksParentCache();
         }
         return t;
     }
