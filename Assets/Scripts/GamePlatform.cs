@@ -732,11 +732,15 @@ namespace WaterTown.Platforms
             if (socketsToDisconnect.Count == 0 && socketsToConnect.Count == 0)
                 return;
             
-            // Apply disconnections - show modules on disconnected sockets
+            // Update _connectedSockets state FIRST (before visibility updates)
+            foreach (int socketIndex in socketsToDisconnect)
+                _connectedSockets.Remove(socketIndex);
+            foreach (int socketIndex in socketsToConnect)
+                _connectedSockets.Add(socketIndex);
+            
+            // Now update module visibility based on new state
             foreach (int socketIndex in socketsToDisconnect)
             {
-                _connectedSockets.Remove(socketIndex);
-                
                 if (_socketToModules.TryGetValue(socketIndex, out var modules))
                 {
                     foreach (var module in modules)
@@ -744,11 +748,8 @@ namespace WaterTown.Platforms
                 }
             }
             
-            // Apply connections - hide modules on connected sockets
             foreach (int socketIndex in socketsToConnect)
             {
-                _connectedSockets.Add(socketIndex);
-                
                 if (_socketToModules.TryGetValue(socketIndex, out var modules))
                 {
                     foreach (var module in modules)
@@ -756,9 +757,9 @@ namespace WaterTown.Platforms
                 }
             }
             
-            // Only update railings that might have changed
-            // Railings on affected sockets need visibility update
-            UpdateAffectedRailings(socketsToDisconnect, socketsToConnect);
+            // Update ALL railings - they check socket state themselves
+            // This ensures posts correctly reflect rail visibility changes
+            RefreshAllRailingsVisibility();
             
             RefreshSocketStatuses();
             ConnectionsChanged?.Invoke(this);
@@ -783,38 +784,6 @@ namespace WaterTown.Platforms
             
             if (pm != null) pm.SetHidden(!visible);
             else moduleGo.SetActive(visible);
-        }
-        
-        /// Updates only railings on affected sockets (not all railings)
-        private void UpdateAffectedRailings(List<int> disconnectedSockets, List<int> connectedSockets)
-        {
-            var affectedRailings = new HashSet<PlatformRailing>();
-            
-            // Collect railings on disconnected sockets
-            foreach (int socketIndex in disconnectedSockets)
-            {
-                if (_socketToRailings.TryGetValue(socketIndex, out var railings))
-                {
-                    foreach (var r in railings)
-                        if (r) affectedRailings.Add(r);
-                }
-            }
-            
-            // Collect railings on connected sockets
-            foreach (int socketIndex in connectedSockets)
-            {
-                if (_socketToRailings.TryGetValue(socketIndex, out var railings))
-                {
-                    foreach (var r in railings)
-                        if (r) affectedRailings.Add(r);
-                }
-            }
-            
-            // Update only affected railings
-            foreach (var railing in affectedRailings)
-            {
-                railing.UpdateVisibility();
-            }
         }
 
         ///
