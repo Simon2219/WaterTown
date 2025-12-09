@@ -643,16 +643,23 @@ namespace WaterTown.Platforms
         /// True if the given socket index is currently part of a connection
         public bool IsSocketConnected(int socketIndex) => _connectedSockets.Contains(socketIndex);
 
-        /// O(n) check: returns true if any of the given sockets has at least one visible rail
-        /// Uses pre-computed counters instead of iterating through all rails
+        /// Returns true if any of the given sockets has at least one visible rail
+        /// Directly checks Rail visibility state instead of relying on counters
         public bool HasVisibleRailOnSockets(int[] socketIndices)
         {
             if (socketIndices == null || socketIndices.Length == 0) return false;
             
             foreach (int socketIndex in socketIndices)
             {
-                if (_visibleRailCountPerSocket.TryGetValue(socketIndex, out int count) && count > 0)
-                    return true;
+                if (_socketToRailings.TryGetValue(socketIndex, out var railings))
+                {
+                    foreach (var railing in railings)
+                    {
+                        // Check if this is a visible Rail (not Post)
+                        if (railing && railing.type == PlatformRailing.RailingType.Rail && !railing.IsHidden)
+                            return true;
+                    }
+                }
             }
             return false;
         }
