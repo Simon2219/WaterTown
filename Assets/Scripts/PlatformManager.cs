@@ -622,8 +622,8 @@ public class PlatformManager : MonoBehaviour
     {
         if (!platformA || !platformB) return;
         
-        // Use cached Links parent transform to avoid transform.Find() calls
-        var parent = GetOrCreateLinksParent(platformA);
+        // Get Links parent (created during platform initialization)
+        var parent = GetLinksParent(platformA);
         if (!parent) return; // Safety check
         
         var go = new GameObject($"Link_{platformA.name}_to_{platformB.name}");
@@ -646,30 +646,22 @@ public class PlatformManager : MonoBehaviour
 
 
     ///
-    /// Gets or creates the "Links" child transform for NavMesh links
-    /// Uses cached transform from GamePlatform to avoid transform.Find() calls
+    /// Gets the Links parent transform from the platform
+    /// Links parent is created during platform initialization, so it should always exist
     ///
-    private static Transform GetOrCreateLinksParent(GamePlatform platform)
+    private static Transform GetLinksParent(GamePlatform platform)
     {
         if (!platform) return null;
         
-        // Use cached Links parent transform (avoids transform.Find() during runtime)
-        var t = platform.LinksParentTransform;
+        var linksParent = platform.LinksParentTransform;
         
-        if (!t)
+        if (!linksParent)
         {
-            // Create Links GameObject if it doesn't exist
-            var go = new GameObject("Links");
-            t = go.transform;
-            t.SetParent(platform.transform, false);
-            t.localPosition = Vector3.zero;
-            t.localRotation = Quaternion.identity;
-            t.localScale = Vector3.one;
-            
-            // Update the cached reference in the platform
-            platform.RefreshLinksParentCache();
+            Debug.LogError($"[PlatformManager] Links parent not found on platform '{platform.name}'. " +
+                           "This should not happen - Links parent is created during platform initialization.", platform);
         }
-        return t;
+        
+        return linksParent;
     }
 
 

@@ -106,25 +106,28 @@ namespace WaterTown.Platforms
             }
         }
         
-        /// Cached Links parent transform (lazily initialized to avoid transform.Find() during runtime)
-        internal Transform LinksParentTransform
-        {
-            get
-            {
-                if (_linksParentTransform == null)
-                {
-                    // Only search once, then cache
-                    _linksParentTransform = transform.Find("Links");
-                }
-                return _linksParentTransform;
-            }
-        }
+        /// Cached Links parent transform (created during initialization)
+        internal Transform LinksParentTransform => _linksParentTransform;
         
-        /// Internal method to update the cached Links parent transform
-        /// Called after creating the Links GameObject
-        internal void RefreshLinksParentCache()
+        /// Creates or finds the Links parent GameObject during platform initialization
+        /// This ensures the Links parent always exists after initialization
+        private void EnsureLinksParentExists()
         {
+            if (_linksParentTransform != null) return;
+            
+            // Try to find existing Links parent first
             _linksParentTransform = transform.Find("Links");
+            
+            if (_linksParentTransform == null)
+            {
+                // Create Links parent if it doesn't exist
+                var go = new GameObject("Links");
+                _linksParentTransform = go.transform;
+                _linksParentTransform.SetParent(transform, false);
+                _linksParentTransform.localPosition = Vector3.zero;
+                _linksParentTransform.localRotation = Quaternion.identity;
+                _linksParentTransform.localScale = Vector3.one;
+            }
         }
 
         private Vector3 _lastPos;
@@ -1117,6 +1120,9 @@ namespace WaterTown.Platforms
         {
             // Build sockets once on initialization
             if (!_socketsBuilt) BuildSockets();
+            
+            // Ensure Links parent exists for NavMesh links
+            EnsureLinksParentExists();
             
             // Register child components once on initialization
             EnsureChildrenModulesRegistered();
