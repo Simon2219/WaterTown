@@ -136,7 +136,6 @@ namespace WaterTown.Platforms
         #region Edge & Socket System
         
         // Edge enum (for compatibility with PlatformModule)
-
         public enum Edge { North, East, South, West }
 
         /// Length in whole meters along the given edge (number of segments)
@@ -146,31 +145,34 @@ namespace WaterTown.Platforms
             return (edge == Edge.North || edge == Edge.South) ? footprintSize.x : footprintSize.y;
         }
 
-        // Sockets (grid-based, direction-agnostic)
-
+        // Socket status and location enums
         public enum SocketStatus { Linkable, Occupied, Connected, Locked, Disabled }
+        public enum SocketLocation { Edge, Corner }
 
-        public enum SocketLocation { Edge, Corner }  // Corner kept for backward compat (we only create Edge sockets)
-
+        /// Socket data structure - represents a connection point on the platform perimeter
+        /// Each socket knows its local position and which direction faces outward (for grid-based adjacency)
         [System.Serializable]
-        public struct SocketInfo
+        public struct SocketData
         {
             [SerializeField, HideInInspector] private int index;
             [SerializeField, HideInInspector] private Vector3 localPos;
+            [SerializeField, HideInInspector] private Vector2Int outwardOffset; // Grid offset to adjacent cell (e.g., (0,1) for +Z direction)
             [SerializeField, HideInInspector] private SocketLocation location;
             [SerializeField] private SocketStatus status;
 
             public int Index => index;
             public Vector3 LocalPos => localPos;
+            public Vector2Int OutwardOffset => outwardOffset;
             public SocketStatus Status => status;
             public bool IsLinkable => status == SocketStatus.Linkable;
             public SocketLocation Location => location;
 
-            internal void Initialize(int idx, Vector3 lp, SocketStatus defaultStatus)
+            internal void Initialize(int idx, Vector3 lp, Vector2Int outward, SocketStatus defaultStatus)
             {
                 index = idx;
                 localPos = lp;
-                location = SocketLocation.Edge; // we only create edge sockets in this setup
+                outwardOffset = outward;
+                location = SocketLocation.Edge;
                 status = defaultStatus;
             }
 
@@ -178,7 +180,7 @@ namespace WaterTown.Platforms
         }
 
         [Header("Sockets (perimeter, 1m spacing)")]
-        [SerializeField] private List<SocketInfo> sockets = new();
+        [SerializeField] private List<SocketData> sockets = new();
         private bool _socketsBuilt;
         
         // Cache for socket world positions (invalidated on transform change)
@@ -191,7 +193,7 @@ namespace WaterTown.Platforms
         /// Read-only access to connected sockets for external systems
         public IReadOnlyCollection<int> ConnectedSockets => _connectedSockets;
 
-        public IReadOnlyList<SocketInfo> Sockets
+        public IReadOnlyList<SocketData> Sockets
         {
             get { if (!_socketsBuilt) BuildSockets(); return sockets; }
         }
@@ -213,11 +215,8 @@ namespace WaterTown.Platforms
         ///
         /// Build sockets along the perimeter of the footprint, in local space,
         /// one socket per 1m edge segment
-        /// Order (for compat with Edge/mark API):
-        ///   0..(w-1)            : North edge
-        ///   w..(2w-1)           : South edge
-        ///   2w..(2w+l-1)        : East edge
-        ///   2w+l..(2w+2l-1)     : West edge
+        /// Each socket stores its outward direction (grid offset) for adjacency checks
+        /// Order: +Z edge, -Z edge, +X edge, -X edge (for compat with Edge API)
         ///
         public void BuildSockets()
         {
@@ -241,47 +240,51 @@ namespace WaterTown.Platforms
 
             int socketIndex = 0;
 
-            // North edge (local z ≈ +halfLength), segments along x
+            // +Z edge (local z ≈ +halfLength), outward direction is (0, +1)
+            Vector2Int outwardPlusZ = new Vector2Int(0, 1);
             for (int segmentIndex = 0; segmentIndex < footprintWidth; segmentIndex++)
             {
                 float localX = -halfWidth + 0.5f + segmentIndex;
                 Vector3 localPosition = new Vector3(localX, 0f, +halfLength);
-                var socketInfo = new SocketInfo();
-                socketInfo.Initialize(socketIndex, localPosition, prev.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
-                sockets.Add(socketInfo);
+                var socketData = new SocketData();
+                socketData.Initialize(socketIndex, localPosition, outwardPlusZ, prev.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
+                sockets.Add(socketData);
                 socketIndex++;
             }
 
-            // South edge (local z ≈ -halfLength)
+            // -Z edge (local z ≈ -halfLength), outward direction is (0, -1)
+            Vector2Int outwardMinusZ = new Vector2Int(0, -1);
             for (int segmentIndex = 0; segmentIndex < footprintWidth; segmentIndex++)
             {
                 float localX = -halfWidth + 0.5f + segmentIndex;
                 Vector3 localPosition = new Vector3(localX, 0f, -halfLength);
-                var socketInfo = new SocketInfo();
-                socketInfo.Initialize(socketIndex, localPosition, prev.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
-                sockets.Add(socketInfo);
+                var socketData = new SocketData();
+                socketData.Initialize(socketIndex, localPosition, outwardMinusZ, prev.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
+                sockets.Add(socketData);
                 socketIndex++;
             }
 
-            // East edge (local x ≈ +halfWidth), along z
+            // +X edge (local x ≈ +halfWidth), outward direction is (+1, 0)
+            Vector2Int outwardPlusX = new Vector2Int(1, 0);
             for (int segmentIndex = 0; segmentIndex < footprintLength; segmentIndex++)
             {
                 float localZ = +halfLength - 0.5f - segmentIndex;
                 Vector3 localPosition = new Vector3(+halfWidth, 0f, localZ);
-                var socketInfo = new SocketInfo();
-                socketInfo.Initialize(socketIndex, localPosition, prev.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
-                sockets.Add(socketInfo);
+                var socketData = new SocketData();
+                socketData.Initialize(socketIndex, localPosition, outwardPlusX, prev.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
+                sockets.Add(socketData);
                 socketIndex++;
             }
 
-            // West edge (local x ≈ -halfWidth)
+            // -X edge (local x ≈ -halfWidth), outward direction is (-1, 0)
+            Vector2Int outwardMinusX = new Vector2Int(-1, 0);
             for (int segmentIndex = 0; segmentIndex < footprintLength; segmentIndex++)
             {
                 float localZ = +halfLength - 0.5f - segmentIndex;
                 Vector3 localPosition = new Vector3(-halfWidth, 0f, localZ);
-                var socketInfo = new SocketInfo();
-                socketInfo.Initialize(socketIndex, localPosition, prev.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
-                sockets.Add(socketInfo);
+                var socketData = new SocketData();
+                socketData.Initialize(socketIndex, localPosition, outwardMinusX, prev.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
+                sockets.Add(socketData);
                 socketIndex++;
             }
 
@@ -291,7 +294,7 @@ namespace WaterTown.Platforms
             _worldPositionsCacheValid = false;
         }
 
-        public SocketInfo GetSocket(int index)
+        public SocketData GetSocket(int index)
         {
             if (!_socketsBuilt) BuildSockets();
             if (index < 0 || index >= sockets.Count)
@@ -711,6 +714,157 @@ namespace WaterTown.Platforms
                 sockets[i] = s;
             }
         }
+
+
+        ///
+        /// Gets the world-space outward direction for a socket (accounts for platform rotation)
+        /// The outward direction points away from the platform toward the adjacent cell
+        ///
+        public Vector3 GetSocketWorldOutwardDirection(int socketIndex)
+        {
+            if (!_socketsBuilt) BuildSockets();
+            if (socketIndex < 0 || socketIndex >= sockets.Count)
+                return Vector3.zero;
+
+            var socket = sockets[socketIndex];
+            // Convert the local outward direction to world space
+            // OutwardOffset is in grid coords (X, Y) where Y maps to world Z
+            Vector3 localOutward = new Vector3(socket.OutwardOffset.x, 0f, socket.OutwardOffset.y);
+            return transform.TransformDirection(localOutward).normalized;
+        }
+
+
+        ///
+        /// Gets the grid cell adjacent to a socket (the cell the socket faces toward)
+        /// Accounts for platform rotation by transforming the outward direction
+        ///
+        public Vector2Int GetAdjacentCellForSocket(int socketIndex, WorldGrid grid)
+        {
+            if (!_socketsBuilt) BuildSockets();
+            if (socketIndex < 0 || socketIndex >= sockets.Count || !grid)
+                return Vector2Int.zero;
+
+            // Get socket world position
+            Vector3 socketWorldPos = GetSocketWorldPosition(socketIndex);
+            
+            // Get world-space outward direction (accounts for rotation)
+            Vector3 worldOutward = GetSocketWorldOutwardDirection(socketIndex);
+            
+            // Calculate adjacent cell position (socket pos + small offset in outward direction)
+            // We use 0.5m offset to ensure we're clearly in the adjacent cell
+            Vector3 adjacentWorldPos = socketWorldPos + worldOutward * 0.5f;
+            
+            return grid.WorldToCell(adjacentWorldPos);
+        }
+
+
+        ///
+        /// Updates socket connection statuses based on adjacent grid cell occupancy
+        /// Each socket checks its adjacent cell - if occupied, the socket becomes Connected
+        /// When new connections are detected, requests NavMesh link creation from PlatformManager
+        ///
+        public void UpdateSocketStatusesFromGrid(
+            WorldGrid grid, 
+            Dictionary<Vector2Int, GamePlatform> cellToPlatform)
+        {
+            if (!_socketsBuilt) BuildSockets();
+            if (!grid || cellToPlatform == null) return;
+
+            var newConnectedSockets = new HashSet<int>();
+            var newNeighbors = new HashSet<GamePlatform>();
+            var previousNeighbors = GetCurrentNeighbors(grid, cellToPlatform);
+
+            for (int i = 0; i < sockets.Count; i++)
+            {
+                var socket = sockets[i];
+                
+                // Skip locked/disabled sockets
+                if (socket.Status == SocketStatus.Locked || socket.Status == SocketStatus.Disabled)
+                    continue;
+
+                // Get the adjacent cell for this socket
+                Vector2Int adjacentCell = GetAdjacentCellForSocket(i, grid);
+                
+                // Check if the adjacent cell is occupied by another platform
+                if (cellToPlatform.TryGetValue(adjacentCell, out var neighborPlatform))
+                {
+                    if (neighborPlatform != null && neighborPlatform != this)
+                    {
+                        newConnectedSockets.Add(i);
+                        newNeighbors.Add(neighborPlatform);
+                    }
+                }
+            }
+
+            // Apply connection changes
+            bool hadChanges = !newConnectedSockets.SetEquals(_connectedSockets);
+            if (hadChanges)
+            {
+                UpdateConnections(newConnectedSockets);
+            }
+            
+            // Request NavMesh links for newly connected neighbors (only when placed, not preview)
+            if (!IsPickedUp && _platformManager != null)
+            {
+                foreach (var neighbor in newNeighbors)
+                {
+                    // Only create link if this is a new connection
+                    if (!previousNeighbors.Contains(neighbor))
+                    {
+                        _platformManager.RequestNavMeshLink(this, neighbor);
+                    }
+                }
+            }
+        }
+
+
+        ///
+        /// Gets current neighbor platforms based on connected sockets
+        ///
+        private HashSet<GamePlatform> GetCurrentNeighbors(WorldGrid grid, Dictionary<Vector2Int, GamePlatform> cellToPlatform)
+        {
+            var neighbors = new HashSet<GamePlatform>();
+            if (!grid || cellToPlatform == null) return neighbors;
+
+            foreach (int socketIndex in _connectedSockets)
+            {
+                Vector2Int adjacentCell = GetAdjacentCellForSocket(socketIndex, grid);
+                if (cellToPlatform.TryGetValue(adjacentCell, out var neighbor) && neighbor != null && neighbor != this)
+                {
+                    neighbors.Add(neighbor);
+                }
+            }
+            return neighbors;
+        }
+
+
+        ///
+        /// Gets all sockets that are currently connected to a specific neighbor platform
+        /// Useful for NavMesh link positioning
+        ///
+        public List<int> GetSocketsConnectedToNeighbor(
+            GamePlatform neighbor,
+            WorldGrid grid,
+            Dictionary<Vector2Int, GamePlatform> cellToPlatform)
+        {
+            var result = new List<int>();
+            if (!_socketsBuilt) BuildSockets();
+            if (!neighbor || !grid || cellToPlatform == null) return result;
+
+            for (int i = 0; i < sockets.Count; i++)
+            {
+                if (!_connectedSockets.Contains(i)) continue;
+
+                Vector2Int adjacentCell = GetAdjacentCellForSocket(i, grid);
+                if (cellToPlatform.TryGetValue(adjacentCell, out var occupant) && occupant == neighbor)
+                {
+                    result.Add(i);
+                }
+            }
+
+            return result;
+        }
+
         
         #endregion
 
