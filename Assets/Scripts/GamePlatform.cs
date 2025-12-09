@@ -1138,7 +1138,13 @@ namespace WaterTown.Platforms
             // Restore original materials
             RestoreOriginalMaterials();
             
-            // Compute cells for placement
+            // Compute cells for placement (defensive null check)
+            if (_platformManager == null)
+            {
+                Debug.LogError($"[GamePlatform] Cannot place platform '{name}' - PlatformManager not initialized!");
+                return;
+            }
+            
             List<Vector2Int> cells = _platformManager.GetCellsForPlatform(this);
             occupiedCells = cells;
             
@@ -1178,6 +1184,12 @@ namespace WaterTown.Platforms
                 
                 // Compute cells and fire placement event to re-register at original position
                 // This triggers adjacency recomputation so railings/NavMesh links update
+                if (_platformManager == null)
+                {
+                    Debug.LogError($"[GamePlatform] Cannot cancel placement of platform '{name}' - PlatformManager not initialized!");
+                    return;
+                }
+                
                 List<Vector2Int> cells = _platformManager.GetCellsForPlatform(this);
                 occupiedCells = cells;
                 
@@ -1303,6 +1315,13 @@ namespace WaterTown.Platforms
         private bool ValidatePlacement()
         {
             if (!IsPickedUp) return true; // Not being placed
+            
+            // If platform manager hasn't been injected yet, cannot validate placement
+            // This can happen if ValidatePlacement is called before SetPlatformManager()
+            if (_platformManager == null)
+            {
+                return false;
+            }
             
             // Compute cells this platform would occupy
             List<Vector2Int> cells = _platformManager.GetCellsForPlatform(this);
