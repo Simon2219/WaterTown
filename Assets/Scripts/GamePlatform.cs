@@ -18,6 +18,8 @@ namespace WaterTown.Platforms
         // Instance References to Manager Systems
         // Set via dependency injection from PlatformManager when platform is created
         private PlatformManager _platformManager;
+        
+        private WorldGrid _worldGrid;
 
         /// Fired whenever this platform's connection/railing state changes
         public event Action<GamePlatform> ConnectionsChanged;
@@ -315,7 +317,6 @@ namespace WaterTown.Platforms
             // Bounds check
             if (index < 0 || index >= sockets.Count)
             {
-                Debug.LogWarning($"[GamePlatform] GetSocketWorldPosition: index {index} out of range (0..{sockets.Count - 1}). Returning transform position.", this);
                 return transform.position;
             }
             
@@ -750,10 +751,10 @@ namespace WaterTown.Platforms
         /// Gets the grid cell adjacent to a socket (the cell the socket faces toward)
         /// Accounts for platform rotation by transforming the outward direction
         ///
-        public Vector2Int GetAdjacentCellForSocket(int socketIndex, WorldGrid grid)
+        public Vector2Int GetAdjacentCellForSocket(int socketIndex)
         {
             if (!_socketsBuilt) BuildSockets();
-            if (socketIndex < 0 || socketIndex >= sockets.Count || !grid)
+            if (socketIndex < 0 || socketIndex >= sockets.Count)
                 return Vector2Int.zero;
 
             // Get socket world position
@@ -766,10 +767,11 @@ namespace WaterTown.Platforms
             // We use 0.5m offset to ensure we're clearly in the adjacent cell
             Vector3 adjacentWorldPos = socketWorldPos + worldOutward * 0.5f;
             
-            return grid.WorldToCell(adjacentWorldPos);
+            return _worldGrid.WorldToCell(adjacentWorldPos);
         }
 
 
+        // ReSharper disable Unity.PerformanceAnalysis
         ///
         /// Updates socket connection statuses based on adjacent grid cell occupancy
         /// Each socket checks its adjacent cell - if occupied, the socket becomes Connected
@@ -784,7 +786,7 @@ namespace WaterTown.Platforms
 
             var newConnectedSockets = new HashSet<int>();
             var newNeighbors = new HashSet<GamePlatform>();
-            var previousNeighbors = GetCurrentNeighbors(grid, cellToPlatform);
+            var previousNeighbors = GetCurrentNeighbors();
 
             for (int i = 0; i < sockets.Count; i++)
             {
@@ -795,12 +797,12 @@ namespace WaterTown.Platforms
                     continue;
 
                 // Get the adjacent cell for this socket
-                Vector2Int adjacentCell = GetAdjacentCellForSocket(i, grid);
+                Vector2Int neighborCell = GetAdjacentCellForSocket(i);
                 
                 // Check if the adjacent cell is occupied by another platform
-                if (cellToPlatform.TryGetValue(adjacentCell, out var neighborPlatform))
+                if (_platformManager.GetPlatformAtCell(neighborCell, out var neighborPlatform))
                 {
-                    if (neighborPlatform != null && neighborPlatform != this)
+                    if (neighborPlatform && neighborPlatform != this)
                     {
                         newConnectedSockets.Add(i);
                         newNeighbors.Add(neighborPlatform);
@@ -816,7 +818,7 @@ namespace WaterTown.Platforms
             }
             
             // Request NavMesh links for newly connected neighbors (only when placed, not preview)
-            if (!IsPickedUp && _platformManager != null)
+            if (!IsPickedUp && _platformManager)
             {
                 foreach (var neighbor in newNeighbors)
                 {
@@ -833,15 +835,15 @@ namespace WaterTown.Platforms
         ///
         /// Gets current neighbor platforms based on connected sockets
         ///
-        private HashSet<GamePlatform> GetCurrentNeighbors(WorldGrid grid, Dictionary<Vector2Int, GamePlatform> cellToPlatform)
+        private HashSet<GamePlatform> GetCurrentNeighbors()
         {
             var neighbors = new HashSet<GamePlatform>();
-            if (!grid || cellToPlatform == null) return neighbors;
 
             foreach (int socketIndex in _connectedSockets)
             {
-                Vector2Int adjacentCell = GetAdjacentCellForSocket(socketIndex, grid);
-                if (cellToPlatform.TryGetValue(adjacentCell, out var neighbor) && neighbor != null && neighbor != this)
+                Vector2Int adjacentCell = GetAdjacentCellForSocket(socketIndex);
+                if (_platformManager.GetPlatformAtCell(adjacentCell, out GamePlatform neighbor)
+                    && neighbor != null && neighbor != this)
                 {
                     neighbors.Add(neighbor);
                 }
@@ -867,7 +869,7 @@ namespace WaterTown.Platforms
             {
                 if (!_connectedSockets.Contains(i)) continue;
 
-                Vector2Int adjacentCell = GetAdjacentCellForSocket(i, grid);
+                Vector2Int adjacentCell = GetAdjacentCellForSocket(i);
                 if (cellToPlatform.TryGetValue(adjacentCell, out var occupant) && occupant == neighbor)
                 {
                     result.Add(i);
@@ -983,9 +985,8 @@ namespace WaterTown.Platforms
                     break;
                 }
             }
-            if (!pm) pm = moduleGo.GetComponent<PlatformModule>();
             
-            if (pm != null) pm.SetHidden(!visible);
+            if (pm) pm.SetHidden(!visible);
             else moduleGo.SetActive(visible);
         }
 
@@ -1069,6 +1070,10 @@ namespace WaterTown.Platforms
             _platformManager = platformManager;
         }
 
+        public void SetWorldGrid(WorldGrid worldGrid)
+        {
+            _worldGrid = worldGrid;
+        }
 
         private void OnEnable()
         {

@@ -1,9 +1,12 @@
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 using Grid;
 using Unity.AI.Navigation;
 using Unity.Entities.UniversalDelegates;
 using UnityEngine;
 using UnityEngine.Events;
+using UnityEngine.Serialization;
 using WaterTown.Platforms;
 
 
@@ -26,10 +29,10 @@ public class PlatformManager : MonoBehaviour
     [Header("Events")]
     
     [Tooltip("Invoked when a platform is successfully placed and registered.")]
-    public UnityEvent<GamePlatform> OnPlatformPlaced;
+    public UnityEvent<GamePlatform> PlatformPlaced;
     
-    [Tooltip("Invoked when a platform is removed/unregistered.")]
-    public UnityEvent<GamePlatform> OnPlatformRemoved;
+    [FormerlySerializedAs("OnPlatformRemoved")] [Tooltip("Invoked when a platform is removed/unregistered.")]
+    public UnityEvent<GamePlatform> PlatformRemoved;
     
     
     #endregion
@@ -142,7 +145,7 @@ public class PlatformManager : MonoBehaviour
                 platform.HasMoved -= OnPlatformHasMoved;
                 platform.Enabled -= OnPlatformEnabled;
                 platform.Disabled -= OnPlatformDisabled;
-                platform.Placed -= HandlePlatformPlaced;
+                platform.Placed -= OnPlatformPlaced;
                 platform.PickedUp -= OnPlatformPickedUp;
             }
         }
@@ -187,12 +190,13 @@ public class PlatformManager : MonoBehaviour
         
         // Inject PlatformManager dependency to avoid FindFirstObjectByType
         platform.SetPlatformManager(this);
+        platform.SetWorldGrid(_worldGrid);
         
         // Subscribe to all instance events for this platform
         platform.HasMoved += OnPlatformHasMoved;
         platform.Enabled += OnPlatformEnabled;
         platform.Disabled += OnPlatformDisabled;
-        platform.Placed += HandlePlatformPlaced;
+        platform.Placed += OnPlatformPlaced;
         platform.PickedUp += OnPlatformPickedUp;
         
         // Add to registry immediately
@@ -213,7 +217,7 @@ public class PlatformManager : MonoBehaviour
         platform.HasMoved -= OnPlatformHasMoved;
         platform.Enabled -= OnPlatformEnabled;
         platform.Disabled -= OnPlatformDisabled;
-        platform.Placed -= HandlePlatformPlaced;
+        platform.Placed -= OnPlatformPlaced;
         platform.PickedUp -= OnPlatformPickedUp;
         
         // Clean up platform data if it exists
@@ -253,7 +257,7 @@ public class PlatformManager : MonoBehaviour
     /// Registers platform in grid, triggers adjacency update, and rebuilds NavMesh
     /// NavMesh links are created automatically when platforms detect connections
     ///
-    private void HandlePlatformPlaced(GamePlatform platform)
+    private void OnPlatformPlaced(GamePlatform platform)
     {
         if (!platform) return;
         
@@ -351,21 +355,27 @@ public class PlatformManager : MonoBehaviour
     /// Get the platform occupying a specific cell, if any
     /// Returns null if cell is empty or out of bounds
     ///
-    public GamePlatform GetPlatformAtCell(Vector2Int cell)
+    public bool GetPlatformAtCell(Vector2Int cell, out GamePlatform platform)
     {
-        return _cellToPlatform.GetValueOrDefault(cell);
+        if (_cellToPlatform.TryGetValue(cell, out var owner))
+        {
+            platform = owner;
+            return true;
+        }
+
+        platform = null;
+        return false;
     }
     
-
     
     // Vector3Int Override
-    public GamePlatform GetPlatformAtCell(Vector3Int cell)
+    public bool GetPlatformAtCell(Vector3Int cell, out GamePlatform platform)
     {
-        return GetPlatformAtCell(new Vector2Int(cell.x, cell.y));
+        return GetPlatformAtCell(new Vector2Int(cell.x, cell.y), out platform);
     }
 
-
-
+    
+    
     /// Check if cell is occupied by any platform
     /// OPTIONAL BOOL: Include similar Flags other than Occupied (Preview)
     ///
@@ -377,8 +387,7 @@ public class PlatformManager : MonoBehaviour
                 :
                 _worldGrid.CellHasAnyFlag(cell, WorldGrid.CellFlag.Occupied);
     }
-
-
+    
 
     /// TRUE IF: All cells inside Area are FLAG Empty
     /// OccupyPreview -> considered free (allows placement over preview)
@@ -396,8 +405,8 @@ public class PlatformManager : MonoBehaviour
         }
         
         // Cells are sorted: first = min (bottom-left), last = max (top-right)
-        Vector2Int min = cells[0];
-        Vector2Int max = cells[cells.Count - 1];
+        Vector2Int min = cells.First();
+        Vector2Int max = cells.Last();
         
         // Use WorldGrid's optimized area check
         return _worldGrid.AreaIsEmpty(min, max);
@@ -460,7 +469,7 @@ public class PlatformManager : MonoBehaviour
         }
         
         // Invoke UnityEvent for platform placed
-        OnPlatformPlaced?.Invoke(platform);
+        PlatformPlaced?.Invoke(platform);
     }
 
 
@@ -494,7 +503,7 @@ public class PlatformManager : MonoBehaviour
             platform.ResetConnections();
 
         // Invoke UnityEvent for platform removed
-        OnPlatformRemoved?.Invoke(platform);
+        PlatformRemoved?.Invoke(platform);
 
         // Mark affected platforms (neighbors) for adjacency update
         MarkAdjacencyDirtyForPlatform(platform);
@@ -552,6 +561,7 @@ public class PlatformManager : MonoBehaviour
     /// Public method for GamePlatform to request NavMesh link creation
     /// Called by GamePlatform when it detects a new neighbor connection
     ///
+    [SuppressMessage("ReSharper", "Unity.PerformanceCriticalCodeInvocation")]
     public void RequestNavMeshLink(GamePlatform platformA, GamePlatform platformB)
     {
         if (!platformA || !platformB) return;
@@ -692,7 +702,7 @@ public class PlatformManager : MonoBehaviour
         
         return linksParent;
     }
-
+    
 
     ///
     /// Recomputes adjacency only for platforms marked as needing update
@@ -749,8 +759,6 @@ public class PlatformManager : MonoBehaviour
         // Use platform's world position to find center cell on the desired level
         Vector3 worldPosition = platform.transform.position;
         var centerCell = _worldGrid.WorldToCell(worldPosition);
-        int centerX = centerCell.x;
-        int centerY = centerCell.y;
 
         int footprintWidth = Mathf.Max(1, platform.Footprint.x);
         int footprintHeight = Mathf.Max(1, platform.Footprint.y);
@@ -763,8 +771,8 @@ public class PlatformManager : MonoBehaviour
         int rotatedWidth = isRotated90Or270 ? footprintHeight : footprintWidth; // width in cells after rotation
         int rotatedHeight = isRotated90Or270 ? footprintWidth : footprintHeight; // height in cells after rotation
 
-        int startX = centerX - rotatedWidth / 2;
-        int startY = centerY - rotatedHeight / 2;
+        int startX = centerCell.x - rotatedWidth / 2;
+        int startY = centerCell.y - rotatedHeight / 2;
 
         // Add cells in sorted order: left-to-right, bottom-to-top
         // This ensures first element = min, last element = max
