@@ -121,7 +121,7 @@ public class TownManager : MonoBehaviour
     ///
     public bool IsAreaFree(List<Vector2Int> cells)
     {
-        return _platformManager.IsAreaFree(cells);
+        return _platformManager.IsAreaEmpty(cells);
     }
 
 

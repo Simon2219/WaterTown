@@ -655,7 +655,6 @@ namespace Grid
 
         
         /// True if area is completely free (no Occupied flags)
-        /// Used for platform placement validation
         public bool AreaIsEmpty(Vector2Int a, Vector2Int b)
         {
             ClampAreaInclusive(a, b, out var min, out var max);

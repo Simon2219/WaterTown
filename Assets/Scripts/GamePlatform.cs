@@ -1230,7 +1230,7 @@ namespace WaterTown.Platforms
             if (cells.Count == 0) return false;
             
             // Check if area is free (OccupyPreview doesn't block, only Occupied does)
-            return _platformManager.IsAreaFree(cells);
+            return _platformManager.IsAreaEmpty(cells);
         }
         
         #endregion
