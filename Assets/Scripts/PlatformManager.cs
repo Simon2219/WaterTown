@@ -623,8 +623,16 @@ public class PlatformManager : MonoBehaviour
         if (!platformA || !platformB) return;
         
         // Get Links parent (created during platform initialization)
-        var parent = GetLinksParent(platformA);
-        if (!parent) return; // Safety check
+        Transform parent;
+        try
+        {
+            parent = GetLinksParent(platformA);
+        }
+        catch (MissingReferenceException e)
+        {
+            Debug.LogError(e.Message, platformA);
+            return;
+        }
         
         var go = new GameObject($"Link_{platformA.name}_to_{platformB.name}");
         go.transform.SetParent(parent, false);
@@ -648,18 +656,17 @@ public class PlatformManager : MonoBehaviour
     ///
     /// Gets the Links parent transform from the platform
     /// Links parent is created during platform initialization, so it should always exist
+    /// Throws MissingReferenceException if Links parent is not found
     ///
     private static Transform GetLinksParent(GamePlatform platform)
     {
-        if (!platform) return null;
+        if (!platform)
+            throw ErrorHandler.MissingDependency("GamePlatform", null);
         
         var linksParent = platform.LinksParentTransform;
         
         if (!linksParent)
-        {
-            Debug.LogError($"[PlatformManager] Links parent not found on platform '{platform.name}'. " +
-                           "This should not happen - Links parent is created during platform initialization.", platform);
-        }
+            throw ErrorHandler.MissingDependency($"Links parent on platform '{platform.name}'", platform);
         
         return linksParent;
     }
