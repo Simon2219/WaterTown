@@ -40,13 +40,13 @@ namespace Editor
         [SerializeField] private RailForwardAxis _railForwardAxis = RailForwardAxis.PlusZ;
 
         // ---- Platform Gizmos UI state ----
-        private bool _gizmosVisible = GamePlatform.GizmoSettings.ShowGizmos;
-        private bool _gizmosShowIndices = GamePlatform.GizmoSettings.ShowIndices;
-        private float _gizmoSphereRadius = GamePlatform.GizmoSettings.SocketSphereRadius;
-        private Color _colFree = GamePlatform.GizmoSettings.ColorFree;
-        private Color _colOccupied = GamePlatform.GizmoSettings.ColorOccupied;
-        private Color _colLocked = GamePlatform.GizmoSettings.ColorLocked;
-        private Color _colDisabled = GamePlatform.GizmoSettings.ColorDisabled;
+        private bool _gizmosVisible = PlatformEditorUtility.GizmoSettings.ShowGizmos;
+        private bool _gizmosShowIndices = PlatformEditorUtility.GizmoSettings.ShowIndices;
+        private float _gizmoSphereRadius = PlatformEditorUtility.GizmoSettings.SocketSphereRadius;
+        private Color _colFree = PlatformEditorUtility.GizmoSettings.ColorFree;
+        private Color _colOccupied = PlatformEditorUtility.GizmoSettings.ColorOccupied;
+        private Color _colLocked = PlatformEditorUtility.GizmoSettings.ColorLocked;
+        private Color _colDisabled = PlatformEditorUtility.GizmoSettings.ColorDisabled;
 
         // ---- Foldouts & scroll ----
         private bool _foldPlatformTools = true;
@@ -193,10 +193,10 @@ namespace Editor
                         {
                             if (GUILayout.Button("Apply Gizmo Settings"))
                             {
-                                GamePlatform.GizmoSettings.SetVisibility(_gizmosVisible);
-                                GamePlatform.GizmoSettings.SetShowIndices(_gizmosShowIndices);
-                                GamePlatform.GizmoSettings.SocketSphereRadius = _gizmoSphereRadius;
-                                GamePlatform.GizmoSettings.SetColors(_colFree, _colOccupied, _colLocked, _colDisabled);
+                                PlatformEditorUtility.GizmoSettings.SetVisibility(_gizmosVisible);
+                                PlatformEditorUtility.GizmoSettings.SetShowIndices(_gizmosShowIndices);
+                                PlatformEditorUtility.GizmoSettings.SocketSphereRadius = _gizmoSphereRadius;
+                                PlatformEditorUtility.GizmoSettings.SetColors(_colFree, _colOccupied, _colLocked, _colDisabled);
                                 SceneView.RepaintAll();
                             }
 
@@ -210,10 +210,10 @@ namespace Editor
                                 _colLocked = new Color(0.95f, 0.25f, 0.25f, 0.90f);
                                 _colDisabled = new Color(0.60f, 0.60f, 0.60f, 0.90f);
 
-                                GamePlatform.GizmoSettings.SetVisibility(_gizmosVisible);
-                                GamePlatform.GizmoSettings.SetShowIndices(_gizmosShowIndices);
-                                GamePlatform.GizmoSettings.SocketSphereRadius = _gizmoSphereRadius;
-                                GamePlatform.GizmoSettings.SetColors(_colFree, _colOccupied, _colLocked, _colDisabled);
+                                PlatformEditorUtility.GizmoSettings.SetVisibility(_gizmosVisible);
+                                PlatformEditorUtility.GizmoSettings.SetShowIndices(_gizmosShowIndices);
+                                PlatformEditorUtility.GizmoSettings.SocketSphereRadius = _gizmoSphereRadius;
+                                PlatformEditorUtility.GizmoSettings.SetColors(_colFree, _colOccupied, _colLocked, _colDisabled);
                                 SceneView.RepaintAll();
                             }
                         }

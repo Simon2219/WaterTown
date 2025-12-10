@@ -3,7 +3,6 @@ using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using Grid;
 using Unity.AI.Navigation;
-using Unity.Entities.UniversalDelegates;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.Serialization;
@@ -188,9 +187,12 @@ public class PlatformManager : MonoBehaviour
     {
         if (!platform) return;
         
-        // Inject PlatformManager dependency to avoid FindFirstObjectByType
+        // Inject dependencies
         platform.SetPlatformManager(this);
         platform.SetWorldGrid(_worldGrid);
+        
+        // Initialize sub-components AFTER dependencies are set
+        platform.InitializeSubComponents();
         
         // Subscribe to all instance events for this platform
         platform.HasMoved += OnPlatformHasMoved;
