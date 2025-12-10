@@ -476,13 +476,18 @@ public class PlatformManager : MonoBehaviour
         if (!_registeredPlatforms.Contains(platform)) return;
 
         // Clear cells from WorldGrid and reverse lookup
-        if (platform.occupiedCells != null)
+        if (platform.occupiedCells != null && platform.occupiedCells.Count > 0)
         {
+            // Use area method for WorldGrid (cells are sorted: first = min, last = max)
+            Vector2Int min = platform.occupiedCells.First();
+            Vector2Int max = platform.occupiedCells.Last();
+            _worldGrid.SetFlagsInAreaExact(min, max, WorldGrid.CellFlag.Empty);
+            
+            // Remove from reverse lookup using GetPlatformAtCell for ownership check
             foreach (Vector2Int cell in platform.occupiedCells)
             {
-                if (_cellToPlatform.TryGetValue(cell, out var owner) && owner == platform)
+                if (GetPlatformAtCell(cell, out var owner) && owner == platform)
                 {
-                    _worldGrid.TrySetCellFlag(cell, WorldGrid.CellFlag.Empty);
                     _cellToPlatform.Remove(cell);
                 }
             }
