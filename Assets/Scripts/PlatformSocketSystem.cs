@@ -18,11 +18,19 @@ namespace WaterTown.Platforms
         public event Action SocketsChanged;
         
         /// Fired when a new neighbor platform is detected (for NavMesh link creation)
-        public event Action<GamePlatform, GamePlatform> NewNeighborDetected;
+        public event Action<GamePlatform> NewNeighborDetected;
         
         #endregion
         
+        #region Dependencies
         
+        
+        private GamePlatform _platform;
+        private PlatformManager _platformManager;
+        private WorldGrid _worldGrid;
+        
+        
+        #endregion
         
         
         #region Enums & Data Structures
@@ -82,19 +90,6 @@ namespace WaterTown.Platforms
             public int[] socketIndices;
             public bool blocksLink;
         }
-        
-        
-        #endregion
-        
-        
-        
-        
-        #region Dependencies
-        
-        
-        private GamePlatform _platform;
-        private PlatformManager _platformManager;
-        private WorldGrid _worldGrid;
         
         
         #endregion
@@ -162,23 +157,14 @@ namespace WaterTown.Platforms
         /// Called by GamePlatform to inject dependencies
         public void SetDependencies(GamePlatform platform, PlatformManager platformManager, WorldGrid worldGrid)
         {
-            // Unsubscribe from old platform if switching
-            if (_platform != null && _platform != platform)
-            {
-                _platform.HasMoved -= OnPlatformMoved;
-            }
-            
             _platform = platform;
             _platformManager = platformManager;
             _worldGrid = worldGrid;
             
             // Subscribe to platform movement (only if not already subscribed)
-            if (_platform != null)
-            {
-                // Remove first to avoid double subscription
-                _platform.HasMoved -= OnPlatformMoved;
-                _platform.HasMoved += OnPlatformMoved;
-            }
+            // Remove first to avoid double subscription
+            _platform.HasMoved -= OnPlatformMoved;
+            _platform.HasMoved += OnPlatformMoved;
         }
         
         
@@ -521,9 +507,6 @@ namespace WaterTown.Platforms
         /// Updates socket connection statuses based on adjacent grid cell occupancy
         public void UpdateSocketStatusesFromGrid()
         {
-            if (!_socketsBuilt) BuildSockets();
-            if (!_worldGrid || !_platformManager || !_platform) return;
-
             var newConnectedSockets = new HashSet<int>();
             var newNeighbors = new HashSet<GamePlatform>();
             var previousNeighbors = GetCurrentNeighbors();
@@ -554,13 +537,13 @@ namespace WaterTown.Platforms
             }
             
             // Notify about new neighbors (for NavMesh link creation)
-            if (!_platform.IsPickedUp && _platformManager)
+            if (!_platform.IsPickedUp)
             {
                 foreach (var neighbor in newNeighbors)
                 {
                     if (!previousNeighbors.Contains(neighbor))
                     {
-                        NewNeighborDetected?.Invoke(_platform, neighbor);
+                        NewNeighborDetected?.Invoke(neighbor);
                     }
                 }
             }
@@ -577,7 +560,7 @@ namespace WaterTown.Platforms
             {
                 Vector2Int adjacentCell = GetAdjacentCellForSocket(socketIndex);
                 if (_platformManager.GetPlatformAtCell(adjacentCell, out GamePlatform neighbor)
-                    && neighbor != null && neighbor != _platform)
+                    && neighbor && neighbor != _platform)
                 {
                     neighbors.Add(neighbor);
                 }
@@ -590,8 +573,6 @@ namespace WaterTown.Platforms
         public List<int> GetSocketsConnectedToNeighbor(GamePlatform neighbor)
         {
             var result = new List<int>();
-            if (!_socketsBuilt) BuildSockets();
-            if (!neighbor || !_platformManager) return result;
 
             for (int i = 0; i < sockets.Count; i++)
             {

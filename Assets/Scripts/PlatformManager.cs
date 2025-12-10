@@ -80,7 +80,7 @@ public class PlatformManager : MonoBehaviour
     
 
     
-    ///
+
     /// Finds and validates all required dependencies
     /// Throws InvalidOperationException if any critical dependency is missing
     /// Note: WorldGrid should be injected via SetWorldGrid before Start
@@ -99,6 +99,8 @@ public class PlatformManager : MonoBehaviour
         }
     }
     
+    
+    
     /// Dependency injection method for WorldGrid (avoids FindFirstObjectByType)
     public void SetWorldGrid(WorldGrid worldGrid)
     {
@@ -106,6 +108,7 @@ public class PlatformManager : MonoBehaviour
     }
 
 
+    
     private void OnEnable()
     {
         // Subscribe to static platform creation/destruction events (for discovery and cleanup)
@@ -113,12 +116,14 @@ public class PlatformManager : MonoBehaviour
         GamePlatform.Destroyed += OnPlatformDestroyed;
     }
 
+    
 
     private void Start()
     {
         SpawnStartupPlatforms();
     }
 
+    
 
     private void LateUpdate()
     {
@@ -130,6 +135,7 @@ public class PlatformManager : MonoBehaviour
     }
 
 
+    
     private void OnDisable()
     {
         // Unsubscribe from static platform creation/destruction events
@@ -304,14 +310,18 @@ public class PlatformManager : MonoBehaviour
         // Store current cells as previous for the next update
         platform.previousOccupiedCells.Clear();
         platform.previousOccupiedCells.AddRange(platform.occupiedCells);
-
+        
+        // Use area method for WorldGrid (cells are sorted: first = min, last = max)
+        Vector2Int min = platform.occupiedCells.First();
+        Vector2Int max = platform.occupiedCells.Last();
+        _worldGrid.SetFlagsInAreaExact(min, max, WorldGrid.CellFlag.Empty);
+        
         // Clear old preview/occupied flags for this platform's old cells
         foreach (Vector2Int cell in platform.occupiedCells)
         {
             // Only clear if this platform owns the cell
             if (_cellToPlatform.TryGetValue(cell, out var owner) && owner == platform)
             {
-                _worldGrid.TrySetCellFlag(cell, WorldGrid.CellFlag.Empty);
                 _cellToPlatform.Remove(cell);
             }
         }
@@ -476,7 +486,7 @@ public class PlatformManager : MonoBehaviour
         if (!_registeredPlatforms.Contains(platform)) return;
 
         // Clear cells from WorldGrid and reverse lookup
-        if (platform.occupiedCells != null && platform.occupiedCells.Count > 0)
+        if (platform.occupiedCells is { Count: > 0 })
         {
             // Use area method for WorldGrid (cells are sorted: first = min, last = max)
             Vector2Int min = platform.occupiedCells.First();
@@ -529,7 +539,7 @@ public class PlatformManager : MonoBehaviour
         if (platform.occupiedCells != null)
             allCellsToCheck.AddRange(platform.occupiedCells);
         
-        if (platform.previousOccupiedCells != null && platform.previousOccupiedCells.Count > 0)
+        if (platform.previousOccupiedCells is {Count: > 0})
         {
             foreach (var cell in platform.previousOccupiedCells)
             {

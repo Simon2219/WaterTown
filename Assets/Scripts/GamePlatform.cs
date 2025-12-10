@@ -358,10 +358,10 @@ namespace WaterTown.Platforms
         }
 
 
-        private void OnNewNeighborDetected(GamePlatform platform, GamePlatform neighbor)
+        private void OnNewNeighborDetected(GamePlatform neighbor)
         {
             // Request NavMesh link creation from PlatformManager
-            _platformManager?.RequestNavMeshLink(platform, neighbor);
+            _platformManager?.RequestNavMeshLink(this, neighbor);
         }
 
 

@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using Grid;
 using UnityEngine;
@@ -8,7 +7,7 @@ using WaterTown.Platforms;
 
 ///
 /// High-level town orchestration manager
-/// Coordinates specialized subsystems (PlatformManager, etc) and provides
+/// Coordinates specialized subsystems (PlatformManager, etc.) and provides
 /// designer-facing events and feedback
 ///
 [DisallowMultipleComponent]

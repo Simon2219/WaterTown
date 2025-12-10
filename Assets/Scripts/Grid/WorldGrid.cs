@@ -1,7 +1,6 @@
-// Assets/Scripts/Grid/WorldGrid.cs
 using System;
 using System.Collections.Generic;
-using Unity.Entities.UniversalDelegates;
+using System.Diagnostics.CodeAnalysis;
 using UnityEngine;
 
 namespace Grid
@@ -114,6 +113,7 @@ namespace Grid
 
         /// Validates grid configuration values.
         /// Throws InvalidOperationException if configuration is invalid.
+        [SuppressMessage("ReSharper", "ConditionIsAlwaysTrueOrFalse")]
         private void ValidateConfiguration()
         {
             if (sizeX < 1 || sizeY < 1 || levels < 1)
@@ -124,13 +124,13 @@ namespace Grid
                 );
             }
             
-            if (CellSize < 1)
+            /*if (CellSize < 1)
             {
                 throw ErrorHandler.InvalidConfiguration(
                     $"Cell size must be at least 1 (current: {CellSize})", 
                     this
                 );
-            }
+            }*/
         }
         
         private void AllocateIfNeeded()
@@ -227,8 +227,8 @@ namespace Grid
         public Vector2Int WorldToCell(Vector3 worldPos)
         {
             var local = worldPos - worldOrigin;
-            int x = Mathf.FloorToInt(local.x / (float)CellSize);
-            int y = Mathf.FloorToInt(local.z / (float)CellSize);
+            int x = Mathf.FloorToInt(local.x / CellSize);
+            int y = Mathf.FloorToInt(local.z / CellSize);
             return new Vector2Int(x, y);
         }
         
@@ -359,8 +359,8 @@ namespace Grid
             float z0 = worldOrigin.z + cell.y * (float)CellSize;
             
             uv01 = new Vector2(
-                Mathf.Clamp01((worldPos.x - x0) / (float)CellSize),
-                Mathf.Clamp01((worldPos.z - z0) / (float)CellSize)
+                Mathf.Clamp01((worldPos.x - x0) / CellSize),
+                Mathf.Clamp01((worldPos.z - z0) / CellSize)
             );
             return true;
         }
