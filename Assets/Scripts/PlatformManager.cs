@@ -179,7 +179,6 @@ public class PlatformManager : MonoBehaviour
     
     
     
-    ///
     /// Event handler for static Created event
     /// Subscribes to all instance events for this platform and injects dependencies
     ///
@@ -192,7 +191,7 @@ public class PlatformManager : MonoBehaviour
         platform.SetWorldGrid(_worldGrid);
         
         // Initialize sub-components AFTER dependencies are set
-        platform.InitializeSubComponents();
+        platform.InitializePlatform();
         
         // Subscribe to all instance events for this platform
         platform.HasMoved += OnPlatformHasMoved;
@@ -207,7 +206,6 @@ public class PlatformManager : MonoBehaviour
 
 
     
-    ///
     /// Event handler for static Destroyed event
     /// Unsubscribes from all instance events and cleans up
     ///
@@ -222,16 +220,11 @@ public class PlatformManager : MonoBehaviour
         platform.Placed -= OnPlatformPlaced;
         platform.PickedUp -= OnPlatformPickedUp;
         
-        // Clean up platform data if it exists
-        if (_registeredPlatforms.Contains(platform))
-        {
-            UnregisterPlatform(platform);
-        }
+        UnregisterPlatform(platform);
     }
 
     
-
-    ///
+    
     /// Instance event handler when a platform becomes enabled
     /// No additional action needed (platform already in registry from Created event)
     ///
@@ -243,18 +236,16 @@ public class PlatformManager : MonoBehaviour
 
 
     
-    ///
     /// Instance event handler when a platform becomes disabled
     /// Removes the platform from the grid
     ///
     private void OnPlatformDisabled(GamePlatform platform)
     {
-        if (!platform) return;
         UnregisterPlatform(platform);
     }
 
 
-    ///
+
     /// Event handler called when ANY platform is placed
     /// Registers platform in grid, triggers adjacency update, and rebuilds NavMesh
     /// NavMesh links are created automatically when platforms detect connections
@@ -274,7 +265,7 @@ public class PlatformManager : MonoBehaviour
     }
 
 
-    ///
+ 
     /// Event handler called when ANY platform is picked up
     /// Clears Occupied flags and cell ownership, marks adjacency dirty
     ///
@@ -304,7 +295,7 @@ public class PlatformManager : MonoBehaviour
 
 
     
-    ///
+
     /// Called when a platform reports its transform changed
     /// Lightweight update for runtime platform movement
     ///
@@ -474,8 +465,8 @@ public class PlatformManager : MonoBehaviour
         PlatformPlaced?.Invoke(platform);
     }
 
-
-    ///
+    
+    
     /// Removes platform occupancy from the grid and clears its connections
     /// Does NOT unsubscribe from events (handled by OnPlatformDestroyed)
     ///
@@ -692,10 +683,10 @@ public class PlatformManager : MonoBehaviour
     /// Links parent is created during platform initialization, so it should always exist
     /// Throws MissingReferenceException if Links parent is not found
     ///
-    private static Transform GetLinksParent(GamePlatform platform)
+    private Transform GetLinksParent(GamePlatform platform)
     {
         if (!platform)
-            throw ErrorHandler.MissingDependency("GamePlatform", null);
+            throw ErrorHandler.MissingDependency("GamePlatform", this);
         
         var linksParent = platform.LinksParentTransform;
         

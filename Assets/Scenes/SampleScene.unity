@@ -1104,10 +1104,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::WaterTown.Town.PlatformManager
   navLinkWidth: 0.6
-  OnPlatformPlaced:
+  PlatformPlaced:
     m_PersistentCalls:
       m_Calls: []
-  OnPlatformRemoved:
+  PlatformRemoved:
     m_PersistentCalls:
       m_Calls: []
 --- !u!114 &522639835

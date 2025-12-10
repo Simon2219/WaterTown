@@ -53,7 +53,6 @@ namespace WaterTown.Platforms
         
         
         
-        
         #region Dependencies
         
         
@@ -65,7 +64,6 @@ namespace WaterTown.Platforms
         
         
         
-        
         #region Sub-Components
         
         
@@ -73,11 +71,9 @@ namespace WaterTown.Platforms
         private PlatformRailingSystem _railingSystem;
         private PlatformPickupHandler _pickupHandler;
         private PlatformEditorUtility _editorUtility;
-        private NavMeshSurface _navSurface;
         
         
         #endregion
-        
         
         
         
@@ -92,7 +88,6 @@ namespace WaterTown.Platforms
         
         
         
-        
         #region Footprint & NavMesh
         
         
@@ -101,56 +96,56 @@ namespace WaterTown.Platforms
         [SerializeField] private Vector2Int footprintSize = new Vector2Int(4, 4);
         public Vector2Int Footprint => footprintSize;
         
-        // Cached transform for "Links" GameObject
-        private Transform _linksParentTransform;
-
+        
         [Header("NavMesh Rebuild")]
         [SerializeField]
         [Tooltip("Delay before rebuilding this platform's NavMesh after changes.")]
         private float rebuildDebounceSeconds = 0.1f;
 
+        
+        // Cached transform for "Links" GameObject
+        private Transform _linksParentTransform;
+        public Transform LinksParentTransform => _linksParentTransform;
+        
+        private NavMeshSurface _navSurface;
+        public NavMeshSurface NavSurface => _navSurface;
+        
+        
         private Coroutine _pendingRebuild;
         
         private Vector3 _lastPos;
         private Quaternion _lastRot;
         private Vector3 _lastScale;
 
-        internal NavMeshSurface NavSurface => _navSurface;
-        
-        /// Cached Links parent transform (created during initialization)
-        internal Transform LinksParentTransform => _linksParentTransform;
         
         
         #endregion
-        
         
         
         
         #region Cached Child Components
         
         
-        private readonly List<PlatformModule> _cachedModules = new List<PlatformModule>();
-        private readonly List<PlatformRailing> _cachedRailings = new List<PlatformRailing>();
-        private readonly List<Collider> _cachedColliders = new List<Collider>();
-        private bool _childComponentsCached = false;
+        private readonly List<PlatformModule> _cachedModules = new();
+        private readonly List<PlatformRailing> _cachedRailings = new();
+        private readonly List<Collider> _cachedColliders = new();
         
         
         #endregion
         
         
         
-        
-        #region IPickupable Facade
+        #region IPickupable Implementation
         
         
         /// Delegate to pickup handler
         public bool IsPickedUp
         {
-            get => _pickupHandler != null && _pickupHandler.IsPickedUp;
+            get => _pickupHandler is { IsPickedUp: true };
             set { if (_pickupHandler != null) _pickupHandler.IsPickedUp = value; }
         }
         
-        public bool CanBePlaced => _pickupHandler != null && _pickupHandler.CanBePlaced;
+        public bool CanBePlaced => _pickupHandler is { CanBePlaced: true };
         public Transform Transform => transform;
         public GameObject GameObject => gameObject;
         
@@ -164,33 +159,29 @@ namespace WaterTown.Platforms
         
         
         
-        
         #region Unity Lifecycle
         
         
         private void Awake()
         {
-            // Get required components
-            _navSurface = GetComponent<NavMeshSurface>();
-            _socketSystem = GetComponent<PlatformSocketSystem>();
-            _railingSystem = GetComponent<PlatformRailingSystem>();
-            _pickupHandler = GetComponent<PlatformPickupHandler>();
-            _editorUtility = GetComponent<PlatformEditorUtility>();
+            if(!TryGetComponent(out _navSurface))
+                throw ErrorHandler.MissingDependency($"[GamePlatform] NavMesh Surface '{nameof(NavMeshSurface)}' not found.", this);
             
-            if (!_navSurface)
-            {
-                ErrorHandler.LogAndDisable(new Exception($"Required dependency '{typeof(NavMeshSurface).Name}' not found."), this);
-                return;
-            }
+            if(!TryGetComponent(out _socketSystem))
+                throw ErrorHandler.MissingDependency($"[GamePlatform] Socket System '{nameof(PlatformSocketSystem)}' not found.", this);
+
+            if(!TryGetComponent(out _railingSystem))
+                throw ErrorHandler.MissingDependency($"[GamePlatform] Railing System '{nameof(PlatformRailingSystem)}' not found.", this);
+
+            if(!TryGetComponent(out _pickupHandler))
+                throw ErrorHandler.MissingDependency($"[GamePlatform] Pickup Handler '{nameof(PlatformPickupHandler)}' not found.", this);
+
+            if(!TryGetComponent(out _editorUtility))
+                throw ErrorHandler.MissingDependency($"[GamePlatform] Editor Utility '{nameof(PlatformEditorUtility)}' not found.", this);
+
             
             // Fire static creation event for managers to subscribe
             Created?.Invoke(this);
-            
-            // Cache all child components at initialization
-            CacheChildComponents();
-            
-            // Initialize platform
-            InitializePlatform();
         }
 
 
@@ -256,12 +247,33 @@ namespace WaterTown.Platforms
         }
         
         
+        
+
+
+        public void InitializePlatform()
+        {
+            // Cache all child components at initialization
+            CacheChildComponents();
+            
+            // Initialize Sub Systems
+            InitializeSubComponents();
+            
+            // Ensure Links parent exists for NavMesh links
+            EnsureLinksParentExists();
+            
+            
+            // Pass cached data to sub-components
+            _socketSystem?.SetCachedModules(_cachedModules);
+            _railingSystem?.SetCachedRailings(_cachedRailings);
+            _pickupHandler?.SetCachedColliders(_cachedColliders);
+        }
+        
+        
+        
         /// Called after all dependencies are set to initialize sub-components
         /// This ensures proper initialization order
-        public void InitializeSubComponents()
+        private void InitializeSubComponents()
         {
-            if (_platformManager == null || _worldGrid == null) return;
-            
             // Initialize sub-components with dependencies
             _socketSystem?.SetDependencies(this, _platformManager, _worldGrid);
             _pickupHandler?.SetDependencies(this, _platformManager);
@@ -277,60 +289,26 @@ namespace WaterTown.Platforms
             _railingSystem?.EnsureChildrenRailingsRegistered();
             _socketSystem?.RefreshSocketStatuses();
         }
-
-
-        private void InitializePlatform()
-        {
-            // Ensure Links parent exists for NavMesh links
-            EnsureLinksParentExists();
-            
-            // Pass cached data to sub-components
-            _socketSystem?.SetCachedModules(_cachedModules);
-            _railingSystem?.SetCachedRailings(_cachedRailings);
-            _pickupHandler?.SetCachedColliders(_cachedColliders);
-            
-            // Note: Full sub-component initialization happens in InitializeSubComponents()
-            // which is called by PlatformManager after dependencies are set
-        }
         
         
-        private bool _eventsSubscribed = false;
         
         private void SubscribeToSubComponentEvents()
         {
-            if (_eventsSubscribed) return;
-            _eventsSubscribed = true;
+            _socketSystem.SocketsChanged += OnSocketsChanged;
+            _socketSystem.NewNeighborDetected += OnNewNeighborDetected;
             
-            if (_socketSystem != null)
-            {
-                _socketSystem.SocketsChanged += OnSocketsChanged;
-                _socketSystem.NewNeighborDetected += OnNewNeighborDetected;
-            }
-            
-            if (_pickupHandler != null)
-            {
-                _pickupHandler.Placed += OnPickupHandlerPlaced;
-                _pickupHandler.PickedUp += OnPickupHandlerPickedUp;
-            }
+            _pickupHandler.Placed += OnPickupHandlerPlaced;
+            _pickupHandler.PickedUp += OnPickupHandlerPickedUp;
         }
         
         
         private void UnsubscribeFromSubComponentEvents()
         {
-            if (!_eventsSubscribed) return;
-            _eventsSubscribed = false;
+            _socketSystem.SocketsChanged -= OnSocketsChanged;
+            _socketSystem.NewNeighborDetected -= OnNewNeighborDetected;
             
-            if (_socketSystem != null)
-            {
-                _socketSystem.SocketsChanged -= OnSocketsChanged;
-                _socketSystem.NewNeighborDetected -= OnNewNeighborDetected;
-            }
-            
-            if (_pickupHandler != null)
-            {
-                _pickupHandler.Placed -= OnPickupHandlerPlaced;
-                _pickupHandler.PickedUp -= OnPickupHandlerPickedUp;
-            }
+            _pickupHandler.Placed -= OnPickupHandlerPlaced;
+            _pickupHandler.PickedUp -= OnPickupHandlerPickedUp;
         }
 
 
@@ -354,8 +332,6 @@ namespace WaterTown.Platforms
 
         private void CacheChildComponents()
         {
-            if (_childComponentsCached) return;
-            
             _cachedModules.Clear();
             _cachedRailings.Clear();
             _cachedColliders.Clear();
@@ -363,13 +339,10 @@ namespace WaterTown.Platforms
             _cachedModules.AddRange(GetComponentsInChildren<PlatformModule>(true));
             _cachedRailings.AddRange(GetComponentsInChildren<PlatformRailing>(true));
             _cachedColliders.AddRange(GetComponentsInChildren<Collider>(true));
-            
-            _childComponentsCached = true;
         }
         
         
         #endregion
-        
         
         
         
@@ -408,8 +381,7 @@ namespace WaterTown.Platforms
         
         
         
-        
-        #region Socket Facade Methods & Type Aliases
+        #region Socket Interface Methods & Type Aliases
         
         
         // Type aliases for external compatibility - maps to PlatformSocketSystem enums
@@ -509,8 +481,7 @@ namespace WaterTown.Platforms
         
         
         
-        
-        #region Module Facade Methods
+        #region Module Interface Methods
         
         
         public void RegisterModuleOnSockets(GameObject moduleGo, bool occupiesSockets, IEnumerable<int> socketIndices) 
@@ -533,8 +504,7 @@ namespace WaterTown.Platforms
         
         
         
-        
-        #region Railing Facade Methods
+        #region Railing Interface Methods
         
         
         public void RegisterRailing(PlatformRailing railing) 
@@ -561,8 +531,7 @@ namespace WaterTown.Platforms
         
         
         
-        
-        #region NavMesh Methods
+        #region NavMesh Interface Methods
         
         
         public void BuildLocalNavMesh()
@@ -595,7 +564,6 @@ namespace WaterTown.Platforms
         
         
         
-        
         #region Utility Methods
         
         
@@ -615,9 +583,5 @@ namespace WaterTown.Platforms
         
         
         #endregion
-        
-        
-        
-        
     }
 }

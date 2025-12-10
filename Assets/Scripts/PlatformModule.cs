@@ -221,7 +221,7 @@ namespace WaterTown.Platforms
             for (int socketIndex = 0; socketIndex < sockets.Count; socketIndex++)
             {
                 var socket = sockets[socketIndex];
-                if (socket.Location != GamePlatform.SocketLocation.Corner) continue;
+                if (socket.Location != PlatformSocketSystem.SocketLocation.Corner) continue;
                 float distance = Vector3.Distance(moduleWorldPosition, platform.GetSocketWorldPosition(socketIndex));
                 if (distance < bestDistance) 
                 { 
