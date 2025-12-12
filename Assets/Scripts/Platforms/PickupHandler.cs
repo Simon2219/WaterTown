@@ -27,6 +27,7 @@ namespace Platforms
         
         
         
+        
         #region Dependencies
         
         
@@ -70,10 +71,15 @@ namespace Platforms
         [SerializeField] private Material pickupInvalidMaterial;
         
         // Auto-generated materials for testing
-        private static Material _autoValidMaterial;
-        private static Material _autoInvalidMaterial;
-        
-        
+        private static readonly int BaseColor = Shader.PropertyToID("_BaseColor");
+        private static readonly int Color1 = Shader.PropertyToID("_Color");
+        private static readonly int Surface = Shader.PropertyToID("_Surface");
+        private static readonly int Blend = Shader.PropertyToID("_Blend");
+        private static readonly int AlphaClip = Shader.PropertyToID("_AlphaClip");
+        private static readonly int SrcBlend = Shader.PropertyToID("_SrcBlend");
+        private static readonly int DstBlend = Shader.PropertyToID("_DstBlend");
+        private static readonly int ZWrite = Shader.PropertyToID("_ZWrite");
+
         #endregion
         
         
@@ -223,22 +229,19 @@ namespace Platforms
         public void UpdateValidityVisuals()
         {
             bool isValid = CanBePlaced;
-            Material targetMaterial = isValid 
-                ? (pickupValidMaterial ? pickupValidMaterial : GetAutoValidMaterial())
-                : (pickupInvalidMaterial ? pickupInvalidMaterial : GetAutoInvalidMaterial());
+            Material previewMaterial = isValid 
+                ? (pickupValidMaterial ? pickupValidMaterial : GetAutoMaterial(isValid: true))
+                : (pickupInvalidMaterial ? pickupInvalidMaterial : GetAutoMaterial(isValid: false));
             
-            if (targetMaterial)
+
+            foreach (var modelRenderer in _allRenderers)
             {
-                foreach (var renderer in _allRenderers)
-                {
-                    if (renderer)
-                    {
-                        var materials = renderer.sharedMaterials;
-                        for (int i = 0; i < materials.Length; i++)
-                            materials[i] = targetMaterial;
-                        renderer.sharedMaterials = materials;
-                    }
-                }
+                Material[] materials = modelRenderer.sharedMaterials;
+                
+                for (int i = 0; i < materials.Length; i++)
+                    materials[i] = previewMaterial;
+                
+                modelRenderer.sharedMaterials = materials;
             }
         }
         
@@ -277,72 +280,59 @@ namespace Platforms
         {
             if (_originalMaterials is { Length: > 0 })
             {
-                foreach (var renderer in _allRenderers)
+                foreach (var modelRenderer in _allRenderers)
                 {
-                    if (renderer)
-                        renderer.sharedMaterials = _originalMaterials;
+                    if (modelRenderer)
+                        modelRenderer.sharedMaterials = _originalMaterials;
                 }
             }
         }
 
 
-        /// Creates or returns the auto-generated green translucent material for valid placement
-        private static Material GetAutoValidMaterial()
+        private static Material GetAutoMaterial(bool isValid)
         {
-            if (!_autoValidMaterial)
-            {
-                Shader shader = Shader.Find("Universal Render Pipeline/Lit");
-                if (!shader) shader = Shader.Find("Standard");
+            Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+            if (!shader) shader = Shader.Find("Standard");
                 
-                _autoValidMaterial = new Material(shader);
-                _autoValidMaterial.name = "Auto_ValidPlacement (Testing)";
-                
-                _autoValidMaterial.SetColor("_BaseColor", new Color(0f, 1f, 0f, 0.6f));
-                _autoValidMaterial.SetColor("_Color", new Color(0f, 1f, 0f, 0.6f));
-                
-                _autoValidMaterial.SetFloat("_Surface", 1);
-                _autoValidMaterial.SetFloat("_Blend", 0);
-                _autoValidMaterial.SetFloat("_AlphaClip", 0);
-                _autoValidMaterial.SetFloat("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-                _autoValidMaterial.SetFloat("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-                _autoValidMaterial.SetFloat("_ZWrite", 0);
-                
-                _autoValidMaterial.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
-                
-                _autoValidMaterial.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
-                _autoValidMaterial.EnableKeyword("_ALPHAPREMULTIPLY_ON");
-            }
-            return _autoValidMaterial;
-        }
+            Material autoGenMaterial = new Material(shader);
 
-
-        /// Creates or returns the auto-generated red translucent material for invalid placement
-        private static Material GetAutoInvalidMaterial()
-        {
-            if (!_autoInvalidMaterial)
+            if (isValid)
             {
-                Shader shader = Shader.Find("Universal Render Pipeline/Lit");
-                if (!shader) shader = Shader.Find("Standard");
+                autoGenMaterial.name = "AutoGen_Placement_Valid";
                 
-                _autoInvalidMaterial = new Material(shader);
-                _autoInvalidMaterial.name = "Auto_InvalidPlacement (Testing)";
+                autoGenMaterial.SetColor(BaseColor, new Color(0f, 1f, 0f, 0.6f));
+                autoGenMaterial.SetColor(Color1, new Color(0f, 1f, 0f, 0.6f));
                 
-                _autoInvalidMaterial.SetColor("_BaseColor", new Color(1f, 0f, 0f, 0.6f));
-                _autoInvalidMaterial.SetColor("_Color", new Color(1f, 0f, 0f, 0.6f));
+                autoGenMaterial.SetFloat(Surface, 1);
+                autoGenMaterial.SetFloat(Blend, 0);
+                autoGenMaterial.SetFloat(AlphaClip, 0);
+                autoGenMaterial.SetFloat(SrcBlend, (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                autoGenMaterial.SetFloat(DstBlend, (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                autoGenMaterial.SetFloat(ZWrite, 0);
                 
-                _autoInvalidMaterial.SetFloat("_Surface", 1);
-                _autoInvalidMaterial.SetFloat("_Blend", 0);
-                _autoInvalidMaterial.SetFloat("_AlphaClip", 0);
-                _autoInvalidMaterial.SetFloat("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-                _autoInvalidMaterial.SetFloat("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-                _autoInvalidMaterial.SetFloat("_ZWrite", 0);
-                
-                _autoInvalidMaterial.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
-                
-                _autoInvalidMaterial.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
-                _autoInvalidMaterial.EnableKeyword("_ALPHAPREMULTIPLY_ON");
             }
-            return _autoInvalidMaterial;
+            else
+            {
+                autoGenMaterial.name = "AutoGen_Placement_Invalid";
+                
+                autoGenMaterial.SetColor(BaseColor, new Color(1f, 0f, 0f, 0.6f));
+                autoGenMaterial.SetColor(Color1, new Color(1f, 0f, 0f, 0.6f));
+                
+                autoGenMaterial.SetFloat(Surface, 1);
+                autoGenMaterial.SetFloat(Blend, 0);
+                autoGenMaterial.SetFloat(AlphaClip, 0);
+                autoGenMaterial.SetFloat(SrcBlend, (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                autoGenMaterial.SetFloat(DstBlend, (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                autoGenMaterial.SetFloat(ZWrite, 0);
+                
+            }
+            
+            autoGenMaterial.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+                
+            autoGenMaterial.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            autoGenMaterial.EnableKeyword("_ALPHAPREMULTIPLY_ON");
+            
+            return autoGenMaterial;
         }
         
         
