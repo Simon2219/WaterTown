@@ -227,7 +227,7 @@ namespace Building
             }
 
             _currentPickup = pickupable;
-            _currentPickup.OnPickedUp(isNewObject: true);
+            _currentPickup.PickUp(isNewObject: true);
         }
 
         /// <summary>
@@ -243,7 +243,7 @@ namespace Building
             }
 
             _currentPickup = pickupable;
-            _currentPickup.OnPickedUp(isNewObject: false);
+            _currentPickup.PickUp(isNewObject: false);
             _currentRotation = pickupable.Transform.eulerAngles.y;
         }
 
@@ -296,7 +296,7 @@ namespace Building
                 return;
             }
             
-            _currentPickup.OnPlaced();
+            _currentPickup.Place();
             _currentPickup = null;
             _selectedBlueprint = null;
             
@@ -309,7 +309,7 @@ namespace Building
         {
             if (_currentPickup == null) return;
             
-            _currentPickup.OnPlacementCancelled();
+            _currentPickup.CancelPlacement();
             _currentPickup = null;
             _selectedBlueprint = null;
         }

@@ -48,6 +48,9 @@ namespace Platforms
         /// Fired when this platform is picked up (before being moved)
         public event Action<GamePlatform> PickedUp;
         
+        /// Fired when placement is cancelled
+        public event Action<GamePlatform> PlacementCancelled;
+        
         
         #endregion
         
@@ -134,20 +137,68 @@ namespace Platforms
         #region IPickupable Implementation
         
         
-        /// Delegate to pickup handler
-        public bool IsPickedUp
-        {
-            get => _pickupHandler.IsPickedUp;
-            set => _pickupHandler.IsPickedUp = value;
-        }
+        private bool _isPickedUp;
+        private bool _isNewObject;
         
-        public bool CanBePlaced => _pickupHandler.CanBePlaced;
+        public bool IsPickedUp => _isPickedUp;
+        public bool IsNewObject => _isNewObject;
+        
+        public bool CanBePlaced => _pickupHandler?.CanBePlaced ?? false;
         public Transform Transform => transform;
         public GameObject GameObject => gameObject;
         
-        public void OnPickedUp(bool isNewObject) => _pickupHandler?.OnPickedUp(isNewObject);
-        public void OnPlaced() => _pickupHandler?.OnPlaced();
-        public void OnPlacementCancelled() => _pickupHandler?.OnPlacementCancelled();
+        
+        /// Initiates pickup - fires PickedUp event for sub-systems to react
+        public void PickUp(bool isNewObject)
+        {
+            _isNewObject = isNewObject;
+            _isPickedUp = true;
+            
+            // Fire event - sub-systems (PickupHandler) listen and react
+            // PlatformManager also listens to clear grid cells (safe for new objects - they have empty occupiedCells)
+            PickedUp?.Invoke(this);
+        }
+        
+        
+        /// Confirms placement - fires Placed event for sub-systems to react
+        public void Place()
+        {
+            _isPickedUp = false;
+            
+            // Compute cells for the new position
+            if (_platformManager)
+                occupiedCells = _platformManager.GetCellsForPlatform(this);
+            
+            // Fire event - sub-systems and managers react
+            Placed?.Invoke(this);
+        }
+        
+        
+        /// Cancels placement
+        /// For new objects: fires PlacementCancelled (handler destroys)
+        /// For existing objects: fires PlacementCancelled (handler restores position), then Place() is called
+        public void CancelPlacement()
+        {
+            _isPickedUp = false;
+            
+            // Fire event - PickupHandler restores position (existing) or marks for destroy (new)
+            PlacementCancelled?.Invoke(this);
+            
+            // For existing objects, re-place at original position (triggers Placed event)
+            // Note: PickupHandler handles the actual position restore before this
+            if (!_isNewObject)
+            {
+                // Compute cells at restored position
+                if (_platformManager)
+                    occupiedCells = _platformManager.GetCellsForPlatform(this);
+                
+                // Fire Placed to re-register and restore visuals
+                Placed?.Invoke(this);
+            }
+        }
+        
+        
+        /// Visual feedback during pickup - delegates to handler
         public void UpdateValidityVisuals() => _pickupHandler?.UpdateValidityVisuals();
         
         
@@ -286,9 +337,6 @@ namespace Platforms
         {
             _socketSystem.SocketsChanged += OnSocketsChanged;
             _socketSystem.NewNeighborDetected += OnNewNeighborDetected;
-            
-            _pickupHandler.Placed += OnPickupHandlerPlaced;
-            _pickupHandler.PickedUp += OnPickupHandlerPickedUp;
         }
         
         
@@ -296,9 +344,6 @@ namespace Platforms
         {
             _socketSystem.SocketsChanged -= OnSocketsChanged;
             _socketSystem.NewNeighborDetected -= OnNewNeighborDetected;
-            
-            _pickupHandler.Placed -= OnPickupHandlerPlaced;
-            _pickupHandler.PickedUp -= OnPickupHandlerPickedUp;
         }
 
 
@@ -352,18 +397,6 @@ namespace Platforms
         {
             // Request NavMesh link creation from PlatformManager
             _platformManager?.RequestNavMeshLink(this, neighbor);
-        }
-
-
-        private void OnPickupHandlerPlaced(GamePlatform platform)
-        {
-            Placed?.Invoke(this);
-        }
-
-
-        private void OnPickupHandlerPickedUp(GamePlatform platform)
-        {
-            PickedUp?.Invoke(this);
         }
         
         

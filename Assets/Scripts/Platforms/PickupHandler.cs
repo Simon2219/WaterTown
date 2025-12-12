@@ -1,33 +1,15 @@
-using System;
 using System.Collections.Generic;
-using Interfaces;
 using UnityEngine;
 
 namespace Platforms
 {
     /// <summary>
-    /// Handles IPickupable implementation for platforms
-    /// Manages pickup state, visual feedback, materials, and colliders
+    /// Handles pickup visuals and physics for platforms.
+    /// Listens to GamePlatform events and manages colliders, materials, and position restoration.
     /// </summary>
     [DisallowMultipleComponent]
-    public class PickupHandler : MonoBehaviour, IPickupable
+    public class PickupHandler : MonoBehaviour
     {
-        #region Events
-        
-        
-        /// Fired when this platform is picked up
-        public event Action<GamePlatform> PickedUp;
-        
-        /// Fired when this platform is placed
-        public event Action<GamePlatform> Placed;
-        
-        
-        #endregion
-        
-        
-        
-        
-        
         #region Dependencies
         
         
@@ -40,37 +22,20 @@ namespace Platforms
         
         
         
-        #region IPickupable Properties
-        
-        
-        public bool IsPickedUp { get; set; }
-        public bool CanBePlaced => ValidatePlacement();
-        public Transform Transform => transform;
-        public GameObject GameObject => gameObject;
-        
-        
-        #endregion
-        
-        
-        
-        
         #region State
         
         
         private Vector3 _originalPosition;
         private Quaternion _originalRotation;
-        private bool _isNewObject;
         private Material[] _originalMaterials;
-        private readonly List<Renderer> _allRenderers = new List<Renderer>();
-        
-        
+        private readonly List<Renderer> _allRenderers = new();
         
         
         [Header("Pickup Materials (Optional - will auto-create if not assigned)")]
         [SerializeField] private Material pickupValidMaterial;
         [SerializeField] private Material pickupInvalidMaterial;
         
-        // Auto-generated materials for testing
+        // Shader property IDs for auto-generated materials
         private static readonly int BaseColor = Shader.PropertyToID("_BaseColor");
         private static readonly int Color1 = Shader.PropertyToID("_Color");
         private static readonly int Surface = Shader.PropertyToID("_Surface");
@@ -80,6 +45,19 @@ namespace Platforms
         private static readonly int DstBlend = Shader.PropertyToID("_DstBlend");
         private static readonly int ZWrite = Shader.PropertyToID("_ZWrite");
 
+        
+        #endregion
+        
+        
+        
+        
+        #region Public API
+        
+        
+        /// Exposed for GamePlatform to check placement validity
+        public bool CanBePlaced => ValidatePlacement();
+        
+        
         #endregion
         
         
@@ -88,13 +66,28 @@ namespace Platforms
         #region Initialization
         
         
-        /// Called by GamePlatform to inject dependencies
+        /// Called by GamePlatform to inject dependencies and subscribe to events
         public void SetDependencies(GamePlatform platform, PlatformManager platformManager)
         {
             _platform = platform;
             _platformManager = platformManager;
+            
+            // Subscribe to GamePlatform events
+            _platform.PickedUp += OnPickedUp;
+            _platform.Placed += OnPlaced;
+            _platform.PlacementCancelled += OnPlacementCancelled;
         }
         
+        
+        private void OnDestroy()
+        {
+            if (_platform)
+            {
+                _platform.PickedUp -= OnPickedUp;
+                _platform.Placed -= OnPlaced;
+                _platform.PlacementCancelled -= OnPlacementCancelled;
+            }
+        }
         
         
         #endregion
@@ -102,92 +95,39 @@ namespace Platforms
         
         
         
-        #region IPickupable Implementation
+        #region Event Handlers
         
         
-        public void OnPickedUp(bool isNewObject)
+        /// Called when platform is picked up (existing platforms only)
+        private void OnPickedUp(GamePlatform platform)
         {
-            IsPickedUp = true;
-            _isNewObject = isNewObject;
-            
-            // Sync state with GamePlatform
-            if (_platform)
-                _platform.IsPickedUp = true;
-            
             // Store original transform for cancellation
             _originalPosition = transform.position;
             _originalRotation = transform.rotation;
             
             // Disable colliders so we can raycast through the platform
-            if (_platform)
-            {
-                foreach (var col in _platform.CachedColliders)
-                {
-                    if (col) col.enabled = false;
-                }
-            }
+            DisableColliders();
             
             // Cache renderers and store original materials
-            if (_allRenderers.Count == 0)
-            {
-                _allRenderers.AddRange(GetComponentsInChildren<Renderer>(true));
-            }
-            
-            if (_allRenderers.Count > 0 && _allRenderers[0])
-            {
-                _originalMaterials = _allRenderers[0].sharedMaterials;
-            }
-            
-            // Fire pickup event for existing platforms (not for new spawned ones)
-            if (!isNewObject)
-            {
-                PickedUp?.Invoke(_platform);
-            }
+            CacheRenderersAndMaterials();
         }
-
-
-        public void OnPlaced()
+        
+        
+        /// Called when platform is placed successfully
+        private void OnPlaced(GamePlatform platform)
         {
             // Restore colliders
-            if (_platform)
-            {
-                foreach (var col in _platform.CachedColliders)
-                {
-                    if (col) col.enabled = true;
-                }
-            }
+            EnableColliders();
             
             // Restore original materials
             RestoreOriginalMaterials();
-            
-            // Compute cells for placement
-            if (!_platformManager)
-            {
-                Debug.LogError($"[PlatformPickupHandler] Cannot place platform '{name}' - PlatformManager not initialized!");
-                return;
-            }
-            
-            List<Vector2Int> cells = _platformManager.GetCellsForPlatform(_platform);
-            if (_platform)
-                _platform.occupiedCells = cells;
-            
-            // Set IsPickedUp to false before firing event
-            IsPickedUp = false;
-            if (_platform)
-                _platform.IsPickedUp = false;
-            
-            // Fire event for managers to register platform and trigger adjacency
-            Placed?.Invoke(_platform);
         }
-
-
-        public void OnPlacementCancelled()
+        
+        
+        /// Called when placement is cancelled
+        private void OnPlacementCancelled(GamePlatform platform)
         {
-            IsPickedUp = false;
-            if (_platform)
-                _platform.IsPickedUp = false;
-            
-            if (_isNewObject)
+            if (_platform.IsNewObject)
             {
                 // New object - destroy it
                 Destroy(gameObject);
@@ -195,37 +135,22 @@ namespace Platforms
             else
             {
                 // Existing object - restore original position
+                // (Colliders/materials restored by subsequent Placed event from GamePlatform)
                 transform.position = _originalPosition;
                 transform.rotation = _originalRotation;
-                
-                // Re-enable colliders
-                if (_platform)
-                {
-                    foreach (var col in _platform.CachedColliders)
-                    {
-                        if (col) col.enabled = true;
-                    }
-                }
-                
-                // Restore original materials
-                RestoreOriginalMaterials();
-                
-                // Compute cells and fire placement event to re-register at original position
-                if (!_platformManager)
-                {
-                    Debug.LogError($"[PlatformPickupHandler] Cannot cancel placement of platform '{name}' - PlatformManager not initialized!");
-                    return;
-                }
-                
-                List<Vector2Int> cells = _platformManager.GetCellsForPlatform(_platform);
-                if (_platform)
-                    _platform.occupiedCells = cells;
-                
-                Placed?.Invoke(_platform);
             }
         }
-
-
+        
+        
+        #endregion
+        
+        
+        
+        
+        #region Visual Feedback
+        
+        
+        /// Updates visual feedback during pickup - called each frame while picked up
         public void UpdateValidityVisuals()
         {
             bool isValid = CanBePlaced;
@@ -233,14 +158,13 @@ namespace Platforms
                 ? (pickupValidMaterial ? pickupValidMaterial : GetAutoMaterial(isValid: true))
                 : (pickupInvalidMaterial ? pickupInvalidMaterial : GetAutoMaterial(isValid: false));
             
-
             foreach (var modelRenderer in _allRenderers)
             {
-                Material[] materials = modelRenderer.sharedMaterials;
+                if (!modelRenderer) continue;
                 
+                Material[] materials = modelRenderer.sharedMaterials;
                 for (int i = 0; i < materials.Length; i++)
                     materials[i] = previewMaterial;
-                
                 modelRenderer.sharedMaterials = materials;
             }
         }
@@ -251,20 +175,28 @@ namespace Platforms
         
         
         
-        #region Validation
+        #region Collider Management
         
         
-        private bool ValidatePlacement()
+        private void DisableColliders()
         {
-            /*if (!IsPickedUp) return true;
+            if (!_platform) return;
             
-            if (_platformManager == null || _platform == null)
-                return false;*/
+            foreach (var col in _platform.CachedColliders)
+            {
+                if (col) col.enabled = false;
+            }
+        }
+        
+        
+        private void EnableColliders()
+        {
+            if (!_platform) return;
             
-            List<Vector2Int> cells = _platformManager.GetCellsForPlatform(_platform);
-            
-            
-            return cells.Count != 0 && _platformManager.IsAreaEmpty(cells);
+            foreach (var col in _platform.CachedColliders)
+            {
+                if (col) col.enabled = true;
+            }
         }
         
         
@@ -276,15 +208,24 @@ namespace Platforms
         #region Material Management
         
         
+        private void CacheRenderersAndMaterials()
+        {
+            if (_allRenderers.Count == 0)
+                _allRenderers.AddRange(GetComponentsInChildren<Renderer>(true));
+            
+            if (_allRenderers.Count > 0 && _allRenderers[0])
+                _originalMaterials = _allRenderers[0].sharedMaterials;
+        }
+        
+        
         private void RestoreOriginalMaterials()
         {
-            if (_originalMaterials is { Length: > 0 })
+            if (_originalMaterials is not { Length: > 0 }) return;
+            
+            foreach (var modelRenderer in _allRenderers)
             {
-                foreach (var modelRenderer in _allRenderers)
-                {
-                    if (modelRenderer)
-                        modelRenderer.sharedMaterials = _originalMaterials;
-                }
+                if (modelRenderer)
+                    modelRenderer.sharedMaterials = _originalMaterials;
             }
         }
 
@@ -299,36 +240,24 @@ namespace Platforms
             if (isValid)
             {
                 autoGenMaterial.name = "AutoGen_Placement_Valid";
-                
                 autoGenMaterial.SetColor(BaseColor, new Color(0f, 1f, 0f, 0.6f));
                 autoGenMaterial.SetColor(Color1, new Color(0f, 1f, 0f, 0.6f));
-                
-                autoGenMaterial.SetFloat(Surface, 1);
-                autoGenMaterial.SetFloat(Blend, 0);
-                autoGenMaterial.SetFloat(AlphaClip, 0);
-                autoGenMaterial.SetFloat(SrcBlend, (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-                autoGenMaterial.SetFloat(DstBlend, (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-                autoGenMaterial.SetFloat(ZWrite, 0);
-                
             }
             else
             {
                 autoGenMaterial.name = "AutoGen_Placement_Invalid";
-                
                 autoGenMaterial.SetColor(BaseColor, new Color(1f, 0f, 0f, 0.6f));
                 autoGenMaterial.SetColor(Color1, new Color(1f, 0f, 0f, 0.6f));
-                
-                autoGenMaterial.SetFloat(Surface, 1);
-                autoGenMaterial.SetFloat(Blend, 0);
-                autoGenMaterial.SetFloat(AlphaClip, 0);
-                autoGenMaterial.SetFloat(SrcBlend, (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-                autoGenMaterial.SetFloat(DstBlend, (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-                autoGenMaterial.SetFloat(ZWrite, 0);
-                
             }
             
+            autoGenMaterial.SetFloat(Surface, 1);
+            autoGenMaterial.SetFloat(Blend, 0);
+            autoGenMaterial.SetFloat(AlphaClip, 0);
+            autoGenMaterial.SetFloat(SrcBlend, (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            autoGenMaterial.SetFloat(DstBlend, (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            autoGenMaterial.SetFloat(ZWrite, 0);
+            
             autoGenMaterial.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
-                
             autoGenMaterial.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
             autoGenMaterial.EnableKeyword("_ALPHAPREMULTIPLY_ON");
             
@@ -337,6 +266,22 @@ namespace Platforms
         
         
         #endregion
+        
+        
+        
+        
+        #region Validation
+        
+        
+        private bool ValidatePlacement()
+        {
+            if (!_platformManager || !_platform) return false;
+            
+            List<Vector2Int> cells = _platformManager.GetCellsForPlatform(_platform);
+            return cells.Count != 0 && _platformManager.IsAreaEmpty(cells);
+        }
+        
+        
+        #endregion
     }
 }
-

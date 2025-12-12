@@ -11,7 +11,7 @@ namespace Interfaces
         /// <summary>
         /// True if this object is currently being picked up/moved by the player.
         /// </summary>
-        bool IsPickedUp { get; set; }
+        bool IsPickedUp { get; }
         
         /// <summary>
         /// True if this object can currently be placed at its current position.
@@ -30,30 +30,29 @@ namespace Interfaces
         GameObject GameObject { get; }
         
         /// <summary>
-        /// Called when the object is picked up (either newly spawned or existing).
-        /// Object should handle its own visual changes (materials, disable colliders, etc.).
+        /// Initiates pickup of this object.
+        /// Object handles its own state changes and fires appropriate events.
         /// </summary>
         /// <param name="isNewObject">True if this is a newly spawned object, false if moving existing</param>
-        void OnPickedUp(bool isNewObject);
+        void PickUp(bool isNewObject);
         
         /// <summary>
-        /// Called when the object is placed successfully.
-        /// Object should restore its normal state and register with relevant managers.
+        /// Confirms placement of this object at current position.
+        /// Object handles its own state changes and fires appropriate events.
         /// </summary>
-        void OnPlaced();
+        void Place();
         
         /// <summary>
-        /// Called when placement is cancelled.
+        /// Cancels placement of this object.
         /// For new objects: they should be destroyed.
         /// For existing objects: they should return to their original position/state.
         /// </summary>
-        void OnPlacementCancelled();
+        void CancelPlacement();
         
         /// <summary>
-        /// Update the object's validity state for visual feedback.
+        /// Update the object's visual feedback for placement validity.
         /// Called each frame while picked up to show if placement is valid.
         /// </summary>
         void UpdateValidityVisuals();
     }
 }
-
