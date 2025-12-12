@@ -6,7 +6,7 @@ using Unity.AI.Navigation;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.Serialization;
-using WaterTown.Platforms;
+using Platforms;
 
 
 ///
@@ -752,14 +752,14 @@ public class PlatformManager : MonoBehaviour
         if (!platform) return outputCells;
 
         // Use platform's world position to find center cell on the desired level
-        Vector3 worldPosition = platform.transform.position;
+        Vector3 worldPosition = ((Component)platform).transform.position;
         var centerCell = _worldGrid.WorldToCell(worldPosition);
 
         int footprintWidth = Mathf.Max(1, platform.Footprint.x);
         int footprintHeight = Mathf.Max(1, platform.Footprint.y);
 
         // Determine rotation in 90° steps (0..3)
-        float yaw = platform.transform.eulerAngles.y;
+        float yaw = ((Component)platform).transform.eulerAngles.y;
         int rotationSteps = Mathf.RoundToInt(yaw / ROTATION_STEP_DEGREES) & ROTATION_MODULO_MASK;
         bool isRotated90Or270 = (rotationSteps % 2) == 1; // 90° or 270° rotations swap width/height
 

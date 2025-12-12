@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using Grid;
 using UnityEngine;
 
-namespace WaterTown.Platforms
+namespace Platforms
 {
     /// <summary>
     /// Manages socket creation, status, grid adjacency, connections, and module registry for a platform

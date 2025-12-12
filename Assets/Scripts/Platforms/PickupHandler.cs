@@ -1,16 +1,17 @@
 using System;
 using System.Collections.Generic;
+using Interfaces;
 using UnityEngine;
-using WaterTown.Interfaces;
+using Interfaces;
 
-namespace WaterTown.Platforms
+namespace Platforms
 {
     /// <summary>
     /// Handles IPickupable implementation for platforms
     /// Manages pickup state, visual feedback, materials, and colliders
     /// </summary>
     [DisallowMultipleComponent]
-    public class PlatformPickupHandler : MonoBehaviour, IPickupable
+    public class PickupHandler : MonoBehaviour, IPickupable
     {
         #region Events
         
@@ -124,8 +125,8 @@ namespace WaterTown.Platforms
                 _platform.IsPickedUp = true;
             
             // Store original transform for cancellation
-            _originalPosition = transform.position;
-            _originalRotation = transform.rotation;
+            _originalPosition = ((Component)this).transform.position;
+            _originalRotation = ((Component)this).transform.rotation;
             
             // Disable colliders so we can raycast through the platform
             if (_cachedColliders != null)
@@ -204,8 +205,8 @@ namespace WaterTown.Platforms
             else
             {
                 // Existing object - restore original position
-                transform.position = _originalPosition;
-                transform.rotation = _originalRotation;
+                ((Component)this).transform.position = _originalPosition;
+                ((Component)this).transform.rotation = _originalRotation;
                 
                 // Re-enable colliders
                 if (_cachedColliders != null)
@@ -235,8 +236,9 @@ namespace WaterTown.Platforms
         }
 
 
-        public void UpdateValidityVisuals(bool isValid)
+        public void UpdateValidityVisuals()
         {
+            bool isValid = CanBePlaced;
             Material targetMaterial = isValid 
                 ? (pickupValidMaterial != null ? pickupValidMaterial : GetAutoValidMaterial())
                 : (pickupInvalidMaterial != null ? pickupInvalidMaterial : GetAutoInvalidMaterial());
@@ -267,16 +269,15 @@ namespace WaterTown.Platforms
         
         private bool ValidatePlacement()
         {
-            if (!IsPickedUp) return true;
+            /*if (!IsPickedUp) return true;
             
             if (_platformManager == null || _platform == null)
-                return false;
+                return false;*/
             
             List<Vector2Int> cells = _platformManager.GetCellsForPlatform(_platform);
             
-            if (cells.Count == 0) return false;
             
-            return _platformManager.IsAreaEmpty(cells);
+            return cells.Count != 0 && _platformManager.IsAreaEmpty(cells);
         }
         
         

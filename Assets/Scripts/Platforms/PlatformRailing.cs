@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace WaterTown.Platforms
+namespace Platforms
 {
     [DisallowMultipleComponent]
     public class PlatformRailing : MonoBehaviour

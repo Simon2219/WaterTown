@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace WaterTown.Interfaces
+namespace Interfaces
 {
     /// <summary>
     /// Interface for objects that can be picked up, moved, and placed in the world.
@@ -53,8 +53,7 @@ namespace WaterTown.Interfaces
         /// Update the object's validity state for visual feedback.
         /// Called each frame while picked up to show if placement is valid.
         /// </summary>
-        /// <param name="isValid">True if current position is valid for placement</param>
-        void UpdateValidityVisuals(bool isValid);
+        void UpdateValidityVisuals();
     }
 }
 

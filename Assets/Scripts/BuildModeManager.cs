@@ -1,13 +1,13 @@
 using System;
 using System.Collections.Generic;
 using Grid;
+using Interfaces;
 using UnityEngine;
 using UnityEngine.InputSystem;
-using WaterTown.Building.UI;
-using WaterTown.Interfaces;
-using WaterTown.Platforms;
+using Interfaces;
+using Platforms;
 
-namespace WaterTown.Building
+namespace Building
 {
     ///
     /// Manages build mode: spawning/moving pickupable objects, validating placement, and handling placement/cancellation
@@ -165,9 +165,8 @@ namespace WaterTown.Building
             if (_currentPickup == null) return;
 
             UpdatePickupPosition();
-
-            bool isValid = _currentPickup.CanBePlaced;
-            _currentPickup.UpdateValidityVisuals(isValid);
+            
+            _currentPickup.UpdateValidityVisuals();
             
             // Trigger adjacency update for preview (only for affected platforms, not all)
             if (_currentPickup is GamePlatform platform && platformManager != null)

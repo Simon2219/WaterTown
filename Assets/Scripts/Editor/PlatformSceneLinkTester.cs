@@ -1,7 +1,7 @@
 #if UNITY_EDITOR
 using UnityEditor;
 using UnityEngine;
-using WaterTown.Platforms;
+using Platforms;
 
 namespace Editor
 {

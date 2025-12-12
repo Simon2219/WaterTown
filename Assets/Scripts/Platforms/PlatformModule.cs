@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace WaterTown.Platforms
+namespace Platforms
 {
     [DisallowMultipleComponent]
     public class PlatformModule : MonoBehaviour
@@ -112,7 +112,7 @@ namespace WaterTown.Platforms
             }
 
             // Choose edge (override or nearest)
-            Vector3 localPosition = platform.transform.InverseTransformPoint(transform.position);
+            Vector3 localPosition = ((Component)platform).transform.InverseTransformPoint(transform.position);
             float halfWidth = platform.Footprint.x * 0.5f;
             float halfLength = platform.Footprint.y * 0.5f;
 

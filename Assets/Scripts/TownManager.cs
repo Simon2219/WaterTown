@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using Grid;
 using UnityEngine;
 using UnityEngine.Events;
-using WaterTown.Platforms;
+using Platforms;
 
 
 ///

@@ -6,7 +6,7 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.AI;
-using WaterTown.Platforms;
+using Platforms;
 
 namespace Editor
 {

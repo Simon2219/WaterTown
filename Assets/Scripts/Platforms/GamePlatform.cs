@@ -4,9 +4,9 @@ using System.Collections.Generic;
 using Unity.AI.Navigation;
 using UnityEngine;
 using Grid;
-using WaterTown.Interfaces;
+using Interfaces;
 
-namespace WaterTown.Platforms
+namespace Platforms
 {
     /// <summary>
     /// Core platform component - manages identity, lifecycle, footprint, NavMesh, and coordinates sub-systems
@@ -17,7 +17,7 @@ namespace WaterTown.Platforms
     [RequireComponent(typeof(NavMeshSurface))]
     [RequireComponent(typeof(PlatformSocketSystem))]
     [RequireComponent(typeof(PlatformRailingSystem))]
-    [RequireComponent(typeof(PlatformPickupHandler))]
+    [RequireComponent(typeof(PickupHandler))]
     [RequireComponent(typeof(PlatformEditorUtility))]
     public class GamePlatform : MonoBehaviour, IPickupable
     {
@@ -69,7 +69,7 @@ namespace WaterTown.Platforms
         
         private PlatformSocketSystem _socketSystem;
         private PlatformRailingSystem _railingSystem;
-        private PlatformPickupHandler _pickupHandler;
+        private PickupHandler _pickupHandler;
         private PlatformEditorUtility _editorUtility;
         
         
@@ -132,18 +132,18 @@ namespace WaterTown.Platforms
         /// Delegate to pickup handler
         public bool IsPickedUp
         {
-            get => _pickupHandler is { IsPickedUp: true };
-            set { if (_pickupHandler != null) _pickupHandler.IsPickedUp = value; }
+            get => _pickupHandler.IsPickedUp;
+            set => _pickupHandler.IsPickedUp = value;
         }
         
-        public bool CanBePlaced => _pickupHandler is { CanBePlaced: true };
+        public bool CanBePlaced => _pickupHandler.CanBePlaced;
         public Transform Transform => transform;
         public GameObject GameObject => gameObject;
         
         public void OnPickedUp(bool isNewObject) => _pickupHandler?.OnPickedUp(isNewObject);
         public void OnPlaced() => _pickupHandler?.OnPlaced();
         public void OnPlacementCancelled() => _pickupHandler?.OnPlacementCancelled();
-        public void UpdateValidityVisuals(bool isValid) => _pickupHandler?.UpdateValidityVisuals(isValid);
+        public void UpdateValidityVisuals() => _pickupHandler?.UpdateValidityVisuals();
         
         
         #endregion
@@ -165,7 +165,7 @@ namespace WaterTown.Platforms
                 throw ErrorHandler.MissingDependency($"[GamePlatform] Railing System '{nameof(PlatformRailingSystem)}' not found.", this);
 
             if(!TryGetComponent(out _pickupHandler))
-                throw ErrorHandler.MissingDependency($"[GamePlatform] Pickup Handler '{nameof(PlatformPickupHandler)}' not found.", this);
+                throw ErrorHandler.MissingDependency($"[GamePlatform] Pickup Handler '{nameof(PickupHandler)}' not found.", this);
 
             if(!TryGetComponent(out _editorUtility))
                 throw ErrorHandler.MissingDependency($"[GamePlatform] Editor Utility '{nameof(PlatformEditorUtility)}' not found.", this);

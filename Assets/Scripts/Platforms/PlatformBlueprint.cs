@@ -1,5 +1,5 @@
 using UnityEngine;
-using WaterTown.Platforms;
+using Platforms;
 
 /// <summary>
 /// Authoritative data for a Platform type:

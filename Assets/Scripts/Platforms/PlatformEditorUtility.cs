@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace WaterTown.Platforms
+namespace Platforms
 {
     /// <summary>
     /// Editor-only utilities for GamePlatform

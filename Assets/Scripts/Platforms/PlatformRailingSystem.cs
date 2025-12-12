@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace WaterTown.Platforms
+namespace Platforms
 {
     /// <summary>
     /// Manages railing registration, visibility tracking, and updates for a platform
