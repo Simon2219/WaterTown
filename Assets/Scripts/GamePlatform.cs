@@ -83,6 +83,10 @@ namespace WaterTown.Platforms
         public List<Vector2Int> occupiedCells = new();
         public List<Vector2Int> previousOccupiedCells = new();
         
+        private readonly List<PlatformModule> _cachedModules = new();
+        private readonly List<PlatformRailing> _cachedRailings = new();
+        private readonly List<Collider> _cachedColliders = new();
+        
         
         #endregion
         
@@ -111,24 +115,11 @@ namespace WaterTown.Platforms
         public NavMeshSurface NavSurface => _navSurface;
         
         
-        private Coroutine _pendingRebuild;
-        
         private Vector3 _lastPos;
         private Quaternion _lastRot;
         private Vector3 _lastScale;
 
-        
-        
-        #endregion
-        
-        
-        
-        #region Cached Child Components
-        
-        
-        private readonly List<PlatformModule> _cachedModules = new();
-        private readonly List<PlatformRailing> _cachedRailings = new();
-        private readonly List<Collider> _cachedColliders = new();
+        private Coroutine _pendingRebuild;
         
         
         #endregion

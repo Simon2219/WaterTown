@@ -19,7 +19,7 @@ MonoBehaviour:
     width: 2048
     height: 1085.6
   m_ShowMode: 4
-  m_Title: Game
+  m_Title: Scene
   m_RootView: {fileID: 11}
   m_MinSize: {x: 875, y: 300}
   m_MaxSize: {x: 10000, y: 10000}
@@ -43,7 +43,7 @@ MonoBehaviour:
     width: 1536
     height: 813.60004
   m_ShowMode: 0
-  m_Title: Hierarchy
+  m_Title: Console
   m_RootView: {fileID: 9}
   m_MinSize: {x: 300, y: 100}
   m_MaxSize: {x: 24288, y: 16192}
@@ -782,7 +782,7 @@ MonoBehaviour:
       scrollPos: {x: 0, y: 0}
       m_SelectedIDs: 
       m_LastClickedID: 0
-      m_ExpandedIDs: 50afffffd0b0ffffd4b0ffffdcb0ffff86c9ffff10fbffff
+      m_ExpandedIDs: 10fbffff
       m_RenameOverlay:
         m_UserAcceptedRename: 0
         m_Name: 
@@ -1442,9 +1442,9 @@ MonoBehaviour:
   m_AudioPlay: 0
   m_DebugDrawModesUseInteractiveLightBakingData: 0
   m_Position:
-    m_Target: {x: 49.50095, y: -11.840741, z: 47.487457}
+    m_Target: {x: 46.796238, y: -12.126157, z: 46.894924}
     speed: 2
-    m_Value: {x: 49.50095, y: -11.840741, z: 47.487457}
+    m_Value: {x: 46.796238, y: -12.126157, z: 46.894924}
   m_RenderMode: 0
   m_CameraMode:
     drawMode: 0
@@ -1731,8 +1731,8 @@ MonoBehaviour:
     m_IsLocked: 1
   m_FolderTreeState:
     scrollPos: {x: 0, y: 0}
-    m_SelectedIDs: 46df0000
-    m_LastClickedID: 57158
+    m_SelectedIDs: 5edf0000
+    m_LastClickedID: 57182
     m_ExpandedIDs: 00000000bede0000c0de0000c2de0000c4de0000c6de0000c8de0000cade0000
     m_RenameOverlay:
       m_UserAcceptedRename: 0

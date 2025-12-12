@@ -280,10 +280,20 @@ public class PlatformManager : MonoBehaviour
         if (!platform) return;
         
         // Clear Occupied flags and cell ownership for cells this platform was occupying
-        ClearPlatformCells(platform);
-        
-        // Clear occupiedCells since platform no longer occupies any cells until it moves
-        platform.occupiedCells?.Clear();
+        if (platform.occupiedCells != null)
+        {
+            foreach (Vector2Int cell in platform.occupiedCells)
+            {
+                if (_cellToPlatform.TryGetValue(cell, out var owner) && owner == platform)
+                {
+                    _worldGrid.TrySetCellFlag(cell, WorldGrid.CellFlag.Empty);
+                    _cellToPlatform.Remove(cell);
+                }
+            }
+            
+            // Clear occupiedCells since platform no longer occupies any cells until it moves
+            platform.occupiedCells.Clear();
+        }
         
         // Mark affected platforms (neighbors at old position) for adjacency update
         MarkAdjacencyDirtyForPlatform(platform);
@@ -301,8 +311,16 @@ public class PlatformManager : MonoBehaviour
         platform.previousOccupiedCells.Clear();
         platform.previousOccupiedCells.AddRange(platform.occupiedCells);
         
-        // Clear old cells from WorldGrid and reverse lookup
-        ClearPlatformCells(platform);
+        // Clear old preview/occupied flags for this platform's old cells
+        foreach (Vector2Int cell in platform.occupiedCells)
+        {
+            // Only clear if this platform owns the cell
+            if (_cellToPlatform.TryGetValue(cell, out var owner) && owner == platform)
+            {
+                _worldGrid.TrySetCellFlag(cell, WorldGrid.CellFlag.Empty);
+                _cellToPlatform.Remove(cell);
+            }
+        }
 
         // Compute new footprint cells from current transform (rotation-aware)
         List<Vector2Int> newCells = GetCellsForPlatform(platform);
@@ -427,7 +445,7 @@ public class PlatformManager : MonoBehaviour
     /// Used by BuildModeManager to update railing preview during placement
     public void TriggerAdjacencyUpdate(GamePlatform platform = null)
     {
-        if (platform != null)
+        if (platform)
             MarkAdjacencyDirtyForPlatform(platform);
         else
             MarkAllPlatformsAdjacencyDirty();
@@ -464,7 +482,22 @@ public class PlatformManager : MonoBehaviour
         if (!_registeredPlatforms.Contains(platform)) return;
 
         // Clear cells from WorldGrid and reverse lookup
-        ClearPlatformCells(platform);
+        if (platform.occupiedCells is { Count: > 0 })
+        {
+            // Use area method for WorldGrid (cells are sorted: first = min, last = max)
+            Vector2Int min = platform.occupiedCells.First();
+            Vector2Int max = platform.occupiedCells.Last();
+            _worldGrid.SetFlagsInAreaExact(min, max, WorldGrid.CellFlag.Empty);
+            
+            // Remove from reverse lookup using GetPlatformAtCell for ownership check
+            foreach (Vector2Int cell in platform.occupiedCells)
+            {
+                if (GetPlatformAtCell(cell, out var owner) && owner == platform)
+                {
+                    _cellToPlatform.Remove(cell);
+                }
+            }
+        }
 
         _registeredPlatforms.Remove(platform);
 
@@ -633,7 +666,7 @@ public class PlatformManager : MonoBehaviour
         }
         catch (MissingReferenceException e)
         {
-            Debug.LogError(e.Message, platformA);
+            ErrorHandler.MissingDependency("[Platform Manager] " + e.Message, platformA);
             return;
         }
         
@@ -695,45 +728,15 @@ public class PlatformManager : MonoBehaviour
         
         // Clear the set after processing
         _platformsNeedingAdjacencyUpdate.Clear();
-
         _isRecomputingAdjacency = false;
     }
-
-
-    ///
-    /// Calculate adjacency for all platforms
-    /// Full recalculation (expensive - use sparingly)
-    ///
-    public void CalculateAdjacencyForAll()
-    {
-        MarkAllPlatformsAdjacencyDirty();
-    }
+    
+    
     
     #endregion
 
     #region Helper Methods
 
-    
-    /// Clears a platform's cells from WorldGrid and removes from reverse lookup
-    /// Uses area method for WorldGrid, direct removal for _cellToPlatform (no ownership check)
-    ///
-    private void ClearPlatformCells(GamePlatform platform)
-    {
-        if (platform.occupiedCells is not { Count: > 0 }) return;
-        
-        // Use area method for WorldGrid (cells are sorted: first = min, last = max)
-        Vector2Int min = platform.occupiedCells.First();
-        Vector2Int max = platform.occupiedCells.Last();
-        _worldGrid.SetFlagsInAreaExact(min, max, WorldGrid.CellFlag.Empty);
-        
-        // Remove from reverse lookup (platform owns all its occupiedCells)
-        foreach (Vector2Int cell in platform.occupiedCells)
-        {
-            _cellToPlatform.Remove(cell);
-        }
-    }
-    
-    
     ///
     /// Compute which 2D grid cells a platform covers on a given level
     /// assuming its footprint is aligned to the 1x1 world grid AND
