@@ -128,11 +128,6 @@ namespace Building
             {
                 pickupAction.action.Enable();
                 pickupAction.action.performed += OnPickupPerformed;
-                Debug.Log($"[BuildModeManager] Pickup action subscribed: {pickupAction.action.name}");
-            }
-            else
-            {
-                Debug.LogWarning("[BuildModeManager] pickupAction is null or has no action!");
             }
         }
 
@@ -198,11 +193,7 @@ namespace Building
         
         private void OnBlueprintSelected(PlatformBlueprint blueprint)
         {
-            if (blueprint == null)
-            {
-                Debug.LogWarning("[BuildModeManager] Received null blueprint.");
-                return;
-            }
+            if (blueprint == null) return;
 
             _selectedBlueprint = blueprint;
             _currentRotation = 0f;
@@ -219,11 +210,7 @@ namespace Building
         /// </summary>
         private void SpawnPlatform(PlatformBlueprint blueprint)
         {
-            if (blueprint.RuntimePrefab == null)
-            {
-                Debug.LogWarning($"[BuildModeManager] Blueprint '{blueprint.DisplayName}' has no runtime prefab.");
-                return;
-            }
+            if (!blueprint.RuntimePrefab) return;
 
             // Cancel any existing pickup
             if (_currentPickup != null)
@@ -239,7 +226,6 @@ namespace Building
             var pickupable = spawnedPlatform.GetComponent<IPickupable>();
             if (pickupable == null)
             {
-                Debug.LogError($"[BuildModeManager] Spawned platform '{spawnedPlatform.name}' doesn't have IPickupable component!");
                 Destroy(spawnedPlatform);
                 return;
             }
@@ -275,7 +261,6 @@ namespace Building
             // Use new Input System for mouse position
             Vector2 mousePosition = Mouse.current != null ? Mouse.current.position.ReadValue() : Vector2.zero;
             Ray ray = mainCamera.ScreenPointToRay(mousePosition);
-            Vector3Int levelRef = new Vector3Int(0, 0, 0);
 
             if (grid.RaycastToCell(ray, out Vector2Int hoveredCell, out Vector3 hitPoint))
             {
@@ -307,17 +292,11 @@ namespace Building
         private void PlacePickup()
         {
             if (_currentPickup == null) return;
-
-            if (!_currentPickup.CanBePlaced)
-            {
-                Debug.LogWarning("[BuildModeManager] Cannot place platform at current position.");
-                return;
-            }
+            if (!_currentPickup.CanBePlaced) return;
             
             _currentPickup.Place();
             _currentPickup = null;
             _selectedBlueprint = null;
-            
         }
 
         /// <summary>
@@ -378,44 +357,19 @@ namespace Building
         
         private void OnPickupPerformed(InputAction.CallbackContext context)
         {
-            Debug.Log("[BuildModeManager] OnPickupPerformed triggered");
-            
-            // Don't pick up if we already have something picked up
-            if (_currentPickup != null)
-            {
-                Debug.Log("[BuildModeManager] Already have a pickup, ignoring");
-                return;
-            }
-            
-            if (!mainCamera)
-            {
-                Debug.LogWarning("[BuildModeManager] No main camera");
-                return;
-            }
+            if (_currentPickup != null) return;
+            if (!mainCamera) return;
             
             // Raycast from camera through mouse position
             Vector2 mousePosition = Mouse.current != null ? Mouse.current.position.ReadValue() : Vector2.zero;
             Ray ray = mainCamera.ScreenPointToRay(mousePosition);
             
-            if (!Physics.Raycast(ray, out RaycastHit hit, 1000f, raycastLayers))
-            {
-                Debug.Log($"[BuildModeManager] Raycast missed (layers: {raycastLayers.value})");
-                return;
-            }
-            
-            Debug.Log($"[BuildModeManager] Raycast hit: {hit.collider.name} on layer {LayerMask.LayerToName(hit.collider.gameObject.layer)}");
+            if (!Physics.Raycast(ray, out RaycastHit hit, 1000f, raycastLayers)) return;
             
             // Try to get GamePlatform from hit object (platforms have colliders on children)
             var platform = hit.collider.GetComponentInParent<GamePlatform>();
-            if (!platform)
-            {
-                Debug.Log("[BuildModeManager] Hit object has no GamePlatform in parent hierarchy");
-                return;
-            }
+            if (!platform) return;
             
-            Debug.Log($"[BuildModeManager] Found platform: {platform.name}, picking up...");
-            
-            // Use existing method to handle pickup
             PickupExistingPlatform(platform);
         }
         
