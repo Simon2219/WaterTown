@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using Interfaces;
 using UnityEngine;
-using Interfaces;
 
 namespace Platforms
 {
@@ -106,17 +105,17 @@ namespace Platforms
             _isNewObject = isNewObject;
             
             // Sync state with GamePlatform
-            if (_platform != null)
+            if (_platform)
                 _platform.IsPickedUp = true;
             
             // Store original transform for cancellation
-            _originalPosition = ((Component)this).transform.position;
-            _originalRotation = ((Component)this).transform.rotation;
+            _originalPosition = transform.position;
+            _originalRotation = transform.rotation;
             
             // Disable colliders so we can raycast through the platform
-            if (_platform._cachedColliders != null)
+            if (_platform)
             {
-                foreach (var col in _platform._cachedColliders)
+                foreach (var col in _platform.CachedColliders)
                 {
                     if (col) col.enabled = false;
                 }
@@ -128,7 +127,7 @@ namespace Platforms
                 _allRenderers.AddRange(GetComponentsInChildren<Renderer>(true));
             }
             
-            if (_allRenderers.Count > 0 && _allRenderers[0] != null)
+            if (_allRenderers.Count > 0 && _allRenderers[0])
             {
                 _originalMaterials = _allRenderers[0].sharedMaterials;
             }
@@ -144,9 +143,9 @@ namespace Platforms
         public void OnPlaced()
         {
             // Restore colliders
-            if (_platform._cachedColliders != null)
+            if (_platform)
             {
-                foreach (var col in _platform._cachedColliders)
+                foreach (var col in _platform.CachedColliders)
                 {
                     if (col) col.enabled = true;
                 }
@@ -156,19 +155,19 @@ namespace Platforms
             RestoreOriginalMaterials();
             
             // Compute cells for placement
-            if (_platformManager == null)
+            if (!_platformManager)
             {
                 Debug.LogError($"[PlatformPickupHandler] Cannot place platform '{name}' - PlatformManager not initialized!");
                 return;
             }
             
             List<Vector2Int> cells = _platformManager.GetCellsForPlatform(_platform);
-            if (_platform != null)
+            if (_platform)
                 _platform.occupiedCells = cells;
             
             // Set IsPickedUp to false before firing event
             IsPickedUp = false;
-            if (_platform != null)
+            if (_platform)
                 _platform.IsPickedUp = false;
             
             // Fire event for managers to register platform and trigger adjacency
@@ -179,7 +178,7 @@ namespace Platforms
         public void OnPlacementCancelled()
         {
             IsPickedUp = false;
-            if (_platform != null)
+            if (_platform)
                 _platform.IsPickedUp = false;
             
             if (_isNewObject)
@@ -190,13 +189,13 @@ namespace Platforms
             else
             {
                 // Existing object - restore original position
-                ((Component)this).transform.position = _originalPosition;
-                ((Component)this).transform.rotation = _originalRotation;
+                transform.position = _originalPosition;
+                transform.rotation = _originalRotation;
                 
                 // Re-enable colliders
-                if (_platform._cachedColliders != null)
+                if (_platform)
                 {
-                    foreach (var col in _platform._cachedColliders)
+                    foreach (var col in _platform.CachedColliders)
                     {
                         if (col) col.enabled = true;
                     }
@@ -206,14 +205,14 @@ namespace Platforms
                 RestoreOriginalMaterials();
                 
                 // Compute cells and fire placement event to re-register at original position
-                if (_platformManager == null)
+                if (!_platformManager)
                 {
                     Debug.LogError($"[PlatformPickupHandler] Cannot cancel placement of platform '{name}' - PlatformManager not initialized!");
                     return;
                 }
                 
                 List<Vector2Int> cells = _platformManager.GetCellsForPlatform(_platform);
-                if (_platform != null)
+                if (_platform)
                     _platform.occupiedCells = cells;
                 
                 Placed?.Invoke(_platform);
@@ -225,14 +224,14 @@ namespace Platforms
         {
             bool isValid = CanBePlaced;
             Material targetMaterial = isValid 
-                ? (pickupValidMaterial != null ? pickupValidMaterial : GetAutoValidMaterial())
-                : (pickupInvalidMaterial != null ? pickupInvalidMaterial : GetAutoInvalidMaterial());
+                ? (pickupValidMaterial ? pickupValidMaterial : GetAutoValidMaterial())
+                : (pickupInvalidMaterial ? pickupInvalidMaterial : GetAutoInvalidMaterial());
             
-            if (targetMaterial != null)
+            if (targetMaterial)
             {
                 foreach (var renderer in _allRenderers)
                 {
-                    if (renderer != null)
+                    if (renderer)
                     {
                         var materials = renderer.sharedMaterials;
                         for (int i = 0; i < materials.Length; i++)
@@ -276,14 +275,12 @@ namespace Platforms
         
         private void RestoreOriginalMaterials()
         {
-            if (_originalMaterials != null && _originalMaterials.Length > 0)
+            if (_originalMaterials is { Length: > 0 })
             {
                 foreach (var renderer in _allRenderers)
                 {
-                    if (renderer != null)
-                    {
+                    if (renderer)
                         renderer.sharedMaterials = _originalMaterials;
-                    }
                 }
             }
         }
@@ -292,10 +289,10 @@ namespace Platforms
         /// Creates or returns the auto-generated green translucent material for valid placement
         private static Material GetAutoValidMaterial()
         {
-            if (_autoValidMaterial == null)
+            if (!_autoValidMaterial)
             {
                 Shader shader = Shader.Find("Universal Render Pipeline/Lit");
-                if (shader == null) shader = Shader.Find("Standard");
+                if (!shader) shader = Shader.Find("Standard");
                 
                 _autoValidMaterial = new Material(shader);
                 _autoValidMaterial.name = "Auto_ValidPlacement (Testing)";
@@ -322,10 +319,10 @@ namespace Platforms
         /// Creates or returns the auto-generated red translucent material for invalid placement
         private static Material GetAutoInvalidMaterial()
         {
-            if (_autoInvalidMaterial == null)
+            if (!_autoInvalidMaterial)
             {
                 Shader shader = Shader.Find("Universal Render Pipeline/Lit");
-                if (shader == null) shader = Shader.Find("Standard");
+                if (!shader) shader = Shader.Find("Standard");
                 
                 _autoInvalidMaterial = new Material(shader);
                 _autoInvalidMaterial.name = "Auto_InvalidPlacement (Testing)";

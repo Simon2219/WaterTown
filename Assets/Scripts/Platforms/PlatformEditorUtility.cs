@@ -134,10 +134,10 @@ namespace Platforms
             Vector3 d = p + (-r * hx) + (f * hz);
             Gizmos.DrawLine(a, b); Gizmos.DrawLine(b, c); Gizmos.DrawLine(c, d); Gizmos.DrawLine(d, a);
 
-            if (_socketSystem == null) return;
+            if (!_socketSystem) return;
             
             var sockets = _socketSystem.Sockets;
-            if (sockets == null || sockets.Count == 0) return;
+            if (sockets is not { Count: > 0 }) return;
 
             int footprintWidth = Mathf.Max(1, footprintSize.x);
             int footprintLength = Mathf.Max(1, footprintSize.y);

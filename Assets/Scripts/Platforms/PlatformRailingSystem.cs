@@ -28,9 +28,6 @@ namespace Platforms
         // Railing registry - maps socket index to railings attached to that socket
         private readonly Dictionary<int, List<PlatformRailing>> _socketToRailings = new();
         
-        // Cached list of railings (populated by GamePlatform at initialization)
-        private List<PlatformRailing> _cachedRailings;
-        
         
         #endregion
         
@@ -45,17 +42,6 @@ namespace Platforms
         {
             _platform = platform;
             _socketSystem = socketSystem;
-            
-            // Note: Event subscriptions are handled by GamePlatform
-            // SocketsChanged -> GamePlatform.OnSocketsChanged -> ConnectionsChanged
-            // Railing visibility is triggered via RefreshAllRailingsVisibility facade
-        }
-        
-        
-        /// Sets the cached railings list (provided by GamePlatform)
-        public void SetCachedRailings(List<PlatformRailing> railings)
-        {
-            _cachedRailings = railings;
         }
         
         
@@ -145,17 +131,17 @@ namespace Platforms
         /// IMPORTANT: Rails must update FIRST so counters are correct when Posts check visibility
         public void RefreshAllRailingsVisibility()
         {
-            if (_cachedRailings == null) return;
+            if (!_platform) return;
             
             // First pass: update all Rails (they update the visibility counters via SetHidden)
-            foreach (var r in _cachedRailings)
+            foreach (var r in _platform.CachedRailings)
             {
                 if (r && r.type == PlatformRailing.RailingType.Rail)
                     r.UpdateVisibility();
             }
             
             // Second pass: update all Posts (they use HasVisibleRailOnSockets which reads counters)
-            foreach (var r in _cachedRailings)
+            foreach (var r in _platform.CachedRailings)
             {
                 if (r && r.type == PlatformRailing.RailingType.Post)
                     r.UpdateVisibility();
@@ -165,9 +151,9 @@ namespace Platforms
 
         public void EnsureChildrenRailingsRegistered()
         {
-            if (_cachedRailings == null) return;
+            if (!_platform) return;
             
-            foreach (var r in _cachedRailings)
+            foreach (var r in _platform.CachedRailings)
             {
                 if (r) r.EnsureRegistered();
             }

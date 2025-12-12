@@ -142,9 +142,6 @@ namespace Platforms
         private readonly Dictionary<GameObject, ModuleReg> _moduleRegs = new();
         private readonly Dictionary<int, List<GameObject>> _socketToModules = new();
         
-        // Cached list of modules (populated by GamePlatform at initialization)
-        private List<PlatformModule> _cachedModules;
-        
         
         #endregion
         
@@ -168,16 +165,9 @@ namespace Platforms
         }
         
         
-        /// Sets the cached modules list (provided by GamePlatform)
-        public void SetCachedModules(List<PlatformModule> modules)
-        {
-            _cachedModules = modules;
-        }
-        
-        
         private void OnDestroy()
         {
-            if (_platform != null)
+            if (_platform)
             {
                 _platform.HasMoved -= OnPlatformMoved;
             }
@@ -653,9 +643,9 @@ namespace Platforms
         public void ResetConnections()
         {
             // Show all modules
-            if (_cachedModules != null)
+            if (_platform)
             {
-                foreach (var m in _cachedModules)
+                foreach (var m in _platform.CachedModules)
                 {
                     if (m) m.SetHidden(false);
                 }
@@ -722,10 +712,11 @@ namespace Platforms
 
             var list = new List<int>(socketIndices);
             
+            // Find module in platform's cached list
             PlatformModule pm = null;
-            if (_cachedModules != null)
+            if (_platform)
             {
-                foreach (var cachedModule in _cachedModules)
+                foreach (var cachedModule in _platform.CachedModules)
                 {
                     if (cachedModule && cachedModule.gameObject == moduleGo)
                     {
@@ -735,7 +726,7 @@ namespace Platforms
                 }
             }
             if (!pm) pm = moduleGo.GetComponent<PlatformModule>();
-            bool blocks = pm ? pm.blocksLink : false;
+            bool blocks = pm && pm.blocksLink;
 
             var reg = new ModuleReg { go = moduleGo, socketIndices = list.ToArray(), blocksLink = blocks };
             _moduleRegs[moduleGo] = reg;
@@ -777,9 +768,9 @@ namespace Platforms
             if (!moduleGo) return;
 
             PlatformModule pm = null;
-            if (_cachedModules != null)
+            if (_platform)
             {
-                foreach (var cachedModule in _cachedModules)
+                foreach (var cachedModule in _platform.CachedModules)
                 {
                     if (cachedModule && cachedModule.gameObject == moduleGo)
                     {
@@ -790,7 +781,7 @@ namespace Platforms
             }
             if (!pm) pm = moduleGo.GetComponent<PlatformModule>();
             
-            if (pm != null) pm.SetHidden(hidden);
+            if (pm) pm.SetHidden(hidden);
             else moduleGo.SetActive(!hidden);
 
             RefreshSocketStatuses();
@@ -802,9 +793,9 @@ namespace Platforms
             if (!moduleGo) return;
             
             PlatformModule pm = null;
-            if (_cachedModules != null)
+            if (_platform)
             {
-                foreach (var cachedModule in _cachedModules)
+                foreach (var cachedModule in _platform.CachedModules)
                 {
                     if (cachedModule && cachedModule.gameObject == moduleGo)
                     {
@@ -821,9 +812,9 @@ namespace Platforms
 
         public void EnsureChildrenModulesRegistered()
         {
-            if (_cachedModules == null) return;
+            if (!_platform) return;
             
-            foreach (var m in _cachedModules)
+            foreach (var m in _platform.CachedModules)
             {
                 if (m) m.EnsureRegistered();
             }

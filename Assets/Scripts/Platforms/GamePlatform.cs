@@ -85,7 +85,12 @@ namespace Platforms
         
         private readonly List<PlatformModule> _cachedModules = new();
         private readonly List<PlatformRailing> _cachedRailings = new();
-        public readonly List<Collider> _cachedColliders = new();
+        private readonly List<Collider> _cachedColliders = new();
+        
+        // Read-only access for sub-systems
+        public IReadOnlyList<PlatformModule> CachedModules => _cachedModules;
+        public IReadOnlyList<PlatformRailing> CachedRailings => _cachedRailings;
+        public IReadOnlyList<Collider> CachedColliders => _cachedColliders;
         
         
         #endregion
@@ -251,11 +256,6 @@ namespace Platforms
             
             // Ensure Links parent exists for NavMesh links
             EnsureLinksParentExists();
-            
-            
-            // Pass cached data to sub-components
-            _socketSystem?.SetCachedModules(_cachedModules);
-            _railingSystem?.SetCachedRailings(_cachedRailings);
         }
         
         
@@ -304,11 +304,11 @@ namespace Platforms
 
         private void EnsureLinksParentExists()
         {
-            if (_linksParentTransform != null) return;
+            if (_linksParentTransform) return;
             
             _linksParentTransform = transform.Find("Links");
             
-            if (_linksParentTransform == null)
+            if (!_linksParentTransform)
             {
                 var go = new GameObject("Links");
                 _linksParentTransform = go.transform;
@@ -409,7 +409,7 @@ namespace Platforms
 
         public void GetSocketIndexRangeForEdge(Edge edge, out int startIndex, out int endIndex)
         {
-            if (_socketSystem != null)
+            if (_socketSystem)
                 _socketSystem.GetSocketIndexRangeForEdge((PlatformSocketSystem.Edge)(int)edge, out startIndex, out endIndex);
             else
             {
