@@ -63,16 +63,7 @@ namespace Platforms
         private Material[] _originalMaterials;
         private readonly List<Renderer> _allRenderers = new List<Renderer>();
         
-        // Cached colliders (provided by GamePlatform)
-        private List<Collider> _cachedColliders;
         
-        
-        #endregion
-        
-        
-        
-        
-        #region Materials Configuration
         
         
         [Header("Pickup Materials (Optional - will auto-create if not assigned)")]
@@ -100,12 +91,6 @@ namespace Platforms
         }
         
         
-        /// Sets the cached colliders list (provided by GamePlatform)
-        public void SetCachedColliders(List<Collider> colliders)
-        {
-            _cachedColliders = colliders;
-        }
-        
         
         #endregion
         
@@ -129,9 +114,9 @@ namespace Platforms
             _originalRotation = ((Component)this).transform.rotation;
             
             // Disable colliders so we can raycast through the platform
-            if (_cachedColliders != null)
+            if (_platform._cachedColliders != null)
             {
-                foreach (var col in _cachedColliders)
+                foreach (var col in _platform._cachedColliders)
                 {
                     if (col) col.enabled = false;
                 }
@@ -159,9 +144,9 @@ namespace Platforms
         public void OnPlaced()
         {
             // Restore colliders
-            if (_cachedColliders != null)
+            if (_platform._cachedColliders != null)
             {
-                foreach (var col in _cachedColliders)
+                foreach (var col in _platform._cachedColliders)
                 {
                     if (col) col.enabled = true;
                 }
@@ -209,9 +194,9 @@ namespace Platforms
                 ((Component)this).transform.rotation = _originalRotation;
                 
                 // Re-enable colliders
-                if (_cachedColliders != null)
+                if (_platform._cachedColliders != null)
                 {
-                    foreach (var col in _cachedColliders)
+                    foreach (var col in _platform._cachedColliders)
                     {
                         if (col) col.enabled = true;
                     }

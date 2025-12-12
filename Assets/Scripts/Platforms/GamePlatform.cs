@@ -85,7 +85,7 @@ namespace Platforms
         
         private readonly List<PlatformModule> _cachedModules = new();
         private readonly List<PlatformRailing> _cachedRailings = new();
-        private readonly List<Collider> _cachedColliders = new();
+        public readonly List<Collider> _cachedColliders = new();
         
         
         #endregion
@@ -256,7 +256,6 @@ namespace Platforms
             // Pass cached data to sub-components
             _socketSystem?.SetCachedModules(_cachedModules);
             _railingSystem?.SetCachedRailings(_cachedRailings);
-            _pickupHandler?.SetCachedColliders(_cachedColliders);
         }
         
         
