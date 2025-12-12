@@ -29,6 +29,7 @@ namespace Building
         [SerializeField] private InputActionReference cancelAction;
         [SerializeField] private InputActionReference rotateCWAction;
         [SerializeField] private InputActionReference rotateCCWAction;
+        [SerializeField] private InputActionReference pickupAction;
 
         [Header("Placement Settings")]
         [SerializeField] private LayerMask raycastLayers;
@@ -122,6 +123,12 @@ namespace Building
                 rotateCCWAction.action.Enable();
                 rotateCCWAction.action.performed += OnRotateCCWPerformed;
             }
+            
+            if (pickupAction?.action != null)
+            {
+                pickupAction.action.Enable();
+                pickupAction.action.performed += OnPickupPerformed;
+            }
         }
 
         private void OnDisable()
@@ -151,6 +158,12 @@ namespace Building
             {
                 rotateCCWAction.action.performed -= OnRotateCCWPerformed;
                 rotateCCWAction.action.Disable();
+            }
+            
+            if (pickupAction?.action != null)
+            {
+                pickupAction.action.performed -= OnPickupPerformed;
+                pickupAction.action.Disable();
             }
 
             if (_currentPickup != null)
@@ -356,6 +369,26 @@ namespace Building
             if (_currentRotation < 0f) _currentRotation += 360f;
 
             _currentPickup.Transform.rotation = Quaternion.Euler(0f, _currentRotation, 0f);
+        }
+        
+        private void OnPickupPerformed(InputAction.CallbackContext context)
+        {
+            // Don't pick up if we already have something picked up
+            if (_currentPickup != null) return;
+            if (!mainCamera) return;
+            
+            // Raycast from camera through mouse position
+            Vector2 mousePosition = Mouse.current != null ? Mouse.current.position.ReadValue() : Vector2.zero;
+            Ray ray = mainCamera.ScreenPointToRay(mousePosition);
+            
+            if (!Physics.Raycast(ray, out RaycastHit hit, 1000f, raycastLayers)) return;
+            
+            // Try to get GamePlatform from hit object (platforms have colliders on children)
+            var platform = hit.collider.GetComponentInParent<GamePlatform>();
+            if (!platform) return;
+            
+            // Use existing method to handle pickup
+            PickupExistingPlatform(platform);
         }
         
         #endregion
