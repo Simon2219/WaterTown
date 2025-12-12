@@ -128,6 +128,11 @@ namespace Building
             {
                 pickupAction.action.Enable();
                 pickupAction.action.performed += OnPickupPerformed;
+                Debug.Log($"[BuildModeManager] Pickup action subscribed: {pickupAction.action.name}");
+            }
+            else
+            {
+                Debug.LogWarning("[BuildModeManager] pickupAction is null or has no action!");
             }
         }
 
@@ -373,19 +378,42 @@ namespace Building
         
         private void OnPickupPerformed(InputAction.CallbackContext context)
         {
+            Debug.Log("[BuildModeManager] OnPickupPerformed triggered");
+            
             // Don't pick up if we already have something picked up
-            if (_currentPickup != null) return;
-            if (!mainCamera) return;
+            if (_currentPickup != null)
+            {
+                Debug.Log("[BuildModeManager] Already have a pickup, ignoring");
+                return;
+            }
+            
+            if (!mainCamera)
+            {
+                Debug.LogWarning("[BuildModeManager] No main camera");
+                return;
+            }
             
             // Raycast from camera through mouse position
             Vector2 mousePosition = Mouse.current != null ? Mouse.current.position.ReadValue() : Vector2.zero;
             Ray ray = mainCamera.ScreenPointToRay(mousePosition);
             
-            if (!Physics.Raycast(ray, out RaycastHit hit, 1000f, raycastLayers)) return;
+            if (!Physics.Raycast(ray, out RaycastHit hit, 1000f, raycastLayers))
+            {
+                Debug.Log($"[BuildModeManager] Raycast missed (layers: {raycastLayers.value})");
+                return;
+            }
+            
+            Debug.Log($"[BuildModeManager] Raycast hit: {hit.collider.name} on layer {LayerMask.LayerToName(hit.collider.gameObject.layer)}");
             
             // Try to get GamePlatform from hit object (platforms have colliders on children)
             var platform = hit.collider.GetComponentInParent<GamePlatform>();
-            if (!platform) return;
+            if (!platform)
+            {
+                Debug.Log("[BuildModeManager] Hit object has no GamePlatform in parent hierarchy");
+                return;
+            }
+            
+            Debug.Log($"[BuildModeManager] Found platform: {platform.name}, picking up...");
             
             // Use existing method to handle pickup
             PickupExistingPlatform(platform);
