@@ -121,6 +121,12 @@ namespace Agents
         private int _frameOffset;
         private static int _globalFrameOffset;
         
+        // Off-mesh link traversal
+        private bool _isTraversingLink;
+        private Vector3 _linkStartPos;
+        private Vector3 _linkEndPos;
+        private float _linkTraversalProgress;
+        
         #endregion
         
         #region Initialization
@@ -195,8 +201,63 @@ namespace Agents
         {
             if (!_initialized || !_navAgent) return;
             
+            // Handle off-mesh link traversal at normal speed
+            HandleOffMeshLinkTraversal();
+            
             UpdateStatus();
             CheckDestinationReached();
+        }
+        
+        /// <summary>
+        /// Handles manual off-mesh link traversal at normal movement speed.
+        /// Called when NavMeshLink.autoUpdatePosition is false.
+        /// </summary>
+        private void HandleOffMeshLinkTraversal()
+        {
+            if (!_navAgent.isOnOffMeshLink)
+            {
+                _isTraversingLink = false;
+                return;
+            }
+            
+            // Start traversal
+            if (!_isTraversingLink)
+            {
+                _isTraversingLink = true;
+                _linkTraversalProgress = 0f;
+                
+                var linkData = _navAgent.currentOffMeshLinkData;
+                _linkStartPos = linkData.startPos;
+                _linkEndPos = linkData.endPos;
+            }
+            
+            // Move along link at normal speed
+            float linkDistance = Vector3.Distance(_linkStartPos, _linkEndPos);
+            if (linkDistance > 0.01f)
+            {
+                float speed = _navAgent.speed;
+                _linkTraversalProgress += (speed * Time.deltaTime) / linkDistance;
+                
+                if (_linkTraversalProgress >= 1f)
+                {
+                    // Completed traversal
+                    _linkTraversalProgress = 1f;
+                    transform.position = _linkEndPos;
+                    _navAgent.CompleteOffMeshLink();
+                    _isTraversingLink = false;
+                }
+                else
+                {
+                    // Interpolate position
+                    transform.position = Vector3.Lerp(_linkStartPos, _linkEndPos, _linkTraversalProgress);
+                }
+            }
+            else
+            {
+                // Link too short, complete immediately
+                _navAgent.CompleteOffMeshLink();
+                _isTraversingLink = false;
+            }
         }
         
         /// <summary>

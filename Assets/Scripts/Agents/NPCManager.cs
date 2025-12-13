@@ -435,29 +435,22 @@ namespace Agents
                 Debug.LogWarning($"[NPCManager] Layer '{agentLayerName}' not found!");
             }
             
-            // Get/Add NavMeshAgent FIRST (before NPCAgent, which requires it)
+            // IMPORTANT: Position at NavMesh BEFORE adding NavMeshAgent to avoid warning
+            agentGo.transform.position = navMeshPosition;
+            
+            // Get/Add NavMeshAgent
             var navAgent = agentGo.GetComponent<NavMeshAgent>();
-            bool wasNewlyAdded = false;
             if (!navAgent)
             {
-                // Disable immediately to prevent Unity's automatic NavMesh check
                 navAgent = agentGo.AddComponent<NavMeshAgent>();
-                navAgent.enabled = false;
-                wasNewlyAdded = true;
             }
             
-            // Set agent type FIRST (before enabling, so Unity checks correct NavMesh)
+            // Configure agent
             int finalAgentType = overrideAgentTypeID >= 0 ? overrideAgentTypeID : agentType.AgentTypeID;
             navAgent.agentTypeID = finalAgentType;
-            
-            // Configure other properties
             ConfigureNavMeshAgent(navAgent);
             
-            // Now enable and warp
-            if (wasNewlyAdded)
-            {
-                navAgent.enabled = true;
-            }
+            // Warp to ensure proper placement
             navAgent.Warp(navMeshPosition);
             
             // Now add NPCAgent (NavMeshAgent already exists)
