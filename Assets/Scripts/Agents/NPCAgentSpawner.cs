@@ -34,10 +34,7 @@ namespace Agents
         [SerializeField] private bool useSpawnPoint = false;
         
         [Header("Ground Detection")]
-        [Tooltip("Use physics raycast to detect ground (uses Ground Layer Mask). If false, uses plane raycast at Ground Plane Height.")]
-        [SerializeField] private bool usePhysicsForGround = false;
-        
-        [Tooltip("Plane height for ground detection (Y coordinate of your NavMesh/platforms). Used when 'Use Physics For Ground' is false.")]
+        [Tooltip("Y coordinate of your NavMesh/platforms for plane raycasting.")]
         [SerializeField] private float groundPlaneHeight = 0f;
         
         [Tooltip("Search radius for finding NavMesh from click point.")]
@@ -50,9 +47,6 @@ namespace Agents
         [Header("Layer Masks")]
         [Tooltip("Layer mask for selecting agents. Should include your NPCAgent layer.")]
         [SerializeField] private LayerMask agentLayerMask = ~0;
-        
-        [Tooltip("Layer mask for ground/platform detection (used if you switch to physics raycast).")]
-        [SerializeField] private LayerMask groundLayerMask = ~0;
         
         [Header("References")]
         [SerializeField] private Camera mainCamera;
@@ -182,22 +176,22 @@ namespace Agents
         /// </summary>
         private void DoSelectOrMove()
         {
-            if (!mainCamera) return;
-            
-            Ray ray = mainCamera.ScreenPointToRay(Mouse.current.position.ReadValue());
-            
-            if (drawDebugVisuals)
+            if (!mainCamera)
             {
-                Debug.DrawRay(ray.origin, ray.direction * maxRaycastDistance, Color.cyan, 2f);
+                mainCamera = Camera.main;
+                if (!mainCamera) return;
             }
             
+            if (Mouse.current == null) return;
+            
+            Vector2 mouseScreenPos = Mouse.current.position.ReadValue();
+            Ray ray = mainCamera.ScreenPointToRay(mouseScreenPos);
+            
             // Step 1: Check if we clicked on an agent
-            // Use RaycastAll with layer mask to check for agents
             RaycastHit[] hits = Physics.RaycastAll(ray, maxRaycastDistance, agentLayerMask);
             
-            if (debugLogs) Debug.Log($"[Spawner] Agent raycast hit {hits.Length} objects on layer mask {agentLayerMask.value}");
+            if (debugLogs) Debug.Log($"[Spawner] Agent raycast: {hits.Length} hits");
             
-            // Check each hit for an NPCAgent
             foreach (var hit in hits)
             {
                 var agent = hit.collider.GetComponent<NPCAgent>();
@@ -206,36 +200,24 @@ namespace Agents
                 
                 if (agent != null)
                 {
-                    // Found an agent - select it
-                    if (debugLogs) Debug.Log($"[Spawner] ★ Clicked on agent #{agent.AgentId}");
+                    if (debugLogs) Debug.Log($"[Spawner] ★ Clicked agent #{agent.AgentId}");
                     SelectAgent(agent);
                     return;
                 }
             }
             
-            // Step 2: Didn't click on an agent
-            // If we have a selected agent, try to move it
+            // Step 2: Didn't click agent - if we have one selected, move it
             if (_selectedAgent != null)
             {
                 if (GetGroundPosition(out Vector3 destination))
                 {
                     if (debugLogs) Debug.Log($"[Spawner] → Moving agent #{_selectedAgent.AgentId} to {destination}");
-                    
-                    if (drawDebugVisuals)
-                    {
-                        Debug.DrawRay(destination, Vector3.up * 3f, Color.blue, 3f);
-                    }
-                    
                     MoveSelectedAgent(destination);
-                }
-                else
-                {
-                    if (debugLogs) Debug.Log("[Spawner] Could not find ground position for move");
                 }
             }
             else
             {
-                if (debugLogs) Debug.Log("[Spawner] No agent selected - click on one first");
+                if (debugLogs) Debug.Log("[Spawner] No agent selected");
             }
         }
         
@@ -301,46 +283,39 @@ namespace Agents
         
         /// <summary>
         /// Get world position from mouse cursor, then snap to nearest NavMesh point.
-        /// Uses either physics raycast (with ground layer mask) or plane raycast.
+        /// Uses plane raycast at groundPlaneHeight (same as WorldGrid.RaycastToCell).
         /// </summary>
         private bool GetGroundPosition(out Vector3 position)
         {
             position = Vector3.zero;
-            if (!mainCamera) return false;
             
-            Vector2 mousePos = Mouse.current.position.ReadValue();
-            Ray ray = mainCamera.ScreenPointToRay(mousePos);
-            
-            Vector3 hitPoint;
-            
-            if (usePhysicsForGround)
+            if (!mainCamera)
             {
-                // Physics raycast using ground layer mask
-                if (!Physics.Raycast(ray, out RaycastHit hit, maxRaycastDistance, groundLayerMask))
-                {
-                    if (debugLogs) Debug.Log("[Spawner] Physics ground raycast missed");
-                    return false;
-                }
-                hitPoint = hit.point;
-                
-                if (debugLogs) Debug.Log($"[Spawner] Physics hit ground '{hit.collider.name}' at {hitPoint}");
+                mainCamera = Camera.main;
+                if (!mainCamera) return false;
             }
-            else
+            
+            if (Mouse.current == null) return false;
+            
+            // Get mouse position and create ray from camera
+            Vector2 mouseScreenPos = Mouse.current.position.ReadValue();
+            Ray ray = mainCamera.ScreenPointToRay(mouseScreenPos);
+            
+            // Plane raycast at ground height (same approach as WorldGrid.RaycastToCell)
+            var plane = new Plane(Vector3.up, new Vector3(0f, groundPlaneHeight, 0f));
+            
+            if (!plane.Raycast(ray, out float dist))
             {
-                // Plane raycast at ground height
-                var plane = new Plane(Vector3.up, new Vector3(0, groundPlaneHeight, 0));
-                
-                if (!plane.Raycast(ray, out float distance))
-                {
-                    if (debugLogs) Debug.Log("[Spawner] Plane raycast missed");
-                    return false;
-                }
-                hitPoint = ray.GetPoint(distance);
+                return false;
             }
+            
+            // Calculate hit point
+            Vector3 hitPoint = ray.origin + ray.direction * dist;
             
             if (drawDebugVisuals)
             {
-                Debug.DrawRay(hitPoint, Vector3.up * 2f, Color.yellow, 1f);
+                Debug.DrawRay(ray.origin, ray.direction * dist, Color.cyan, 2f);
+                Debug.DrawRay(hitPoint, Vector3.up * 2f, Color.yellow, 2f);
             }
             
             // Find nearest NavMesh point
@@ -350,7 +325,7 @@ namespace Agents
                 
                 if (drawDebugVisuals)
                 {
-                    Debug.DrawLine(hitPoint, position, Color.magenta, 1f);
+                    Debug.DrawRay(position, Vector3.up * 3f, Color.green, 2f);
                 }
                 
                 return true;

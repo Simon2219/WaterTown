@@ -437,21 +437,28 @@ namespace Agents
             
             // Get/Add NavMeshAgent FIRST (before NPCAgent, which requires it)
             var navAgent = agentGo.GetComponent<NavMeshAgent>();
+            bool wasNewlyAdded = false;
             if (!navAgent)
             {
+                // Disable immediately to prevent Unity's automatic NavMesh check
                 navAgent = agentGo.AddComponent<NavMeshAgent>();
+                navAgent.enabled = false;
+                wasNewlyAdded = true;
             }
             
-            // Configure and warp
-            ConfigureNavMeshAgent(navAgent);
-            navAgent.Warp(navMeshPosition);
-            
-            // Set agent type after warp
+            // Set agent type FIRST (before enabling, so Unity checks correct NavMesh)
             int finalAgentType = overrideAgentTypeID >= 0 ? overrideAgentTypeID : agentType.AgentTypeID;
-            if (finalAgentType != 0)
+            navAgent.agentTypeID = finalAgentType;
+            
+            // Configure other properties
+            ConfigureNavMeshAgent(navAgent);
+            
+            // Now enable and warp
+            if (wasNewlyAdded)
             {
-                navAgent.agentTypeID = finalAgentType;
+                navAgent.enabled = true;
             }
+            navAgent.Warp(navMeshPosition);
             
             // Now add NPCAgent (NavMeshAgent already exists)
             var npcAgent = agentGo.GetComponent<NPCAgent>();
