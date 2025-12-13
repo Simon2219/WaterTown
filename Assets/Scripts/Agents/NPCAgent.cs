@@ -238,18 +238,25 @@ namespace Agents
                 float speed = _navAgent.speed;
                 _linkTraversalProgress += (speed * Time.deltaTime) / linkDistance;
                 
+                // Apply baseOffset to keep agent at correct height (same as normal NavMesh walking)
+                float yOffset = _navAgent.baseOffset;
+                
                 if (_linkTraversalProgress >= 1f)
                 {
                     // Completed traversal
                     _linkTraversalProgress = 1f;
-                    transform.position = _linkEndPos;
+                    Vector3 endPos = _linkEndPos;
+                    endPos.y += yOffset;
+                    transform.position = endPos;
                     _navAgent.CompleteOffMeshLink();
                     _isTraversingLink = false;
                 }
                 else
                 {
-                    // Interpolate position
-                    transform.position = Vector3.Lerp(_linkStartPos, _linkEndPos, _linkTraversalProgress);
+                    // Interpolate position with height offset
+                    Vector3 pos = Vector3.Lerp(_linkStartPos, _linkEndPos, _linkTraversalProgress);
+                    pos.y += yOffset;
+                    transform.position = pos;
                 }
             }
             else
