@@ -56,9 +56,8 @@ namespace Agents
         [SerializeField] private GameObject agentPrefab;
         
         [Header("Default Agent Settings")]
-        [Tooltip("NavMesh Agent Type ID. Must match the agent type used when baking NavMeshSurfaces.\n" +
-                 "Set this to match your Navigation settings (Window > AI > Navigation).")]
-        [SerializeField] private int agentTypeID = 0;
+        [Tooltip("NavMesh Agent Type. Must match the agent type used when baking NavMeshSurfaces.")]
+        [SerializeField] private NavMeshAgentType agentType;
         
         [SerializeField] private float defaultSpeed = 3.5f;
         [SerializeField] private float defaultAngularSpeed = 120f;
@@ -553,7 +552,7 @@ namespace Agents
         private void ConfigureNavMeshAgent(NavMeshAgent navAgent)
         {
             // Agent type MUST match the NavMeshSurface baking type for pathfinding to work
-            navAgent.agentTypeID = agentTypeID;
+            navAgent.agentTypeID = agentType.AgentTypeID;
             
             navAgent.speed = defaultSpeed;
             navAgent.angularSpeed = defaultAngularSpeed;
