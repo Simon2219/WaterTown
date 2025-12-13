@@ -7,7 +7,11 @@ namespace Agents
 {
     /// <summary>
     /// Handles agent spawning and selection/movement commands via InputActions.
-    /// Assign InputAction references in the Inspector.
+    /// 
+    /// Flow:
+    /// 1. Click anywhere → raycast
+    /// 2. If raycast hits an Agent → select it
+    /// 3. If agent is already selected AND click on ground → move agent there
     /// </summary>
     [DisallowMultipleComponent]
     public class NPCAgentSpawner : MonoBehaviour
@@ -15,90 +19,53 @@ namespace Agents
         #region Configuration
         
         [Header("Input Actions")]
-        [Tooltip("InputAction for spawning a new agent at mouse cursor position.")]
+        [Tooltip("InputAction for spawning a new agent.")]
         [SerializeField] private InputActionReference spawnAgentAction;
         
-        [Tooltip("InputAction for selecting an agent or issuing a move command.")]
+        [Tooltip("InputAction for selecting/moving agents (typically left mouse click).")]
         [SerializeField] private InputActionReference selectMoveAction;
         
-        [Header("Spawn Position Settings")]
-        [Tooltip("Optional spawn point transform. If set and 'Use Spawn Point' is true, agents spawn here.")]
+        [Header("Spawn Settings")]
+        [Tooltip("Optional fixed spawn point. If set and enabled, agents spawn here.")]
         [SerializeField] private Transform spawnPoint;
-        
-        [Tooltip("Use spawn point instead of mouse cursor position.")]
         [SerializeField] private bool useSpawnPoint = false;
         
-        [Tooltip("Layer mask for ground/platform detection when spawning.")]
-        [SerializeField] private LayerMask groundLayerMask = ~0;
+        [Header("Ground Detection")]
+        [Tooltip("Plane height for ground detection (Y coordinate of your NavMesh/platforms).")]
+        [SerializeField] private float groundPlaneHeight = 0f;
         
-        [Tooltip("Maximum raycast distance for ground detection.")]
-        [SerializeField] private float groundRaycastDistance = 1000f;
+        [Tooltip("Search radius for finding NavMesh from click point.")]
+        [SerializeField] private float navMeshSearchRadius = 5f;
         
-        [Header("Spawn Raycast Mode")]
-        [Tooltip("How to determine spawn position from mouse click.")]
-        [SerializeField] private SpawnRaycastMode raycastMode = SpawnRaycastMode.PhysicsRaycast;
-        
-        [Tooltip("Plane height for PlaneRaycast mode.")]
-        [SerializeField] private float planeHeight = 0f;
-        
-        [Header("Selection Settings")]
-        [Tooltip("Layer mask for agent selection raycasts.")]
-        [SerializeField] private LayerMask agentLayerMask = ~0;
-        
-        [Tooltip("Maximum raycast distance for agent selection.")]
-        [SerializeField] private float maxSelectionRaycastDistance = 1000f;
+        [Header("Raycasting")]
+        [Tooltip("Maximum raycast distance.")]
+        [SerializeField] private float maxRaycastDistance = 500f;
         
         [Header("References")]
-        [Tooltip("Main camera for raycasting. If null, uses Camera.main.")]
         [SerializeField] private Camera mainCamera;
         
         [Header("Debug")]
-        [SerializeField] private bool debugLogs = false;
-        [SerializeField] private bool drawDebugRays = false;
-        [SerializeField] private bool drawDebugMarkers = false;
-        
-        #endregion
-        
-        #region Enums
-        
-        public enum SpawnRaycastMode
-        {
-            [Tooltip("Physics raycast - detects actual collider surfaces (recommended).")]
-            PhysicsRaycast,
-            
-            [Tooltip("Plane raycast - raycasts to a horizontal plane at specified height.")]
-            PlaneRaycast,
-            
-            [Tooltip("NavMesh sample - finds nearest NavMesh point from physics hit.")]
-            NavMeshSample
-        }
+        [SerializeField] private bool debugLogs = true;
+        [SerializeField] private bool drawDebugVisuals = true;
         
         #endregion
         
         #region Events
         
-        /// <summary>Fired when an agent is spawned via this spawner.</summary>
         public event Action<NPCAgent> OnAgentSpawned;
-        
-        /// <summary>Fired when an agent is selected.</summary>
         public event Action<NPCAgent> OnAgentSelected;
-        
-        /// <summary>Fired when an agent is deselected.</summary>
         public event Action<NPCAgent> OnAgentDeselected;
-        
-        /// <summary>Fired when a move command is issued to the selected agent.</summary>
         public event Action<NPCAgent, Vector3> OnMoveCommandIssued;
         
         #endregion
         
-        #region Public Properties
+        #region Properties
         
-        /// <summary>Currently selected agent (if any).</summary>
         public NPCAgent SelectedAgent => _selectedAgent;
         
         #endregion
         
-        #region Private State
+        #region Private
         
         private NPCManager _manager;
         private NPCAgent _selectedAgent;
@@ -109,24 +76,15 @@ namespace Agents
         
         private void Awake()
         {
-            if (!mainCamera)
-            {
-                mainCamera = Camera.main;
-            }
-            
-            if (!mainCamera)
-            {
-                Debug.LogError("[NPCAgentSpawner] No camera assigned and Camera.main is null.");
-            }
+            if (!mainCamera) mainCamera = Camera.main;
         }
         
         private void Start()
         {
             _manager = NPCManager.Instance;
-            
             if (!_manager)
             {
-                Debug.LogError("[NPCAgentSpawner] NPCManager not found in scene. Disabling spawner.");
+                Debug.LogError("[NPCAgentSpawner] NPCManager not found!");
                 enabled = false;
             }
         }
@@ -135,372 +93,268 @@ namespace Agents
         {
             if (spawnAgentAction?.action != null)
             {
-                spawnAgentAction.action.performed += OnSpawnActionPerformed;
+                spawnAgentAction.action.performed += OnSpawnInput;
                 spawnAgentAction.action.Enable();
+                if (debugLogs) Debug.Log($"[Spawner] Registered SPAWN: {spawnAgentAction.action.name}");
             }
             
             if (selectMoveAction?.action != null)
             {
-                selectMoveAction.action.performed += OnSelectMoveActionPerformed;
+                selectMoveAction.action.performed += OnSelectMoveInput;
                 selectMoveAction.action.Enable();
+                if (debugLogs) Debug.Log($"[Spawner] Registered SELECT/MOVE: {selectMoveAction.action.name}");
             }
         }
         
         private void OnDisable()
         {
             if (spawnAgentAction?.action != null)
-            {
-                spawnAgentAction.action.performed -= OnSpawnActionPerformed;
-            }
+                spawnAgentAction.action.performed -= OnSpawnInput;
             
             if (selectMoveAction?.action != null)
-            {
-                selectMoveAction.action.performed -= OnSelectMoveActionPerformed;
-            }
+                selectMoveAction.action.performed -= OnSelectMoveInput;
         }
         
         #endregion
         
         #region Input Handlers
         
-        private void OnSpawnActionPerformed(InputAction.CallbackContext ctx)
+        private void OnSpawnInput(InputAction.CallbackContext ctx)
         {
-            SpawnAgent();
+            if (debugLogs) Debug.Log("[Spawner] ▶ SPAWN INPUT");
+            DoSpawn();
         }
         
-        private void OnSelectMoveActionPerformed(InputAction.CallbackContext ctx)
+        private void OnSelectMoveInput(InputAction.CallbackContext ctx)
         {
-            HandleSelectOrMove();
+            if (debugLogs) Debug.Log("[Spawner] ▶ SELECT/MOVE INPUT");
+            DoSelectOrMove();
         }
         
         #endregion
         
-        #region Spawning
+        #region Core Logic
         
         /// <summary>
-        /// Spawns an agent at the configured location (mouse cursor or spawn point).
+        /// Spawn an agent at mouse position (or spawn point if configured).
         /// </summary>
-        public void SpawnAgent()
+        private void DoSpawn()
         {
             if (!_manager) return;
             
-            Vector3 spawnPosition;
-            
+            Vector3 pos;
             if (useSpawnPoint && spawnPoint)
             {
-                spawnPosition = spawnPoint.position;
-                
-                if (debugLogs)
-                    Debug.Log($"[NPCAgentSpawner] Using spawn point position: {spawnPosition}");
+                pos = spawnPoint.position;
             }
-            else
+            else if (!GetGroundPosition(out pos))
             {
-                if (!TryGetWorldPosition(out spawnPosition))
-                {
-                    if (debugLogs)
-                        Debug.Log("[NPCAgentSpawner] Failed to find valid spawn position from mouse cursor.");
-                    return;
-                }
+                if (debugLogs) Debug.LogWarning("[Spawner] Could not find ground position for spawn");
+                return;
             }
             
-            if (drawDebugMarkers)
-            {
-                Debug.DrawRay(spawnPosition, Vector3.up * 3f, Color.green, 5f);
-            }
-            
-            var agent = _manager.SpawnAgent(spawnPosition);
-            
+            var agent = _manager.SpawnAgent(pos);
             if (agent)
             {
-                if (debugLogs)
-                    Debug.Log($"[NPCAgentSpawner] Spawned agent {agent.AgentId} at {agent.transform.position}");
-                
+                if (debugLogs) Debug.Log($"[Spawner] ✓ Spawned agent #{agent.AgentId}");
                 OnAgentSpawned?.Invoke(agent);
-            }
-            else
-            {
-                if (debugLogs)
-                    Debug.LogWarning($"[NPCAgentSpawner] Failed to spawn agent at {spawnPosition}");
             }
         }
         
         /// <summary>
-        /// Spawns an agent at a specific world position.
+        /// Main click handler:
+        /// 1. Raycast to find what was clicked
+        /// 2. If clicked on agent → select it
+        /// 3. Else if have selected agent → move it to click position
         /// </summary>
-        public NPCAgent SpawnAgentAt(Vector3 worldPosition)
+        private void DoSelectOrMove()
         {
-            if (!_manager) return null;
+            if (!mainCamera) return;
             
-            var agent = _manager.SpawnAgent(worldPosition);
+            Ray ray = mainCamera.ScreenPointToRay(Mouse.current.position.ReadValue());
             
-            if (agent)
+            if (drawDebugVisuals)
             {
-                OnAgentSpawned?.Invoke(agent);
+                Debug.DrawRay(ray.origin, ray.direction * maxRaycastDistance, Color.cyan, 2f);
             }
             
-            return agent;
+            // Step 1: Check if we clicked on an agent
+            // Use RaycastAll to check ALL objects the ray passes through
+            RaycastHit[] hits = Physics.RaycastAll(ray, maxRaycastDistance);
+            
+            if (debugLogs) Debug.Log($"[Spawner] Raycast hit {hits.Length} objects");
+            
+            // Check each hit for an NPCAgent
+            foreach (var hit in hits)
+            {
+                var agent = hit.collider.GetComponent<NPCAgent>();
+                if (agent == null)
+                    agent = hit.collider.GetComponentInParent<NPCAgent>();
+                
+                if (agent != null)
+                {
+                    // Found an agent - select it
+                    if (debugLogs) Debug.Log($"[Spawner] ★ Clicked on agent #{agent.AgentId}");
+                    SelectAgent(agent);
+                    return;
+                }
+            }
+            
+            // Step 2: Didn't click on an agent
+            // If we have a selected agent, try to move it
+            if (_selectedAgent != null)
+            {
+                if (GetGroundPosition(out Vector3 destination))
+                {
+                    if (debugLogs) Debug.Log($"[Spawner] → Moving agent #{_selectedAgent.AgentId} to {destination}");
+                    
+                    if (drawDebugVisuals)
+                    {
+                        Debug.DrawRay(destination, Vector3.up * 3f, Color.blue, 3f);
+                    }
+                    
+                    MoveSelectedAgent(destination);
+                }
+                else
+                {
+                    if (debugLogs) Debug.Log("[Spawner] Could not find ground position for move");
+                }
+            }
+            else
+            {
+                if (debugLogs) Debug.Log("[Spawner] No agent selected - click on one first");
+            }
         }
         
         #endregion
         
-        #region Selection & Movement
+        #region Selection
         
-        /// <summary>
-        /// Handles the combined select/move action.
-        /// - If clicking on an agent: select it
-        /// - If an agent is selected and clicking elsewhere: issue move command
-        /// </summary>
-        private void HandleSelectOrMove()
-        {
-            if (!mainCamera) return;
-            
-            Vector2 mousePosition = GetMouseScreenPosition();
-            Ray ray = mainCamera.ScreenPointToRay(mousePosition);
-            
-            // First, check if we're clicking on an agent
-            if (Physics.Raycast(ray, out RaycastHit agentHit, maxSelectionRaycastDistance, agentLayerMask))
-            {
-                var clickedAgent = agentHit.collider.GetComponent<NPCAgent>();
-                if (!clickedAgent)
-                {
-                    clickedAgent = agentHit.collider.GetComponentInParent<NPCAgent>();
-                }
-                
-                if (clickedAgent)
-                {
-                    SelectAgent(clickedAgent);
-                    return;
-                }
-            }
-            
-            // Not clicking on an agent - if we have one selected, issue move command
-            if (_selectedAgent)
-            {
-                if (TryGetWorldPosition(out Vector3 destination))
-                {
-                    if (drawDebugMarkers)
-                    {
-                        Debug.DrawRay(destination, Vector3.up * 2f, Color.blue, 3f);
-                    }
-                    
-                    IssueMoveCommand(destination);
-                }
-                else
-                {
-                    if (debugLogs)
-                        Debug.Log("[NPCAgentSpawner] Could not determine move destination.");
-                }
-            }
-            else
-            {
-                if (debugLogs)
-                    Debug.Log("[NPCAgentSpawner] Clicked empty space with no agent selected.");
-            }
-        }
-        
-        /// <summary>
-        /// Selects the specified agent, deselecting any previously selected agent.
-        /// </summary>
         public void SelectAgent(NPCAgent agent)
         {
-            if (agent == _selectedAgent) return;
-            
             // Deselect previous
-            if (_selectedAgent)
+            if (_selectedAgent != null && _selectedAgent != agent)
             {
                 _selectedAgent.Deselect();
                 OnAgentDeselected?.Invoke(_selectedAgent);
+                if (debugLogs) Debug.Log($"[Spawner] Deselected agent #{_selectedAgent.AgentId}");
             }
             
             // Select new
             _selectedAgent = agent;
-            
-            if (_selectedAgent)
+            if (_selectedAgent != null)
             {
                 _selectedAgent.Select();
                 OnAgentSelected?.Invoke(_selectedAgent);
-                
-                if (debugLogs)
-                    Debug.Log($"[NPCAgentSpawner] Selected agent {_selectedAgent.AgentId}");
+                if (debugLogs) Debug.Log($"[Spawner] ★ Selected agent #{_selectedAgent.AgentId}");
             }
         }
         
-        /// <summary>
-        /// Deselects the currently selected agent.
-        /// </summary>
-        public void DeselectAgent()
+        public void DeselectCurrent()
         {
-            if (_selectedAgent)
+            if (_selectedAgent != null)
             {
                 _selectedAgent.Deselect();
                 OnAgentDeselected?.Invoke(_selectedAgent);
-                
-                if (debugLogs)
-                    Debug.Log($"[NPCAgentSpawner] Deselected agent {_selectedAgent.AgentId}");
-                
+                if (debugLogs) Debug.Log($"[Spawner] Deselected agent #{_selectedAgent.AgentId}");
                 _selectedAgent = null;
             }
         }
         
-        /// <summary>
-        /// Issues a move command to the selected agent.
-        /// </summary>
-        public void IssueMoveCommand(Vector3 destination)
+        #endregion
+        
+        #region Movement
+        
+        private void MoveSelectedAgent(Vector3 destination)
         {
-            if (!_selectedAgent) return;
+            if (_selectedAgent == null) return;
             
             bool success = _selectedAgent.SetDestination(destination);
             
             if (success)
             {
-                if (debugLogs)
-                    Debug.Log($"[NPCAgentSpawner] Move command sent to agent {_selectedAgent.AgentId} -> {destination}");
-                
+                if (debugLogs) Debug.Log($"[Spawner] ✓ Move command sent");
                 OnMoveCommandIssued?.Invoke(_selectedAgent, destination);
             }
             else
             {
-                if (debugLogs)
-                    Debug.LogWarning($"[NPCAgentSpawner] Move command failed for agent {_selectedAgent.AgentId}");
+                if (debugLogs) Debug.LogWarning("[Spawner] ✗ Move command failed");
             }
         }
         
         #endregion
         
-        #region Raycast Helpers
+        #region Ground Position
         
         /// <summary>
-        /// Gets mouse screen position using new Input System.
+        /// Get world position from mouse cursor by raycasting to ground plane,
+        /// then snapping to nearest NavMesh point.
         /// </summary>
-        private Vector2 GetMouseScreenPosition()
+        private bool GetGroundPosition(out Vector3 position)
         {
-            return Mouse.current != null ? Mouse.current.position.ReadValue() : Vector2.zero;
-        }
-        
-        /// <summary>
-        /// Gets world position based on configured raycast mode.
-        /// </summary>
-        private bool TryGetWorldPosition(out Vector3 worldPosition)
-        {
-            worldPosition = Vector3.zero;
-            
+            position = Vector3.zero;
             if (!mainCamera) return false;
             
-            Vector2 mousePosition = GetMouseScreenPosition();
-            Ray ray = mainCamera.ScreenPointToRay(mousePosition);
+            Vector2 mousePos = Mouse.current.position.ReadValue();
+            Ray ray = mainCamera.ScreenPointToRay(mousePos);
             
-            if (drawDebugRays)
-            {
-                Debug.DrawRay(ray.origin, ray.direction * groundRaycastDistance, Color.yellow, 2f);
-            }
+            // Raycast to horizontal plane at ground height
+            var plane = new Plane(Vector3.up, new Vector3(0, groundPlaneHeight, 0));
             
-            switch (raycastMode)
-            {
-                case SpawnRaycastMode.PhysicsRaycast:
-                    return TryPhysicsRaycast(ray, out worldPosition);
-                    
-                case SpawnRaycastMode.PlaneRaycast:
-                    return TryPlaneRaycast(ray, out worldPosition);
-                    
-                case SpawnRaycastMode.NavMeshSample:
-                    return TryNavMeshSample(ray, out worldPosition);
-                    
-                default:
-                    return TryPhysicsRaycast(ray, out worldPosition);
-            }
-        }
-        
-        /// <summary>
-        /// Physics raycast - hits actual collider surfaces.
-        /// </summary>
-        private bool TryPhysicsRaycast(Ray ray, out Vector3 worldPosition)
-        {
-            worldPosition = Vector3.zero;
-            
-            if (Physics.Raycast(ray, out RaycastHit hit, groundRaycastDistance, groundLayerMask))
-            {
-                worldPosition = hit.point;
-                
-                if (debugLogs)
-                    Debug.Log($"[NPCAgentSpawner] Physics hit '{hit.collider.name}' at {hit.point}");
-                
-                if (drawDebugRays)
-                {
-                    Debug.DrawLine(ray.origin, hit.point, Color.green, 2f);
-                }
-                
-                return true;
-            }
-            
-            if (debugLogs)
-                Debug.Log("[NPCAgentSpawner] Physics raycast missed.");
-            
-            return false;
-        }
-        
-        /// <summary>
-        /// Plane raycast - hits horizontal plane at specified height.
-        /// </summary>
-        private bool TryPlaneRaycast(Ray ray, out Vector3 worldPosition)
-        {
-            worldPosition = Vector3.zero;
-            
-            var groundPlane = new Plane(Vector3.up, new Vector3(0, planeHeight, 0));
-            
-            if (groundPlane.Raycast(ray, out float distance))
-            {
-                worldPosition = ray.GetPoint(distance);
-                
-                if (debugLogs)
-                    Debug.Log($"[NPCAgentSpawner] Plane hit at {worldPosition}");
-                
-                if (drawDebugRays)
-                {
-                    Debug.DrawLine(ray.origin, worldPosition, Color.blue, 2f);
-                }
-                
-                return true;
-            }
-            
-            return false;
-        }
-        
-        /// <summary>
-        /// NavMesh sample - physics raycast then find nearest NavMesh point.
-        /// </summary>
-        private bool TryNavMeshSample(Ray ray, out Vector3 worldPosition)
-        {
-            worldPosition = Vector3.zero;
-            
-            // First do physics raycast
-            if (!TryPhysicsRaycast(ray, out Vector3 hitPoint))
+            if (!plane.Raycast(ray, out float distance))
             {
                 return false;
             }
             
-            // Then sample NavMesh at that point
-            if (NavMesh.SamplePosition(hitPoint, out NavMeshHit navHit, 5f, NavMesh.AllAreas))
+            Vector3 planeHit = ray.GetPoint(distance);
+            
+            if (drawDebugVisuals)
             {
-                worldPosition = navHit.position;
+                Debug.DrawRay(planeHit, Vector3.up * 2f, Color.yellow, 1f);
+            }
+            
+            // Find nearest NavMesh point
+            if (NavMesh.SamplePosition(planeHit, out NavMeshHit navHit, navMeshSearchRadius, NavMesh.AllAreas))
+            {
+                position = navHit.position;
                 
-                if (debugLogs)
-                    Debug.Log($"[NPCAgentSpawner] NavMesh sample at {worldPosition}");
-                
-                if (drawDebugRays)
+                if (drawDebugVisuals)
                 {
-                    Debug.DrawLine(hitPoint, worldPosition, Color.magenta, 2f);
+                    Debug.DrawLine(planeHit, position, Color.magenta, 1f);
                 }
                 
                 return true;
             }
             
-            // Fall back to physics hit if no NavMesh found
-            worldPosition = hitPoint;
-            
             if (debugLogs)
-                Debug.Log($"[NPCAgentSpawner] No NavMesh found, using physics hit at {worldPosition}");
+            {
+                Debug.LogWarning($"[Spawner] No NavMesh within {navMeshSearchRadius}m of {planeHit}");
+            }
             
-            return true;
+            return false;
+        }
+        
+        #endregion
+        
+        #region Public API
+        
+        /// <summary>
+        /// Spawn an agent at a specific position.
+        /// </summary>
+        public NPCAgent SpawnAt(Vector3 position)
+        {
+            if (!_manager) return null;
+            var agent = _manager.SpawnAgent(position);
+            if (agent) OnAgentSpawned?.Invoke(agent);
+            return agent;
+        }
+        
+        /// <summary>
+        /// Issue move command to selected agent.
+        /// </summary>
+        public void MoveSelectedTo(Vector3 destination)
+        {
+            MoveSelectedAgent(destination);
         }
         
         #endregion

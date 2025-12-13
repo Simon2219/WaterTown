@@ -73,11 +73,11 @@ namespace Agents
         [Tooltip("Fixed height offset when using FixedOffset mode.")]
         [SerializeField] private float fixedHeightOffset = 0.9f;
         
-        [Tooltip("Maximum distance to search for NavMesh when spawning. Keep small for precise placement.")]
-        [SerializeField] private float navMeshSearchRadius = 1.5f;
+        [Tooltip("Maximum distance to search for NavMesh when spawning.")]
+        [SerializeField] private float navMeshSearchRadius = 2f;
         
-        [Tooltip("If true, spawn at exact click position. If false, snap to nearest NavMesh point.")]
-        [SerializeField] private bool spawnAtExactPosition = true;
+        [Tooltip("Layer to assign spawned agents to. Important for selection raycasts!")]
+        [SerializeField] private string agentLayerName = "NPCAgent";
         
         [Header("Status Colors")]
         [SerializeField] private Color idleColor = new Color(0.3f, 0.7f, 0.3f, 1f);
@@ -417,79 +417,81 @@ namespace Agents
         
         /// <summary>
         /// Spawn an agent at the specified world position.
-        /// Position should be on or near a platform surface.
+        /// The position should already be on or very near a NavMesh (use NPCAgentSpawner for proper positioning).
         /// </summary>
         public NPCAgent SpawnAgent(Vector3 worldPosition)
         {
-            // Verify there's NavMesh nearby (required for NavMeshAgent)
+            // Find nearest NavMesh position
             if (!NavMesh.SamplePosition(worldPosition, out NavMeshHit navHit, navMeshSearchRadius, NavMesh.AllAreas))
             {
-                Debug.LogWarning($"[NPCManager] No NavMesh found within {navMeshSearchRadius}m of {worldPosition}");
+                Debug.LogWarning($"[NPCManager] No NavMesh within {navMeshSearchRadius}m of {worldPosition}. " +
+                                 "Make sure you're clicking on a NavMesh area!");
                 return null;
             }
             
-            // Determine spawn XZ position
-            Vector3 spawnXZ;
-            if (spawnAtExactPosition)
-            {
-                // Spawn at exact click position (X, Z), only use NavMesh for Y validation
-                spawnXZ = new Vector3(worldPosition.x, navHit.position.y, worldPosition.z);
-            }
-            else
-            {
-                // Snap to NavMesh position
-                spawnXZ = navHit.position;
-            }
+            // Use the NavMesh position (this is where the agent will actually walk)
+            Vector3 navMeshPosition = navHit.position;
             
-            // Calculate final spawn position with height offset
-            float heightAboveGround = CalculateSpawnHeight();
-            Vector3 spawnPos = spawnXZ + Vector3.up * heightAboveGround;
+            // Calculate visual position (raised by capsule height)
+            float heightOffset = CalculateSpawnHeight();
+            Vector3 visualPosition = navMeshPosition + Vector3.up * heightOffset;
             
             if (debugSpawnLogs)
             {
-                Debug.Log($"[NPCManager] Spawning agent:\n" +
-                          $"  Input position: {worldPosition}\n" +
-                          $"  NavMesh hit: {navHit.position}\n" +
-                          $"  Final spawn: {spawnPos}\n" +
-                          $"  Height offset: {heightAboveGround}");
+                Debug.Log($"[NPCManager] Spawn:\n" +
+                          $"  Requested: {worldPosition}\n" +
+                          $"  NavMesh: {navMeshPosition}\n" +
+                          $"  Visual: {visualPosition}");
             }
             
-            // Create the agent GameObject
-            GameObject agentGo;
-            if (agentPrefab)
+            // Create GameObject
+            GameObject agentGo = agentPrefab 
+                ? Instantiate(agentPrefab, visualPosition, Quaternion.identity)
+                : CreateProceduralAgent(visualPosition);
+            
+            // Set layer for selection raycasts (including children)
+            int layer = LayerMask.NameToLayer(agentLayerName);
+            if (layer >= 0)
             {
-                agentGo = Instantiate(agentPrefab, spawnPos, Quaternion.identity);
+                SetLayerRecursively(agentGo, layer);
+                
+                if (debugSpawnLogs)
+                    Debug.Log($"[NPCManager] Set agent to layer '{agentLayerName}' ({layer})");
             }
             else
             {
-                agentGo = CreateProceduralAgent(spawnPos);
+                Debug.LogWarning($"[NPCManager] Layer '{agentLayerName}' not found! Create it in Edit > Project Settings > Tags and Layers");
             }
             
-            // Ensure components exist
+            // Ensure NPCAgent component
             var npcAgent = agentGo.GetComponent<NPCAgent>();
             if (!npcAgent)
             {
                 npcAgent = agentGo.AddComponent<NPCAgent>();
             }
             
+            // Ensure NavMeshAgent component
             var navAgent = agentGo.GetComponent<NavMeshAgent>();
             if (!navAgent)
             {
                 navAgent = agentGo.AddComponent<NavMeshAgent>();
             }
             
-            // Configure NavMeshAgent
+            // Configure before warping
             ConfigureNavMeshAgent(navAgent);
             
-            // Warp agent to ensure it's properly placed on NavMesh
-            navAgent.Warp(spawnXZ);
+            // Warp to NavMesh position (this properly places the agent)
+            navAgent.Warp(navMeshPosition);
             
-            // Initialize the NPCAgent component
+            // Initialize NPCAgent
             int agentId = _nextAgentId++;
             npcAgent.Initialize(this, agentId);
-            
-            // Apply initial visuals
             npcAgent.UpdateVisuals();
+            
+            if (debugSpawnLogs)
+            {
+                Debug.Log($"[NPCManager] ✓ Agent {agentId} spawned. OnNavMesh: {navAgent.isOnNavMesh}");
+            }
             
             return npcAgent;
         }
@@ -593,6 +595,18 @@ namespace Agents
         #endregion
         
         #region Utility
+        
+        /// <summary>
+        /// Set layer on GameObject and all its children.
+        /// </summary>
+        private void SetLayerRecursively(GameObject obj, int layer)
+        {
+            obj.layer = layer;
+            foreach (Transform child in obj.transform)
+            {
+                SetLayerRecursively(child.gameObject, layer);
+            }
+        }
         
         public Color GetColorForStatus(AgentStatus status)
         {
