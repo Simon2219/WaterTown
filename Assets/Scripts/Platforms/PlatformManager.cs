@@ -683,9 +683,9 @@ public class PlatformManager : MonoBehaviour
         link.width = navLinkWidth;
         link.area = 0;
         
-        // Cache NavSurface reference to avoid property access (NavSurface is a property getter)
-        NavMeshSurface navSurface = platformA.NavSurface;
-        link.agentTypeID = navSurface ? navSurface.agentTypeID : 0;
+        // Use agentTypeID = -1 to allow ALL agent types to traverse this link
+        // This ensures NPC agents can walk across platform connections regardless of agent type
+        link.agentTypeID = -1;
     }
 
 
