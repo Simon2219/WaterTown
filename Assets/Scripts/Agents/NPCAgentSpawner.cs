@@ -8,6 +8,7 @@ namespace Agents
     /// <summary>
     /// Handles agent spawning and selection/movement commands via InputActions.
     /// Assign InputAction references in the Inspector.
+    /// Uses plane raycast at y=0 for accurate mouse-to-world position conversion.
     /// </summary>
     [DisallowMultipleComponent]
     public class NPCAgentSpawner : MonoBehaviour
@@ -28,15 +29,12 @@ namespace Agents
         [Tooltip("Use spawn point instead of mouse cursor position.")]
         [SerializeField] private bool useSpawnPoint = false;
         
-        [Tooltip("Layer mask for raycast when spawning/selecting.")]
-        [SerializeField] private LayerMask raycastLayerMask = ~0; // Everything by default
-        
-        [Tooltip("Maximum raycast distance.")]
-        [SerializeField] private float maxRaycastDistance = 1000f;
-        
         [Header("Selection Settings")]
         [Tooltip("Layer mask for agent selection raycasts.")]
         [SerializeField] private LayerMask agentLayerMask = ~0;
+        
+        [Tooltip("Maximum raycast distance for agent selection.")]
+        [SerializeField] private float maxRaycastDistance = 1000f;
         
         [Header("References")]
         [Tooltip("Main camera for raycasting. If null, uses Camera.main.")]
@@ -49,33 +47,23 @@ namespace Agents
         
         #region Events
         
-        /// <summary>
-        /// Fired when an agent is spawned via this spawner.
-        /// </summary>
+        /// <summary>Fired when an agent is spawned via this spawner.</summary>
         public event Action<NPCAgent> OnAgentSpawned;
         
-        /// <summary>
-        /// Fired when an agent is selected.
-        /// </summary>
+        /// <summary>Fired when an agent is selected.</summary>
         public event Action<NPCAgent> OnAgentSelected;
         
-        /// <summary>
-        /// Fired when an agent is deselected.
-        /// </summary>
+        /// <summary>Fired when an agent is deselected.</summary>
         public event Action<NPCAgent> OnAgentDeselected;
         
-        /// <summary>
-        /// Fired when a move command is issued to the selected agent.
-        /// </summary>
+        /// <summary>Fired when a move command is issued to the selected agent.</summary>
         public event Action<NPCAgent, Vector3> OnMoveCommandIssued;
         
         #endregion
         
         #region Public Properties
         
-        /// <summary>
-        /// Currently selected agent (if any).
-        /// </summary>
+        /// <summary>Currently selected agent (if any).</summary>
         public NPCAgent SelectedAgent => _selectedAgent;
         
         #endregion
@@ -110,12 +98,13 @@ namespace Agents
             {
                 Debug.LogError("[NPCAgentSpawner] NPCManager not found in scene. Disabling spawner.");
                 enabled = false;
+                return;
             }
+            
         }
         
         private void OnEnable()
         {
-            // Subscribe to input actions
             if (spawnAgentAction?.action != null)
             {
                 spawnAgentAction.action.performed += OnSpawnActionPerformed;
@@ -131,7 +120,6 @@ namespace Agents
         
         private void OnDisable()
         {
-            // Unsubscribe from input actions
             if (spawnAgentAction?.action != null)
             {
                 spawnAgentAction.action.performed -= OnSpawnActionPerformed;
@@ -176,7 +164,6 @@ namespace Agents
             }
             else
             {
-                // Raycast from mouse position
                 if (!TryGetMouseWorldPosition(out spawnPosition))
                 {
                     if (debugLogs)
@@ -226,9 +213,10 @@ namespace Agents
         {
             if (!mainCamera) return;
             
-            Ray ray = mainCamera.ScreenPointToRay(Mouse.current.position.ReadValue());
+            Vector2 mousePosition = GetMouseScreenPosition();
+            Ray ray = mainCamera.ScreenPointToRay(mousePosition);
             
-            // First, check if we're clicking on an agent
+            // First, check if we're clicking on an agent (physics raycast for colliders)
             if (Physics.Raycast(ray, out RaycastHit agentHit, maxRaycastDistance, agentLayerMask))
             {
                 var clickedAgent = agentHit.collider.GetComponent<NPCAgent>();
@@ -239,7 +227,6 @@ namespace Agents
                 
                 if (clickedAgent)
                 {
-                    // Clicked on an agent - select it
                     SelectAgent(clickedAgent);
                     return;
                 }
@@ -249,19 +236,22 @@ namespace Agents
             if (_selectedAgent)
             {
                 // We have a selected agent - try to issue move command
-                if (TryGetNavMeshPosition(ray, out Vector3 destination))
+                if (TryGetMouseWorldPosition(out Vector3 destination))
                 {
-                    IssueMoveCommand(destination);
-                }
-                else
-                {
-                    if (debugLogs)
-                        Debug.Log("[NPCAgentSpawner] Clicked position is not on NavMesh.");
+                    // Sample NavMesh at the destination
+                    if (NavMesh.SamplePosition(destination, out NavMeshHit navHit, 5f, NavMesh.AllAreas))
+                    {
+                        IssueMoveCommand(navHit.position);
+                    }
+                    else
+                    {
+                        if (debugLogs)
+                            Debug.Log("[NPCAgentSpawner] Clicked position is not on NavMesh.");
+                    }
                 }
             }
             else
             {
-                // No agent selected and didn't click on one - deselect (no-op in this case)
                 if (debugLogs)
                     Debug.Log("[NPCAgentSpawner] Clicked empty space with no agent selected.");
             }
@@ -334,7 +324,16 @@ namespace Agents
         #region Raycast Helpers
         
         /// <summary>
-        /// Gets world position under mouse cursor via raycast.
+        /// Gets mouse screen position using new Input System.
+        /// </summary>
+        private Vector2 GetMouseScreenPosition()
+        {
+            return Mouse.current != null ? Mouse.current.position.ReadValue() : Vector2.zero;
+        }
+        
+        /// <summary>
+        /// Gets world position under mouse cursor using plane raycast at y=0.
+        /// Same approach as WorldGrid.RaycastToCell but without grid bounds check.
         /// </summary>
         private bool TryGetMouseWorldPosition(out Vector3 worldPosition)
         {
@@ -342,34 +341,19 @@ namespace Agents
             
             if (!mainCamera) return false;
             
-            Ray ray = mainCamera.ScreenPointToRay(Mouse.current.position.ReadValue());
+            Vector2 mousePosition = GetMouseScreenPosition();
+            Ray ray = mainCamera.ScreenPointToRay(mousePosition);
             
-            if (Physics.Raycast(ray, out RaycastHit hit, maxRaycastDistance, raycastLayerMask))
+            // Plane raycast at y=0 (ground level) - same logic as WorldGrid.RaycastToCell
+            var groundPlane = new Plane(Vector3.up, Vector3.zero);
+            
+            if (groundPlane.Raycast(ray, out float distance))
             {
-                worldPosition = hit.point;
-                return true;
-            }
-            
-            return false;
-        }
-        
-        /// <summary>
-        /// Gets a valid NavMesh position from a ray.
-        /// </summary>
-        private bool TryGetNavMeshPosition(Ray ray, out Vector3 navMeshPosition)
-        {
-            navMeshPosition = Vector3.zero;
-            
-            // First, raycast to get a world position
-            if (!Physics.Raycast(ray, out RaycastHit hit, maxRaycastDistance, raycastLayerMask))
-            {
-                return false;
-            }
-            
-            // Then sample NavMesh at that position
-            if (NavMesh.SamplePosition(hit.point, out NavMeshHit navHit, 5f, NavMesh.AllAreas))
-            {
-                navMeshPosition = navHit.position;
+                worldPosition = ray.GetPoint(distance);
+                
+                if (debugLogs)
+                    Debug.Log($"[NPCAgentSpawner] Plane raycast hit at {worldPosition}");
+                
                 return true;
             }
             
