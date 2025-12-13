@@ -210,7 +210,7 @@ namespace Agents
         
         /// <summary>
         /// Handles manual off-mesh link traversal at normal movement speed.
-        /// Called when NavMeshLink.autoUpdatePosition is false.
+        /// Called when NavMeshAgent.autoTraverseOffMeshLink is false.
         /// </summary>
         private void HandleOffMeshLinkTraversal()
         {
