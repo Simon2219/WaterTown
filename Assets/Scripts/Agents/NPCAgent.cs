@@ -123,9 +123,9 @@ namespace Agents
         
         // Off-mesh link traversal
         private bool _isTraversingLink;
-        private Vector3 _linkStartPos;
         private Vector3 _linkEndPos;
-        private float _linkTraversalProgress;
+        private float _linkTotalDistance;
+        private float _linkTraveledDistance;
         
         #endregion
         
@@ -211,6 +211,7 @@ namespace Agents
         /// <summary>
         /// Handles manual off-mesh link traversal at normal movement speed.
         /// Called when NavMeshAgent.autoTraverseOffMeshLink is false.
+        /// Uses velocity-based movement (not lerp) for consistent speed.
         /// </summary>
         private void HandleOffMeshLinkTraversal()
         {
@@ -220,48 +221,60 @@ namespace Agents
                 return;
             }
             
-            // Start traversal
+            float baseOffset = _navAgent.baseOffset;
+            
+            // Start traversal - use agent's CURRENT position (no snap)
             if (!_isTraversingLink)
             {
                 _isTraversingLink = true;
-                _linkTraversalProgress = 0f;
+                _linkTraveledDistance = 0f;
                 
                 var linkData = _navAgent.currentOffMeshLinkData;
-                _linkStartPos = linkData.startPos;
                 _linkEndPos = linkData.endPos;
+                
+                // Calculate total distance from current position to end
+                // Use ground-level positions (without baseOffset) for distance calculation
+                Vector3 currentGroundPos = transform.position;
+                currentGroundPos.y -= baseOffset;
+                _linkTotalDistance = Vector3.Distance(currentGroundPos, _linkEndPos);
             }
             
-            // Move along link at normal speed
-            float linkDistance = Vector3.Distance(_linkStartPos, _linkEndPos);
-            if (linkDistance > 0.01f)
+            if (_linkTotalDistance < 0.01f)
             {
-                float speed = _navAgent.speed;
-                _linkTraversalProgress += (speed * Time.deltaTime) / linkDistance;
-                
-                // Apply baseOffset to keep agent at correct height (same as normal NavMesh walking)
-                float yOffset = _navAgent.baseOffset;
-                
-                if (_linkTraversalProgress >= 1f)
-                {
-                    // Completed traversal
-                    _linkTraversalProgress = 1f;
-                    Vector3 endPos = _linkEndPos;
-                    endPos.y += yOffset;
-                    transform.position = endPos;
-                    _navAgent.CompleteOffMeshLink();
-                    _isTraversingLink = false;
-                }
-                else
-                {
-                    // Interpolate position with height offset
-                    Vector3 pos = Vector3.Lerp(_linkStartPos, _linkEndPos, _linkTraversalProgress);
-                    pos.y += yOffset;
-                    transform.position = pos;
-                }
+                // Already at destination
+                _navAgent.CompleteOffMeshLink();
+                _isTraversingLink = false;
+                return;
             }
-            else
+            
+            // Move at constant speed (same as normal NavMesh movement)
+            float speed = _navAgent.speed;
+            float moveDistance = speed * Time.deltaTime;
+            _linkTraveledDistance += moveDistance;
+            
+            // Calculate progress (0 to 1)
+            float progress = Mathf.Clamp01(_linkTraveledDistance / _linkTotalDistance);
+            
+            // Get current ground position (where we started this frame)
+            Vector3 currentGroundPos = transform.position;
+            currentGroundPos.y -= baseOffset;
+            
+            // Move towards end position at constant speed
+            Vector3 newGroundPos = Vector3.MoveTowards(currentGroundPos, _linkEndPos, moveDistance);
+            
+            // Apply baseOffset for visual height
+            Vector3 newPos = newGroundPos;
+            newPos.y += baseOffset;
+            transform.position = newPos;
+            
+            // Check if we've reached the end
+            if (progress >= 1f || Vector3.Distance(newGroundPos, _linkEndPos) < 0.01f)
             {
-                // Link too short, complete immediately
+                // Snap to exact end position
+                Vector3 finalPos = _linkEndPos;
+                finalPos.y += baseOffset;
+                transform.position = finalPos;
+                
                 _navAgent.CompleteOffMeshLink();
                 _isTraversingLink = false;
             }
