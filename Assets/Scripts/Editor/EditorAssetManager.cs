@@ -484,6 +484,7 @@ namespace Editor
             }
 
             surface.collectObjects = CollectObjects.Children;
+            // Agent type should be configured in Unity Editor to match your NPC agents
         }
 
         private static void BuildAndSaveNavMeshForPrefab(GamePlatform gp, Transform root)
