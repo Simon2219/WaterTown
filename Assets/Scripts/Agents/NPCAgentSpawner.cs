@@ -26,6 +26,9 @@ namespace Agents
         [SerializeField] private InputActionReference selectMoveAction;
         
         [Header("Spawn Settings")]
+        [Tooltip("NavMesh Agent Type for spawned agents. Must match the NavMeshSurface baking type.")]
+        [SerializeField] private NavMeshAgentType agentType;
+        
         [Tooltip("Optional fixed spawn point. If set and enabled, agents spawn here.")]
         [SerializeField] private Transform spawnPoint;
         [SerializeField] private bool useSpawnPoint = false;
@@ -163,7 +166,7 @@ namespace Agents
                 return;
             }
             
-            var agent = _manager.SpawnAgent(pos);
+            var agent = _manager.SpawnAgent(pos, agentType.AgentTypeID);
             if (agent)
             {
                 if (debugLogs) Debug.Log($"[Spawner] ✓ Spawned agent #{agent.AgentId}");
@@ -371,7 +374,7 @@ namespace Agents
         public NPCAgent SpawnAt(Vector3 position)
         {
             if (!_manager) return null;
-            var agent = _manager.SpawnAgent(position);
+            var agent = _manager.SpawnAgent(position, agentType.AgentTypeID);
             if (agent) OnAgentSpawned?.Invoke(agent);
             return agent;
         }

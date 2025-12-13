@@ -422,7 +422,9 @@ namespace Agents
         /// Spawn an agent at the specified world position.
         /// The position should already be on or very near a NavMesh (use NPCAgentSpawner for proper positioning).
         /// </summary>
-        public NPCAgent SpawnAgent(Vector3 worldPosition)
+        /// <param name="worldPosition">World position to spawn at</param>
+        /// <param name="overrideAgentTypeID">Optional: override the default agent type ID. Use -1 to use default.</param>
+        public NPCAgent SpawnAgent(Vector3 worldPosition, int overrideAgentTypeID = -1)
         {
             // Find nearest NavMesh position
             if (!NavMesh.SamplePosition(worldPosition, out NavMeshHit navHit, navMeshSearchRadius, NavMesh.AllAreas))
@@ -481,7 +483,7 @@ namespace Agents
             }
             
             // Configure before warping
-            ConfigureNavMeshAgent(navAgent);
+            ConfigureNavMeshAgent(navAgent, overrideAgentTypeID);
             
             // Warp to NavMesh position (this properly places the agent)
             navAgent.Warp(navMeshPosition);
@@ -549,10 +551,10 @@ namespace Agents
             return go;
         }
         
-        private void ConfigureNavMeshAgent(NavMeshAgent navAgent)
+        private void ConfigureNavMeshAgent(NavMeshAgent navAgent, int overrideAgentTypeID = -1)
         {
             // Agent type MUST match the NavMeshSurface baking type for pathfinding to work
-            navAgent.agentTypeID = agentType.AgentTypeID;
+            navAgent.agentTypeID = overrideAgentTypeID >= 0 ? overrideAgentTypeID : agentType.AgentTypeID;
             
             navAgent.speed = defaultSpeed;
             navAgent.angularSpeed = defaultAngularSpeed;
