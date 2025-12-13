@@ -1,15 +1,14 @@
 using System;
 using System.Collections.Generic;
-using Unity.Entities;
 using UnityEngine;
 using UnityEngine.AI;
 
 namespace Agents
 {
     /// <summary>
-    /// Central manager for all NPC agents in the town.
-    /// Creates and manages both GameObjects (for NavMeshAgent) and ECS Entities (for DOTS processing).
-    /// Designed for 500+ agents with Burst-compiled parallel processing.
+    /// Central manager for all NPC agents.
+    /// Handles spawning, registration, and performance optimization via LOD and culling.
+    /// Designed for 500+ agents with batched updates.
     /// </summary>
     [DisallowMultipleComponent]
     public class NPCManager : MonoBehaviour
@@ -35,44 +34,63 @@ namespace Agents
         
         #endregion
         
-        #region Configuration
+        #region Configuration - Agent Settings
         
         [Header("Agent Prefab Settings")]
         [Tooltip("If null, agents are created procedurally as capsules.")]
         [SerializeField] private GameObject agentPrefab;
         
         [Header("Default Agent Settings")]
-        [Tooltip("Default movement speed for agents (units/second).")]
         [SerializeField] private float defaultSpeed = 3.5f;
-        
-        [Tooltip("Default angular speed for agents (degrees/second).")]
         [SerializeField] private float defaultAngularSpeed = 120f;
-        
-        [Tooltip("Default acceleration for agents.")]
         [SerializeField] private float defaultAcceleration = 8f;
-        
-        [Tooltip("Default stopping distance for agents.")]
         [SerializeField] private float defaultStoppingDistance = 0.1f;
-        
-        [Tooltip("Height offset for agents above NavMesh surface.")]
         [SerializeField] private float heightOffset = 0.05f;
-        
-        [Tooltip("Capsule radius for procedural agents.")]
         [SerializeField] private float agentRadius = 0.3f;
-        
-        [Tooltip("Capsule height for procedural agents.")]
         [SerializeField] private float agentHeight = 1.8f;
         
         [Header("Status Colors")]
-        [SerializeField] private Color idleColor = new Color(0.3f, 0.7f, 0.3f, 1f);      // Green
-        [SerializeField] private Color movingColor = new Color(0.3f, 0.5f, 0.9f, 1f);    // Blue
-        [SerializeField] private Color selectedColor = new Color(1f, 0.9f, 0.2f, 1f);    // Yellow
-        [SerializeField] private Color waitingColor = new Color(0.9f, 0.6f, 0.2f, 1f);   // Orange
-        [SerializeField] private Color errorColor = new Color(0.9f, 0.2f, 0.2f, 1f);     // Red
+        [SerializeField] private Color idleColor = new Color(0.3f, 0.7f, 0.3f, 1f);
+        [SerializeField] private Color movingColor = new Color(0.3f, 0.5f, 0.9f, 1f);
+        [SerializeField] private Color selectedColor = new Color(1f, 0.9f, 0.2f, 1f);
+        [SerializeField] private Color waitingColor = new Color(0.9f, 0.6f, 0.2f, 1f);
+        [SerializeField] private Color errorColor = new Color(0.9f, 0.2f, 0.2f, 1f);
         
-        [Header("Selection Visual Settings")]
-        [Tooltip("Scale multiplier when agent is selected.")]
+        [Header("Selection Settings")]
         [SerializeField] private float selectedScaleMultiplier = 1.1f;
+        
+        #endregion
+        
+        #region Configuration - LOD & Performance
+        
+        [Header("LOD Settings")]
+        [Tooltip("Distance for High LOD (full updates every frame).")]
+        [SerializeField] private float lodHighDistance = 20f;
+        
+        [Tooltip("Distance for Medium LOD (updates every 3 frames).")]
+        [SerializeField] private float lodMediumDistance = 50f;
+        
+        [Tooltip("Distance for Low LOD (updates every 5 frames).")]
+        [SerializeField] private float lodLowDistance = 100f;
+        
+        [Tooltip("Beyond this distance, visuals are disabled.")]
+        [SerializeField] private float cullDistance = 150f;
+        
+        [Tooltip("How often to recalculate LOD levels (seconds).")]
+        [SerializeField] private float lodUpdateInterval = 0.5f;
+        
+        [Header("Performance Settings")]
+        [Tooltip("Maximum agents to process per frame for LOD updates.")]
+        [SerializeField] private int maxLODUpdatesPerFrame = 50;
+        
+        [Tooltip("Enable LOD system.")]
+        [SerializeField] private bool enableLOD = true;
+        
+        [Tooltip("Enable visual culling at distance.")]
+        [SerializeField] private bool enableCulling = true;
+        
+        [Header("Debug")]
+        [SerializeField] private bool showPerformanceStats;
         
         #endregion
         
@@ -93,55 +111,62 @@ namespace Agents
         public Color WaitingColor => waitingColor;
         public Color ErrorColor => errorColor;
         
-        /// <summary>
-        /// Read-only access to all registered agents.
-        /// </summary>
-        public IReadOnlyCollection<NPCAgent> AllAgents => _agents;
+        /// <summary>All registered agents.</summary>
+        public IReadOnlyList<NPCAgent> AllAgents => _agentsList;
         
-        /// <summary>
-        /// Current number of registered agents.
-        /// </summary>
-        public int AgentCount => _agents.Count;
+        /// <summary>Number of agents.</summary>
+        public int AgentCount => _agentsList.Count;
         
-        /// <summary>
-        /// ECS World used for agent entities.
-        /// </summary>
-        public World AgentWorld => _world;
+        /// <summary>Camera used for LOD calculations.</summary>
+        public Camera LODCamera => _lodCamera;
         
-        /// <summary>
-        /// Entity Manager for the agent world.
-        /// </summary>
-        public EntityManager EntityManager => _entityManager;
+        #endregion
+        
+        #region Performance Stats (Public)
+        
+        public int AgentsHighLOD { get; private set; }
+        public int AgentsMediumLOD { get; private set; }
+        public int AgentsLowLOD { get; private set; }
+        public int AgentsCulled { get; private set; }
+        public int AgentsUpdatedThisFrame { get; private set; }
         
         #endregion
         
         #region Events
         
-        /// <summary>
-        /// Fired when an agent is spawned and registered.
-        /// </summary>
+        /// <summary>Fired when agent is spawned.</summary>
         public event Action<NPCAgent> AgentSpawned;
         
-        /// <summary>
-        /// Fired when an agent is destroyed and unregistered.
-        /// </summary>
+        /// <summary>Fired when agent is destroyed.</summary>
         public event Action<NPCAgent> AgentDestroyed;
         
         #endregion
         
         #region Private State
         
-        private readonly HashSet<NPCAgent> _agents = new();
+        // Agent storage
+        private readonly HashSet<NPCAgent> _agentsSet = new();
+        private readonly List<NPCAgent> _agentsList = new();
         
-        // ECS
-        private World _world;
-        private EntityManager _entityManager;
-        private EntityArchetype _agentArchetype;
+        // LOD buckets
+        private readonly List<NPCAgent> _highLODAgents = new();
+        private readonly List<NPCAgent> _mediumLODAgents = new();
+        private readonly List<NPCAgent> _lowLODAgents = new();
+        private readonly List<NPCAgent> _culledAgents = new();
         
-        // Shared material for procedural agents
+        // LOD update tracking
+        private Camera _lodCamera;
+        private float _lastLODUpdateTime;
+        private int _lodUpdateIndex;
+        
+        // Shared material
         private Material _sharedAgentMaterial;
         
-        private static int _nextAgentId = 0;
+        // Frame tracking
+        private int _frameCount;
+        
+        // ID generation
+        private static int _nextAgentId;
         
         #endregion
         
@@ -151,20 +176,33 @@ namespace Agents
         {
             if (_instance != null && _instance != this)
             {
-                Debug.LogWarning("[NPCManager] Multiple NPCManager instances detected. Destroying duplicate.");
+                Debug.LogWarning("[NPCManager] Multiple NPCManager instances. Destroying duplicate.");
                 Destroy(gameObject);
                 return;
             }
             _instance = this;
             
-            // Create shared material for procedural agents
             _sharedAgentMaterial = new Material(Shader.Find("Universal Render Pipeline/Lit"))
             {
                 color = idleColor
             };
             
-            // Initialize ECS
-            InitializeECS();
+            _lodCamera = Camera.main;
+        }
+        
+        private void Update()
+        {
+            _frameCount++;
+            
+            // Update LOD periodically
+            if (enableLOD && Time.time - _lastLODUpdateTime >= lodUpdateInterval)
+            {
+                UpdateLODLevels();
+                _lastLODUpdateTime = Time.time;
+            }
+            
+            // Process agents by LOD tier
+            ProcessAgentUpdates();
         }
         
         private void OnDestroy()
@@ -182,100 +220,202 @@ namespace Agents
         
         #endregion
         
-        #region ECS Initialization
+        #region LOD System
         
         /// <summary>
-        /// Initialize ECS world and archetypes for agents.
+        /// Recalculates LOD levels for agents based on camera distance.
+        /// Processes in batches to distribute load.
         /// </summary>
-        private void InitializeECS()
+        private void UpdateLODLevels()
         {
-            // Use the default world
-            _world = World.DefaultGameObjectInjectionWorld;
-            
-            if (_world == null)
+            if (!_lodCamera)
             {
-                Debug.LogError("[NPCManager] No default ECS World found. Ensure Entities package is set up correctly.");
-                return;
+                _lodCamera = Camera.main;
+                if (!_lodCamera) return;
             }
             
-            _entityManager = _world.EntityManager;
+            Vector3 cameraPos = _lodCamera.transform.position;
+            int agentCount = _agentsList.Count;
             
-            // Create archetype for agents
-            _agentArchetype = _entityManager.CreateArchetype(
-                typeof(AgentData),
-                typeof(AgentManagedData),
-                typeof(AgentVisualConfig)
-            );
+            if (agentCount == 0) return;
             
-            Debug.Log("[NPCManager] ECS initialized successfully.");
+            // Process a batch of agents
+            int processed = 0;
+            int startIndex = _lodUpdateIndex;
+            
+            while (processed < maxLODUpdatesPerFrame && processed < agentCount)
+            {
+                int index = (_lodUpdateIndex + processed) % agentCount;
+                var agent = _agentsList[index];
+                
+                if (agent)
+                {
+                    UpdateAgentLOD(agent, cameraPos);
+                }
+                
+                processed++;
+            }
+            
+            _lodUpdateIndex = (startIndex + processed) % Mathf.Max(1, agentCount);
+            
+            // Update stats
+            UpdateLODStats();
         }
+        
+        private void UpdateAgentLOD(NPCAgent agent, Vector3 cameraPos)
+        {
+            float distance = Vector3.Distance(agent.transform.position, cameraPos);
+            agent.CameraDistance = distance;
+            
+            AgentLODLevel newLevel;
+            
+            if (!enableLOD)
+            {
+                newLevel = AgentLODLevel.High;
+            }
+            else if (distance <= lodHighDistance)
+            {
+                newLevel = AgentLODLevel.High;
+            }
+            else if (distance <= lodMediumDistance)
+            {
+                newLevel = AgentLODLevel.Medium;
+            }
+            else if (distance <= lodLowDistance)
+            {
+                newLevel = AgentLODLevel.Low;
+            }
+            else if (enableCulling && distance > cullDistance)
+            {
+                newLevel = AgentLODLevel.Culled;
+            }
+            else
+            {
+                newLevel = AgentLODLevel.Low;
+            }
+            
+            // Move between buckets if LOD changed
+            if (agent.LODLevel != newLevel)
+            {
+                RemoveFromLODBucket(agent);
+                agent.SetLODLevel(newLevel);
+                AddToLODBucket(agent);
+            }
+        }
+        
+        private void AddToLODBucket(NPCAgent agent)
+        {
+            switch (agent.LODLevel)
+            {
+                case AgentLODLevel.High:
+                    _highLODAgents.Add(agent);
+                    break;
+                case AgentLODLevel.Medium:
+                    _mediumLODAgents.Add(agent);
+                    break;
+                case AgentLODLevel.Low:
+                    _lowLODAgents.Add(agent);
+                    break;
+                case AgentLODLevel.Culled:
+                    _culledAgents.Add(agent);
+                    break;
+            }
+        }
+        
+        private void RemoveFromLODBucket(NPCAgent agent)
+        {
+            switch (agent.LODLevel)
+            {
+                case AgentLODLevel.High:
+                    _highLODAgents.Remove(agent);
+                    break;
+                case AgentLODLevel.Medium:
+                    _mediumLODAgents.Remove(agent);
+                    break;
+                case AgentLODLevel.Low:
+                    _lowLODAgents.Remove(agent);
+                    break;
+                case AgentLODLevel.Culled:
+                    _culledAgents.Remove(agent);
+                    break;
+            }
+        }
+        
+        private void UpdateLODStats()
+        {
+            AgentsHighLOD = _highLODAgents.Count;
+            AgentsMediumLOD = _mediumLODAgents.Count;
+            AgentsLowLOD = _lowLODAgents.Count;
+            AgentsCulled = _culledAgents.Count;
+        }
+        
+        #endregion
+        
+        #region Agent Updates
         
         /// <summary>
-        /// Creates an ECS entity for an agent with all required components.
+        /// Process agent updates based on LOD tier.
         /// </summary>
-        private Entity CreateAgentEntity(NPCAgent agent, NavMeshAgent navAgent, Renderer renderer, Vector3 scale)
+        private void ProcessAgentUpdates()
         {
-            if (_world == null || !_world.IsCreated)
+            int updatedCount = 0;
+            
+            // High LOD - update every frame
+            for (int i = 0; i < _highLODAgents.Count; i++)
             {
-                Debug.LogError("[NPCManager] Cannot create entity - ECS World not available.");
-                return Entity.Null;
+                var agent = _highLODAgents[i];
+                if (agent)
+                {
+                    agent.UpdateFull();
+                    updatedCount++;
+                }
             }
             
-            Entity entity = _entityManager.CreateEntity(_agentArchetype);
-            
-            // Set AgentData
-            int agentId = _nextAgentId++;
-            _entityManager.SetComponentData(entity, new AgentData
+            // Medium LOD - update every 3 frames (staggered)
+            for (int i = 0; i < _mediumLODAgents.Count; i++)
             {
-                AgentId = agentId,
-                Status = AgentStatus.Idle,
-                StatusBeforeSelection = AgentStatus.Idle,
-                IsSelected = false,
-                HasDestination = false,
-                CurrentPosition = agent.transform.position,
-                TargetPosition = agent.transform.position,
-                Velocity = float3Zero,
-                RemainingDistance = 0f,
-                StoppingDistance = defaultStoppingDistance,
-                PathStatus = PathStatus.Complete
-            });
+                var agent = _mediumLODAgents[i];
+                if (agent && agent.ShouldUpdateThisFrame(_frameCount))
+                {
+                    agent.UpdateReduced();
+                    updatedCount++;
+                }
+            }
             
-            // Set managed data (references to GameObjects)
-            _entityManager.SetComponentData(entity, new AgentManagedData
+            // Low LOD - update every 5 frames (staggered)
+            for (int i = 0; i < _lowLODAgents.Count; i++)
             {
-                Agent = agent,
-                NavMeshAgent = navAgent,
-                Renderer = renderer
-            });
+                var agent = _lowLODAgents[i];
+                if (agent && agent.ShouldUpdateThisFrame(_frameCount))
+                {
+                    agent.UpdateReduced();
+                    updatedCount++;
+                }
+            }
             
-            // Set visual config
-            _entityManager.SetComponentData(entity, new AgentVisualConfig
+            // Culled - minimal updates every 15 frames
+            for (int i = 0; i < _culledAgents.Count; i++)
             {
-                SelectedScaleMultiplier = selectedScaleMultiplier,
-                BaseScaleX = scale.x,
-                BaseScaleY = scale.y,
-                BaseScaleZ = scale.z
-            });
+                var agent = _culledAgents[i];
+                if (agent && agent.ShouldUpdateThisFrame(_frameCount))
+                {
+                    agent.UpdateMinimal();
+                    updatedCount++;
+                }
+            }
             
-            return entity;
+            AgentsUpdatedThisFrame = updatedCount;
         }
-        
-        // Helper for float3 zero (avoid Unity.Mathematics dependency in this file's namespace)
-        private static readonly Unity.Mathematics.float3 float3Zero = Unity.Mathematics.float3.zero;
         
         #endregion
         
         #region Agent Factory
         
         /// <summary>
-        /// Spawns a new agent at the specified position on the NavMesh.
-        /// Creates both a GameObject (for NavMeshAgent) and an ECS Entity (for DOTS processing).
+        /// Spawn an agent at the specified NavMesh position.
         /// </summary>
-        /// <param name="worldPosition">Target world position (will be sampled to NavMesh).</param>
-        /// <returns>The spawned agent, or null if spawn failed.</returns>
         public NPCAgent SpawnAgent(Vector3 worldPosition)
         {
-            // Sample NavMesh to find valid position
             if (!NavMesh.SamplePosition(worldPosition, out NavMeshHit hit, 10f, NavMesh.AllAreas))
             {
                 Debug.LogWarning($"[NPCManager] Failed to find NavMesh position near {worldPosition}");
@@ -295,14 +435,12 @@ namespace Agents
                 agentGo = CreateProceduralAgent(spawnPos);
             }
             
-            // Ensure NPCAgent component exists
             var npcAgent = agentGo.GetComponent<NPCAgent>();
             if (!npcAgent)
             {
                 npcAgent = agentGo.AddComponent<NPCAgent>();
             }
             
-            // Ensure NavMeshAgent exists and configure it
             var navAgent = agentGo.GetComponent<NavMeshAgent>();
             if (!navAgent)
             {
@@ -311,21 +449,14 @@ namespace Agents
             
             ConfigureNavMeshAgent(navAgent);
             
-            // Get renderer for visuals
-            var agentRenderer = agentGo.GetComponent<Renderer>();
-            
-            // Create ECS entity
-            Vector3 scale = agentGo.transform.localScale;
-            Entity entity = CreateAgentEntity(npcAgent, navAgent, agentRenderer, scale);
-            
-            // Initialize the NPC agent with entity reference
-            npcAgent.Initialize(this, navAgent, entity, _nextAgentId - 1);
+            int agentId = _nextAgentId++;
+            npcAgent.Initialize(this, agentId);
             
             return npcAgent;
         }
         
         /// <summary>
-        /// Spawns an agent at a specific spawn point transform.
+        /// Spawn an agent at a transform's position.
         /// </summary>
         public NPCAgent SpawnAgentAtPoint(Transform spawnPoint)
         {
@@ -334,26 +465,19 @@ namespace Agents
                 Debug.LogWarning("[NPCManager] Spawn point is null.");
                 return null;
             }
-            
             return SpawnAgent(spawnPoint.position);
         }
         
-        /// <summary>
-        /// Creates a procedural capsule agent.
-        /// </summary>
         private GameObject CreateProceduralAgent(Vector3 position)
         {
             var go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-            go.name = $"NPC_Agent_{_agents.Count}";
+            go.name = $"NPC_Agent_{_agentsList.Count}";
             go.transform.position = position;
             
-            // Scale capsule to match agent dimensions
-            // Default capsule is 2 units tall, 1 unit diameter
             float scaleY = agentHeight / 2f;
             float scaleXZ = agentRadius * 2f;
             go.transform.localScale = new Vector3(scaleXZ, scaleY, scaleXZ);
             
-            // Apply material - create instance for color changes
             var renderer = go.GetComponent<Renderer>();
             if (renderer)
             {
@@ -363,9 +487,6 @@ namespace Agents
             return go;
         }
         
-        /// <summary>
-        /// Configures a NavMeshAgent with default settings.
-        /// </summary>
         private void ConfigureNavMeshAgent(NavMeshAgent navAgent)
         {
             navAgent.speed = defaultSpeed;
@@ -375,8 +496,6 @@ namespace Agents
             navAgent.radius = agentRadius;
             navAgent.height = agentHeight;
             navAgent.baseOffset = heightOffset;
-            
-            // Allow traversal of all NavMesh areas (including links)
             navAgent.areaMask = NavMesh.AllAreas;
             navAgent.autoTraverseOffMeshLink = true;
         }
@@ -386,80 +505,32 @@ namespace Agents
         #region Agent Registration
         
         /// <summary>
-        /// Registers an agent with the manager. Called automatically by NPCAgent.
+        /// Register an agent with the manager.
         /// </summary>
         internal void RegisterAgent(NPCAgent agent)
         {
             if (!agent) return;
             
-            if (_agents.Add(agent))
+            if (_agentsSet.Add(agent))
             {
+                _agentsList.Add(agent);
+                _highLODAgents.Add(agent); // Start in high LOD
                 AgentSpawned?.Invoke(agent);
             }
         }
         
         /// <summary>
-        /// Unregisters an agent from the manager. Called automatically by NPCAgent.
+        /// Unregister an agent from the manager.
         /// </summary>
         internal void UnregisterAgent(NPCAgent agent)
         {
             if (!agent) return;
             
-            if (_agents.Remove(agent))
+            if (_agentsSet.Remove(agent))
             {
-                // Destroy ECS entity
-                if (agent.LinkedEntity != Entity.Null && _world != null && _world.IsCreated)
-                {
-                    if (_entityManager.Exists(agent.LinkedEntity))
-                    {
-                        _entityManager.DestroyEntity(agent.LinkedEntity);
-                    }
-                }
-                
+                _agentsList.Remove(agent);
+                RemoveFromLODBucket(agent);
                 AgentDestroyed?.Invoke(agent);
-            }
-        }
-        
-        #endregion
-        
-        #region ECS Data Access
-        
-        /// <summary>
-        /// Updates ECS AgentData when agent state changes from MonoBehaviour side.
-        /// Called by NPCAgent when SetDestination, Select, etc. are called.
-        /// </summary>
-        internal void UpdateAgentData(Entity entity, AgentData data)
-        {
-            if (entity == Entity.Null || _world == null || !_world.IsCreated) return;
-            if (!_entityManager.Exists(entity)) return;
-            
-            _entityManager.SetComponentData(entity, data);
-        }
-        
-        /// <summary>
-        /// Gets current AgentData for an entity.
-        /// </summary>
-        internal AgentData GetAgentData(Entity entity)
-        {
-            if (entity == Entity.Null || _world == null || !_world.IsCreated)
-                return default;
-            if (!_entityManager.Exists(entity))
-                return default;
-            
-            return _entityManager.GetComponentData<AgentData>(entity);
-        }
-        
-        /// <summary>
-        /// Marks an agent's visuals as dirty (needs update).
-        /// </summary>
-        internal void MarkVisualsDirty(Entity entity)
-        {
-            if (entity == Entity.Null || _world == null || !_world.IsCreated) return;
-            if (!_entityManager.Exists(entity)) return;
-            
-            if (!_entityManager.HasComponent<AgentVisualsDirty>(entity))
-            {
-                _entityManager.AddComponent<AgentVisualsDirty>(entity);
             }
         }
         
@@ -468,7 +539,7 @@ namespace Agents
         #region Utility
         
         /// <summary>
-        /// Gets the appropriate color for an agent status.
+        /// Get color for a status.
         /// </summary>
         public Color GetColorForStatus(AgentStatus status)
         {
@@ -484,28 +555,51 @@ namespace Agents
         }
         
         /// <summary>
-        /// Gets the appropriate color for an agent status (NPCAgent enum version).
+        /// Set the camera used for LOD calculations.
         /// </summary>
-        public Color GetColorForStatus(NPCAgent.AgentStatus status)
+        public void SetLODCamera(Camera camera)
         {
-            return status switch
-            {
-                NPCAgent.AgentStatus.Idle => idleColor,
-                NPCAgent.AgentStatus.Moving => movingColor,
-                NPCAgent.AgentStatus.Selected => selectedColor,
-                NPCAgent.AgentStatus.Waiting => waitingColor,
-                NPCAgent.AgentStatus.Error => errorColor,
-                _ => idleColor
-            };
+            _lodCamera = camera;
         }
         
         /// <summary>
-        /// Destroys all agents. Useful for cleanup/reset.
+        /// Force immediate LOD update for all agents.
+        /// </summary>
+        public void ForceUpdateAllLOD()
+        {
+            if (!_lodCamera) return;
+            
+            Vector3 cameraPos = _lodCamera.transform.position;
+            foreach (var agent in _agentsList)
+            {
+                if (agent)
+                {
+                    UpdateAgentLOD(agent, cameraPos);
+                }
+            }
+            UpdateLODStats();
+        }
+        
+        /// <summary>
+        /// Enable/disable all agent visuals (for pause screens, etc.).
+        /// </summary>
+        public void SetAllVisualsEnabled(bool enabled)
+        {
+            foreach (var agent in _agentsList)
+            {
+                if (agent)
+                {
+                    agent.SetVisualsEnabled(enabled);
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Destroy all agents.
         /// </summary>
         public void DestroyAllAgents()
         {
-            // Copy to avoid modification during iteration
-            var agentsCopy = new List<NPCAgent>(_agents);
+            var agentsCopy = new List<NPCAgent>(_agentsList);
             foreach (var agent in agentsCopy)
             {
                 if (agent)
@@ -514,7 +608,74 @@ namespace Agents
                 }
             }
             
-            _agents.Clear();
+            _agentsList.Clear();
+            _agentsSet.Clear();
+            _highLODAgents.Clear();
+            _mediumLODAgents.Clear();
+            _lowLODAgents.Clear();
+            _culledAgents.Clear();
+        }
+        
+        /// <summary>
+        /// Get agent by ID.
+        /// </summary>
+        public NPCAgent GetAgentById(int agentId)
+        {
+            foreach (var agent in _agentsList)
+            {
+                if (agent && agent.AgentId == agentId)
+                {
+                    return agent;
+                }
+            }
+            return null;
+        }
+        
+        /// <summary>
+        /// Get all agents within a radius.
+        /// </summary>
+        public List<NPCAgent> GetAgentsInRadius(Vector3 center, float radius)
+        {
+            var result = new List<NPCAgent>();
+            float radiusSqr = radius * radius;
+            
+            foreach (var agent in _agentsList)
+            {
+                if (agent)
+                {
+                    float distSqr = (agent.transform.position - center).sqrMagnitude;
+                    if (distSqr <= radiusSqr)
+                    {
+                        result.Add(agent);
+                    }
+                }
+            }
+            
+            return result;
+        }
+        
+        #endregion
+        
+        #region Debug GUI
+        
+        private void OnGUI()
+        {
+            if (!showPerformanceStats) return;
+            
+            GUILayout.BeginArea(new Rect(10, 10, 250, 200));
+            GUILayout.BeginVertical("box");
+            
+            GUILayout.Label($"<b>NPC Performance Stats</b>");
+            GUILayout.Label($"Total Agents: {AgentCount}");
+            GUILayout.Label($"Updated This Frame: {AgentsUpdatedThisFrame}");
+            GUILayout.Space(5);
+            GUILayout.Label($"High LOD: {AgentsHighLOD}");
+            GUILayout.Label($"Medium LOD: {AgentsMediumLOD}");
+            GUILayout.Label($"Low LOD: {AgentsLowLOD}");
+            GUILayout.Label($"Culled: {AgentsCulled}");
+            
+            GUILayout.EndVertical();
+            GUILayout.EndArea();
         }
         
         #endregion

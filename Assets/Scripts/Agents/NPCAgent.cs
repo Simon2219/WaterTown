@@ -1,15 +1,11 @@
 using System;
-using Unity.Entities;
-using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.AI;
 
 namespace Agents
 {
-    #region ECS Components
-    
     /// <summary>
-    /// Agent status enum used by both ECS and MonoBehaviour.
+    /// Agent status for visual feedback and logic.
     /// </summary>
     public enum AgentStatus : byte
     {
@@ -21,71 +17,24 @@ namespace Agents
     }
 
     /// <summary>
-    /// Path status enum (mirrors NavMeshPathStatus).
+    /// LOD level for performance optimization.
     /// </summary>
-    public enum PathStatus : byte
+    public enum AgentLODLevel : byte
     {
-        Complete = 0,
-        Partial = 1,
-        Invalid = 2,
-        Pending = 3
+        /// <summary>Full updates every frame, full visuals.</summary>
+        High = 0,
+        /// <summary>Updates every 2-3 frames, full visuals.</summary>
+        Medium = 1,
+        /// <summary>Updates every 5 frames, simplified visuals.</summary>
+        Low = 2,
+        /// <summary>Visuals disabled, minimal updates.</summary>
+        Culled = 3
     }
 
     /// <summary>
-    /// Core agent data stored in ECS for efficient batch processing.
-    /// </summary>
-    public struct AgentData : IComponentData
-    {
-        public int AgentId;
-        public AgentStatus Status;
-        public AgentStatus StatusBeforeSelection;
-        public bool IsSelected;
-        public bool HasDestination;
-        public float3 CurrentPosition;
-        public float3 TargetPosition;
-        public float3 Velocity;
-        public float RemainingDistance;
-        public float StoppingDistance;
-        public PathStatus PathStatus;
-    }
-
-    /// <summary>
-    /// Tag component for agents that need visual updates.
-    /// </summary>
-    public struct AgentVisualsDirty : IComponentData { }
-
-    /// <summary>
-    /// Tag component for newly spawned agents that need initialization.
-    /// </summary>
-    public struct AgentNeedsInit : IComponentData { }
-
-    /// <summary>
-    /// Link to the managed GameObject (NavMeshAgent).
-    /// </summary>
-    public class AgentManagedData : IComponentData
-    {
-        public NPCAgent Agent;
-        public NavMeshAgent NavMeshAgent;
-        public Renderer Renderer;
-    }
-
-    /// <summary>
-    /// Agent visual configuration (colors, scale).
-    /// </summary>
-    public struct AgentVisualConfig : IComponentData
-    {
-        public float SelectedScaleMultiplier;
-        public float BaseScaleX;
-        public float BaseScaleY;
-        public float BaseScaleZ;
-    }
-    
-    #endregion
-
-    /// <summary>
-    /// Individual NPC agent component. Bridges GameObject (NavMeshAgent) with ECS Entity.
-    /// Movement and visual state are processed by DOTS systems.
-    /// This MonoBehaviour handles the NavMeshAgent control and event callbacks.
+    /// Individual NPC agent component.
+    /// Handles NavMeshAgent control, status, and visual state.
+    /// Performance is managed by NPCManager through LOD and culling.
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(NavMeshAgent))]
@@ -93,96 +42,104 @@ namespace Agents
     {
         #region Events
         
-        /// <summary>
-        /// Fired when this agent's status changes.
-        /// </summary>
+        /// <summary>Fired when status changes.</summary>
         public event Action<NPCAgent, AgentStatus> StatusChanged;
         
-        /// <summary>
-        /// Fired when this agent reaches its destination.
-        /// </summary>
+        /// <summary>Fired when destination is reached.</summary>
         public event Action<NPCAgent> DestinationReached;
         
-        /// <summary>
-        /// Fired when this agent is selected/deselected.
-        /// </summary>
+        /// <summary>Fired when selection state changes.</summary>
         public event Action<NPCAgent, bool> SelectionChanged;
+        
+        /// <summary>Fired when LOD level changes.</summary>
+        public event Action<NPCAgent, AgentLODLevel> LODChanged;
         
         #endregion
         
         #region Public Properties
         
-        /// <summary>
-        /// Current status of this agent (read from ECS).
-        /// </summary>
-        public AgentStatus Status => _cachedStatus;
+        /// <summary>Unique ID for this agent.</summary>
+        public int AgentId { get; private set; }
         
-        /// <summary>
-        /// Whether this agent is currently selected.
-        /// </summary>
+        /// <summary>Current status.</summary>
+        public AgentStatus Status => _status;
+        
+        /// <summary>Whether this agent is selected.</summary>
         public bool IsSelected => _isSelected;
         
-        /// <summary>
-        /// Whether this agent is currently moving toward a destination.
-        /// </summary>
+        /// <summary>Whether this agent is moving toward a destination.</summary>
         public bool IsMoving => _navAgent && _navAgent.hasPath && !_navAgent.isStopped && 
                                 _navAgent.remainingDistance > _navAgent.stoppingDistance;
         
-        /// <summary>
-        /// Current destination (if any).
-        /// </summary>
-        public Vector3? CurrentDestination => _hasDestination ? _navAgent.destination : null;
+        /// <summary>Current destination (if any).</summary>
+        public Vector3? CurrentDestination => _hasDestination ? _navAgent.destination : (Vector3?)null;
         
-        /// <summary>
-        /// Reference to the NavMeshAgent component.
-        /// </summary>
+        /// <summary>Reference to NavMeshAgent.</summary>
         public NavMeshAgent NavAgent => _navAgent;
         
-        /// <summary>
-        /// Unique ID for this agent.
-        /// </summary>
-        public int AgentId { get; private set; }
+        /// <summary>Current LOD level.</summary>
+        public AgentLODLevel LODLevel => _lodLevel;
         
-        /// <summary>
-        /// The ECS Entity linked to this agent.
-        /// </summary>
-        public Entity LinkedEntity => _linkedEntity;
+        /// <summary>Whether visuals are currently enabled.</summary>
+        public bool VisualsEnabled => _visualsEnabled;
+        
+        /// <summary>Distance to main camera (updated by manager).</summary>
+        public float CameraDistance { get; internal set; }
         
         #endregion
         
-        #region Private State
+        #region Serialized Fields
         
-        private NPCManager _manager;
+        [Header("Debug")]
+        [SerializeField] private bool showDebugInfo;
+        
+        #endregion
+        
+        #region Internal State
+        
+        internal NPCManager Manager;
+        internal Renderer AgentRenderer;
+        internal Material AgentMaterial;
+        
         private NavMeshAgent _navAgent;
-        private Entity _linkedEntity;
-        
-        private AgentStatus _cachedStatus = AgentStatus.Idle;
-        private AgentStatus _previousStatus = AgentStatus.Idle;
+        private AgentStatus _status = AgentStatus.Idle;
         private AgentStatus _statusBeforeSelection = AgentStatus.Idle;
+        private AgentLODLevel _lodLevel = AgentLODLevel.High;
         private bool _isSelected;
         private bool _hasDestination;
         private bool _wasAtDestination = true;
-        private bool _isInitialized;
+        private bool _visualsEnabled = true;
+        private Vector3 _baseScale;
+        
+        // Frame skip tracking
+        private int _frameOffset;
+        private static int _globalFrameOffset;
         
         #endregion
         
         #region Initialization
         
         /// <summary>
-        /// Initialize the agent with manager reference and ECS entity.
-        /// Called by NPCManager after spawn.
+        /// Initialize the agent. Called by NPCManager after spawn.
         /// </summary>
-        internal void Initialize(NPCManager manager, NavMeshAgent navAgent, Entity entity, int agentId)
+        internal void Initialize(NPCManager manager, int agentId)
         {
-            if (_isInitialized) return;
-            
-            _manager = manager;
-            _navAgent = navAgent;
-            _linkedEntity = entity;
+            Manager = manager;
             AgentId = agentId;
+            _navAgent = GetComponent<NavMeshAgent>();
+            AgentRenderer = GetComponent<Renderer>();
             
-            _manager.RegisterAgent(this);
-            _isInitialized = true;
+            if (AgentRenderer)
+            {
+                AgentMaterial = AgentRenderer.material;
+            }
+            
+            _baseScale = transform.localScale;
+            
+            // Stagger frame updates to distribute load
+            _frameOffset = _globalFrameOffset++ % 10;
+            
+            manager.RegisterAgent(this);
         }
         
         #endregion
@@ -191,73 +148,197 @@ namespace Agents
         
         private void Awake()
         {
-            if (!_navAgent)
-            {
-                _navAgent = GetComponent<NavMeshAgent>();
-            }
+            _navAgent = GetComponent<NavMeshAgent>();
         }
         
         private void OnDestroy()
         {
-            if (_manager)
+            if (Manager)
             {
-                _manager.UnregisterAgent(this);
+                Manager.UnregisterAgent(this);
+            }
+            
+            if (AgentMaterial)
+            {
+                Destroy(AgentMaterial);
             }
         }
         
         #endregion
         
-        #region ECS Sync
+        #region Update Methods (Called by Manager)
         
         /// <summary>
-        /// Called by ECS system to sync state from AgentData to this MonoBehaviour.
+        /// Full update - called every frame for High LOD agents.
         /// </summary>
-        internal void SyncFromECS(AgentData data)
+        internal void UpdateFull()
         {
-            AgentStatus newStatus = data.Status;
-            
-            if (newStatus != _previousStatus)
-            {
-                _cachedStatus = newStatus;
-                StatusChanged?.Invoke(this, _cachedStatus);
-                _previousStatus = newStatus;
-            }
-            
-            bool atDestination = !data.HasDestination && _hasDestination;
-            if (atDestination && !_wasAtDestination)
-            {
-                _hasDestination = false;
-                DestinationReached?.Invoke(this);
-            }
-            _wasAtDestination = !data.HasDestination;
-            _hasDestination = data.HasDestination;
+            UpdateStatus();
+            CheckDestinationReached();
         }
         
         /// <summary>
-        /// Pushes current state to ECS entity.
+        /// Reduced update - called periodically for Medium/Low LOD agents.
         /// </summary>
-        private void PushToECS()
+        internal void UpdateReduced()
         {
-            if (_linkedEntity == Entity.Null || _manager == null) return;
-            
-            var data = _manager.GetAgentData(_linkedEntity);
-            
-            data.IsSelected = _isSelected;
-            data.HasDestination = _hasDestination;
-            data.StatusBeforeSelection = _statusBeforeSelection;
-            
-            if (_isSelected)
+            UpdateStatus();
+            CheckDestinationReached();
+        }
+        
+        /// <summary>
+        /// Minimal update - called rarely for Culled agents.
+        /// </summary>
+        internal void UpdateMinimal()
+        {
+            // Only check if we've reached destination
+            CheckDestinationReached();
+        }
+        
+        /// <summary>
+        /// Check if this agent should update this frame based on LOD.
+        /// </summary>
+        internal bool ShouldUpdateThisFrame(int frameCount)
+        {
+            return _lodLevel switch
             {
-                data.Status = AgentStatus.Selected;
+                AgentLODLevel.High => true,
+                AgentLODLevel.Medium => (frameCount + _frameOffset) % 3 == 0,
+                AgentLODLevel.Low => (frameCount + _frameOffset) % 5 == 0,
+                AgentLODLevel.Culled => (frameCount + _frameOffset) % 15 == 0,
+                _ => true
+            };
+        }
+        
+        private void UpdateStatus()
+        {
+            if (_isSelected) return;
+            
+            AgentStatus newStatus = DetermineStatus();
+            
+            if (newStatus != _status)
+            {
+                _status = newStatus;
+                UpdateVisuals();
+                StatusChanged?.Invoke(this, _status);
+            }
+        }
+        
+        private AgentStatus DetermineStatus()
+        {
+            if (!_navAgent) return AgentStatus.Error;
+            
+            if (_navAgent.pathStatus == NavMeshPathStatus.PathInvalid)
+            {
+                return AgentStatus.Error;
             }
             
-            if (_hasDestination && _navAgent != null)
+            if (_hasDestination)
             {
-                data.TargetPosition = _navAgent.destination;
+                if (_navAgent.pathPending)
+                {
+                    return AgentStatus.Waiting;
+                }
+                
+                if (_navAgent.remainingDistance <= _navAgent.stoppingDistance)
+                {
+                    _hasDestination = false;
+                    return AgentStatus.Idle;
+                }
+                
+                if (_navAgent.velocity.sqrMagnitude > 0.01f)
+                {
+                    return AgentStatus.Moving;
+                }
+                
+                return AgentStatus.Waiting;
             }
             
-            _manager.UpdateAgentData(_linkedEntity, data);
-            _manager.MarkVisualsDirty(_linkedEntity);
+            return AgentStatus.Idle;
+        }
+        
+        private void CheckDestinationReached()
+        {
+            bool atDestination = !_hasDestination;
+            
+            if (atDestination && !_wasAtDestination)
+            {
+                DestinationReached?.Invoke(this);
+            }
+            
+            _wasAtDestination = atDestination;
+        }
+        
+        #endregion
+        
+        #region LOD & Culling
+        
+        /// <summary>
+        /// Set LOD level. Called by NPCManager.
+        /// </summary>
+        internal void SetLODLevel(AgentLODLevel level)
+        {
+            if (_lodLevel == level) return;
+            
+            AgentLODLevel previousLevel = _lodLevel;
+            _lodLevel = level;
+            
+            // Handle visual culling
+            bool shouldShowVisuals = level != AgentLODLevel.Culled;
+            if (shouldShowVisuals != _visualsEnabled)
+            {
+                SetVisualsEnabled(shouldShowVisuals);
+            }
+            
+            LODChanged?.Invoke(this, _lodLevel);
+        }
+        
+        /// <summary>
+        /// Enable/disable visual components (renderer).
+        /// NavMeshAgent continues to work.
+        /// </summary>
+        internal void SetVisualsEnabled(bool enabled)
+        {
+            if (_visualsEnabled == enabled) return;
+            _visualsEnabled = enabled;
+            
+            if (AgentRenderer)
+            {
+                AgentRenderer.enabled = enabled;
+            }
+        }
+        
+        #endregion
+        
+        #region Visual Updates
+        
+        /// <summary>
+        /// Update visual appearance based on status.
+        /// </summary>
+        internal void UpdateVisuals()
+        {
+            if (!_visualsEnabled || !Manager) return;
+            
+            // Update color
+            if (AgentMaterial)
+            {
+                Color color = Manager.GetColorForStatus(_status);
+                AgentMaterial.color = color;
+            }
+            
+            // Update scale for selection
+            transform.localScale = _isSelected 
+                ? _baseScale * Manager.SelectedScaleMultiplier 
+                : _baseScale;
+        }
+        
+        /// <summary>
+        /// Force visual update (e.g., after LOD change).
+        /// </summary>
+        internal void ForceVisualUpdate()
+        {
+            if (!_visualsEnabled) return;
+            UpdateVisuals();
         }
         
         #endregion
@@ -278,7 +359,7 @@ namespace Agents
             if (!NavMesh.SamplePosition(destination, out NavMeshHit hit, 5f, NavMesh.AllAreas))
             {
                 Debug.LogWarning($"[NPCAgent] Agent {AgentId} could not find NavMesh position near {destination}");
-                SetErrorState();
+                SetStatus(AgentStatus.Error);
                 return false;
             }
             
@@ -288,18 +369,17 @@ namespace Agents
             {
                 _hasDestination = true;
                 _wasAtDestination = false;
-                PushToECS();
             }
             else
             {
-                SetErrorState();
+                SetStatus(AgentStatus.Error);
             }
             
             return result;
         }
         
         /// <summary>
-        /// Stops the agent's current movement.
+        /// Stops current movement.
         /// </summary>
         public void Stop()
         {
@@ -307,63 +387,51 @@ namespace Agents
             {
                 _navAgent.ResetPath();
                 _hasDestination = false;
-                PushToECS();
             }
         }
         
         /// <summary>
-        /// Selects this agent.
+        /// Select this agent.
         /// </summary>
         public void Select()
         {
             if (_isSelected) return;
             
-            _statusBeforeSelection = _cachedStatus;
+            _statusBeforeSelection = _status;
             _isSelected = true;
-            _cachedStatus = AgentStatus.Selected;
+            _status = AgentStatus.Selected;
             
+            UpdateVisuals();
             SelectionChanged?.Invoke(this, true);
-            StatusChanged?.Invoke(this, _cachedStatus);
-            
-            PushToECS();
+            StatusChanged?.Invoke(this, _status);
         }
         
         /// <summary>
-        /// Deselects this agent.
+        /// Deselect this agent.
         /// </summary>
         public void Deselect()
         {
             if (!_isSelected) return;
             
             _isSelected = false;
-            _cachedStatus = _statusBeforeSelection;
+            _status = _statusBeforeSelection;
             
+            UpdateVisuals();
             SelectionChanged?.Invoke(this, false);
-            StatusChanged?.Invoke(this, _cachedStatus);
-            
-            if (_linkedEntity != Entity.Null && _manager != null)
-            {
-                var data = _manager.GetAgentData(_linkedEntity);
-                data.IsSelected = false;
-                data.Status = _statusBeforeSelection;
-                _manager.UpdateAgentData(_linkedEntity, data);
-                _manager.MarkVisualsDirty(_linkedEntity);
-            }
+            StatusChanged?.Invoke(this, _status);
         }
         
         /// <summary>
-        /// Toggles selection state.
+        /// Toggle selection.
         /// </summary>
         public void ToggleSelection()
         {
-            if (_isSelected)
-                Deselect();
-            else
-                Select();
+            if (_isSelected) Deselect();
+            else Select();
         }
         
         /// <summary>
-        /// Manually sets the agent status.
+        /// Manually set status.
         /// </summary>
         public void SetStatus(AgentStatus newStatus)
         {
@@ -373,21 +441,13 @@ namespace Agents
                 return;
             }
             
-            _cachedStatus = newStatus;
-            
-            if (_linkedEntity != Entity.Null && _manager != null)
-            {
-                var data = _manager.GetAgentData(_linkedEntity);
-                data.Status = newStatus;
-                _manager.UpdateAgentData(_linkedEntity, data);
-                _manager.MarkVisualsDirty(_linkedEntity);
-            }
-            
-            StatusChanged?.Invoke(this, _cachedStatus);
+            _status = newStatus;
+            UpdateVisuals();
+            StatusChanged?.Invoke(this, _status);
         }
         
         /// <summary>
-        /// Teleports agent to a new position (snapped to NavMesh).
+        /// Teleport to position (snapped to NavMesh).
         /// </summary>
         public bool Teleport(Vector3 worldPosition)
         {
@@ -399,24 +459,34 @@ namespace Agents
             _navAgent.Warp(hit.position);
             _hasDestination = false;
             
-            PushToECS();
-            
             return true;
         }
         
-        private void SetErrorState()
+        #endregion
+        
+        #region Debug
+        
+        private void OnDrawGizmosSelected()
         {
-            _cachedStatus = AgentStatus.Error;
+            if (!showDebugInfo || !_navAgent) return;
             
-            if (_linkedEntity != Entity.Null && _manager != null)
+            // Draw path
+            if (_navAgent.hasPath)
             {
-                var data = _manager.GetAgentData(_linkedEntity);
-                data.Status = AgentStatus.Error;
-                _manager.UpdateAgentData(_linkedEntity, data);
-                _manager.MarkVisualsDirty(_linkedEntity);
+                Gizmos.color = Color.yellow;
+                var corners = _navAgent.path.corners;
+                for (int i = 0; i < corners.Length - 1; i++)
+                {
+                    Gizmos.DrawLine(corners[i], corners[i + 1]);
+                }
             }
             
-            StatusChanged?.Invoke(this, _cachedStatus);
+            // Draw destination
+            if (_hasDestination)
+            {
+                Gizmos.color = Color.green;
+                Gizmos.DrawWireSphere(_navAgent.destination, 0.3f);
+            }
         }
         
         #endregion

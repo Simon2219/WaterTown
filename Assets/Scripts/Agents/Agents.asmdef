@@ -1,16 +1,10 @@
 {
     "name": "Agents",
     "rootNamespace": "Agents",
-    "references": [
-        "Unity.Entities",
-        "Unity.Burst",
-        "Unity.Collections",
-        "Unity.Mathematics",
-        "Unity.Transforms"
-    ],
+    "references": [],
     "includePlatforms": [],
     "excludePlatforms": [],
-    "allowUnsafeCode": true,
+    "allowUnsafeCode": false,
     "overrideReferences": false,
     "precompiledReferences": [],
     "autoReferenced": true,
