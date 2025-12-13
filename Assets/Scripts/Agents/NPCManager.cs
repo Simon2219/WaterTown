@@ -37,7 +37,11 @@ namespace Agents
         #region Configuration - Agent Settings
         
         [Header("Agent Prefab Settings")]
-        [Tooltip("If null, agents are created procedurally as capsules.")]
+        [Tooltip("Optional prefab with pre-configured NavMeshAgent.\n" +
+                 "RECOMMENDED: Create a prefab with NavMeshAgent already set to your agent type.\n" +
+                 "This avoids the 'not close enough to NavMesh' warning that occurs when\n" +
+                 "dynamically adding NavMeshAgent for non-default agent types.\n" +
+                 "If null, agents are created procedurally as capsules.")]
         [SerializeField] private GameObject agentPrefab;
         
         [Header("Default Agent Settings")]
@@ -401,11 +405,21 @@ namespace Agents
         /// <param name="overrideAgentTypeID">Optional: override the default agent type ID. Use -1 to use default.</param>
         public NPCAgent SpawnAgent(Vector3 worldPosition, int overrideAgentTypeID = -1)
         {
-            // Find nearest NavMesh position
-            if (!NavMesh.SamplePosition(worldPosition, out NavMeshHit navHit, navMeshSearchRadius, NavMesh.AllAreas))
+            // Determine which agent type we're spawning
+            int finalAgentType = overrideAgentTypeID >= 0 ? overrideAgentTypeID : agentType.AgentTypeID;
+            
+            // Create a query filter for the specific agent type
+            var filter = new NavMeshQueryFilter
             {
-                Debug.LogWarning($"[NPCManager] No NavMesh within {navMeshSearchRadius}m of {worldPosition}. " +
-                                 "Make sure you're clicking on a NavMesh area!");
+                agentTypeID = finalAgentType,
+                areaMask = NavMesh.AllAreas
+            };
+            
+            // Find nearest NavMesh position for THIS agent type
+            if (!NavMesh.SamplePosition(worldPosition, out NavMeshHit navHit, navMeshSearchRadius, filter))
+            {
+                Debug.LogWarning($"[NPCManager] No NavMesh for agent type {finalAgentType} within {navMeshSearchRadius}m of {worldPosition}. " +
+                                 "Make sure you're clicking on a NavMesh area baked for this agent type!");
                 return null;
             }
             
@@ -416,10 +430,11 @@ namespace Agents
             {
                 Debug.Log($"[NPCManager] Spawn:\n" +
                           $"  Requested: {worldPosition}\n" +
-                          $"  NavMesh: {navMeshPosition}");
+                          $"  NavMesh: {navMeshPosition}\n" +
+                          $"  AgentType: {finalAgentType}");
             }
             
-            // Create GameObject AT NAVMESH POSITION (important - NavMeshAgent needs to be on NavMesh)
+            // Create GameObject AT NAVMESH POSITION
             GameObject agentGo = agentPrefab 
                 ? Instantiate(agentPrefab, navMeshPosition, Quaternion.identity)
                 : CreateProceduralAgent(navMeshPosition);
@@ -435,22 +450,20 @@ namespace Agents
                 Debug.LogWarning($"[NPCManager] Layer '{agentLayerName}' not found!");
             }
             
-            // IMPORTANT: Position at NavMesh BEFORE adding NavMeshAgent to avoid warning
-            agentGo.transform.position = navMeshPosition;
-            
             // Get/Add NavMeshAgent
+            // Note: Unity may log a warning here if default agent type differs from our type.
+            // This is harmless - we configure the correct type immediately after.
             var navAgent = agentGo.GetComponent<NavMeshAgent>();
             if (!navAgent)
             {
                 navAgent = agentGo.AddComponent<NavMeshAgent>();
             }
             
-            // Configure agent
-            int finalAgentType = overrideAgentTypeID >= 0 ? overrideAgentTypeID : agentType.AgentTypeID;
+            // Configure agent with correct type FIRST
             navAgent.agentTypeID = finalAgentType;
             ConfigureNavMeshAgent(navAgent);
             
-            // Warp to ensure proper placement
+            // Warp to ensure proper placement on the correct NavMesh
             navAgent.Warp(navMeshPosition);
             
             // Now add NPCAgent (NavMeshAgent already exists)
