@@ -9,6 +9,7 @@ namespace Platforms
     /// Manages socket creation, status, grid adjacency, connections, and module registry for a platform
     /// Handles all socket-related logic including neighbor detection and connection state
     /// </summary>
+    /// 
     [DisallowMultipleComponent]
     public class PlatformSocketSystem : MonoBehaviour
     {
@@ -56,15 +57,48 @@ namespace Platforms
             [SerializeField] private SocketStatus status;
             
             // World position - updated when platform moves
-            private Vector3 worldPos;
 
-            public int Index => index;
-            public Vector3 LocalPos => localPos;
-            public Vector3 WorldPos => worldPos;
-            public Vector2Int OutwardOffset => outwardOffset;
-            public SocketStatus Status => status;
-            public bool IsLinkable => status == SocketStatus.Linkable;
-            public SocketLocation Location => location;
+            public int Index
+            {
+                get => index; 
+                set => index = value;
+            }
+
+            public Vector3 LocalPos
+            {
+                get => localPos;
+                set => localPos = value;
+            }
+
+            public Vector3 WorldPos 
+            { 
+                get; 
+                private set; 
+            }
+
+            public Vector2Int OutwardOffset
+            {
+                get => outwardOffset;
+                set => outwardOffset = value;
+            }
+
+            public SocketStatus Status
+            {
+                get => status;
+                set => status = value;
+            }
+
+            public bool IsLinkable
+            {
+                get => status == SocketStatus.Linkable;
+                set => throw new NotImplementedException();
+            }
+
+            public SocketLocation Location
+            {
+                get => location;
+                set => location = value;
+            }
 
             internal void Initialize(int idx, Vector3 lp, Vector2Int outward, SocketStatus defaultStatus)
             {
@@ -73,12 +107,12 @@ namespace Platforms
                 outwardOffset = outward;
                 location = SocketLocation.Edge;
                 status = defaultStatus;
-                worldPos = Vector3.zero;
+                WorldPos = Vector3.zero;
             }
 
             public void SetStatus(SocketStatus s) => status = s;
             
-            internal void SetWorldPosition(Vector3 pos) => worldPos = pos;
+            internal void SetWorldPosition(Vector3 pos) => WorldPos = pos;
         }
         
         
@@ -100,32 +134,37 @@ namespace Platforms
         #region Socket Data
         
         
-        [Header("Sockets (perimeter, 1m spacing)")]
+        [Header("Sockets")]
         [SerializeField] private List<SocketData> sockets = new();
-        private bool _socketsBuilt;
-        
+
         /// Set of socket indices that are currently part of a connection
         private readonly HashSet<int> _connectedSockets = new();
+
+        private bool SocketsBuilt { get; set; }
         
         /// Read-only access to connected sockets for external systems
-        public IReadOnlyCollection<int> ConnectedSockets => _connectedSockets;
-        
+        public IReadOnlyCollection<int> ConnectedSockets
+        {
+            get => _connectedSockets;
+            set => throw new NotImplementedException();
+        }
+
         public IReadOnlyList<SocketData> Sockets
         {
             get 
             { 
-                if (!_socketsBuilt && _platform) BuildSockets(); 
+                if (!SocketsBuilt) BuildSockets(); 
                 return sockets; 
             }
         }
         
-        public bool SocketsBuilt => _socketsBuilt;
         
+
         public int SocketCount
         {
             get 
             { 
-                if (!_socketsBuilt && _platform) BuildSockets();
+                if (!SocketsBuilt) BuildSockets();
                 return sockets.Count;
             }
         }
@@ -140,7 +179,7 @@ namespace Platforms
         
         
         private readonly Dictionary<GameObject, ModuleReg> _moduleRegs = new();
-        private readonly Dictionary<int, List<GameObject>> _socketToModules = new();
+        private readonly Dictionary<int, GameObject> _socketToModules = new();
         
         
         #endregion
@@ -158,7 +197,7 @@ namespace Platforms
             _platformManager = platformManager;
             _worldGrid = worldGrid;
             
-            // Subscribe to platform movement (only if not already subscribed)
+            // Subscribe to platform movement
             // Remove first to avoid double subscription
             _platform.HasMoved -= OnPlatformMoved;
             _platform.HasMoved += OnPlatformMoved;
@@ -202,7 +241,7 @@ namespace Platforms
                 prev[s.LocalPos] = s.Status;
 
             sockets.Clear();
-            _socketsBuilt = false;
+            SocketsBuilt = false;
 
             int footprintWidth = Mathf.Max(1, footprintSize.x);
             int footprintLength = Mathf.Max(1, footprintSize.y);
@@ -259,7 +298,7 @@ namespace Platforms
                 socketIndex++;
             }
 
-            _socketsBuilt = true;
+            SocketsBuilt = true;
             
             UpdateSocketWorldPositions();
         }
@@ -275,7 +314,7 @@ namespace Platforms
         
         public SocketData GetSocket(int index)
         {
-            if (!_socketsBuilt) BuildSockets();
+            if (!SocketsBuilt) BuildSockets();
             if (index < 0 || index >= sockets.Count)
             {
                 Debug.LogWarning($"[PlatformSocketSystem] GetSocket: index {index} out of range (0..{sockets.Count - 1}).", this);
@@ -287,7 +326,7 @@ namespace Platforms
 
         public Vector3 GetSocketWorldPosition(int index)
         {
-            if (!_socketsBuilt) BuildSockets();
+            if (!SocketsBuilt) BuildSockets();
             
             if (index < 0 || index >= sockets.Count)
                 return transform.position;
@@ -298,7 +337,7 @@ namespace Platforms
 
         public void SetSocketStatus(int index, SocketStatus status)
         {
-            if (!_socketsBuilt) BuildSockets();
+            if (!SocketsBuilt) BuildSockets();
             if (index < 0 || index >= sockets.Count)
             {
                 Debug.LogWarning($"[PlatformSocketSystem] SetSocketStatus: index {index} out of range (0..{sockets.Count - 1}).", this);
@@ -313,7 +352,7 @@ namespace Platforms
         /// Updates world positions for all sockets based on current transform
         public void UpdateSocketWorldPositions()
         {
-            if (!_socketsBuilt) return;
+            if (!SocketsBuilt) return;
             
             for (int i = 0; i < sockets.Count; i++)
             {
@@ -348,7 +387,7 @@ namespace Platforms
         /// Gets the socket index range (start, end inclusive) for a given edge
         public void GetSocketIndexRangeForEdge(Edge edge, out int startIndex, out int endIndex)
         {
-            if (!_socketsBuilt) BuildSockets();
+            if (!SocketsBuilt) BuildSockets();
             if (!_platform) { startIndex = 0; endIndex = 0; return; }
 
             var footprintSize = _platform.Footprint;
@@ -381,7 +420,7 @@ namespace Platforms
         /// Compatibility helper for code that thinks in Edge+mark (PlatformModule, old tools)
         public int GetSocketIndexByEdgeMark(Edge edge, int mark)
         {
-            if (!_socketsBuilt) BuildSockets();
+            if (!SocketsBuilt) BuildSockets();
             if (!_platform) return 0;
 
             var footprintSize = _platform.Footprint;
@@ -410,7 +449,7 @@ namespace Platforms
         /// Return the single nearest socket index to a local position
         public int FindNearestSocketIndexLocal(Vector3 localPos)
         {
-            if (!_socketsBuilt) BuildSockets();
+            if (!SocketsBuilt) BuildSockets();
             int best = -1;
             float bestD = float.MaxValue;
 
@@ -431,7 +470,7 @@ namespace Platforms
         public void FindNearestSocketIndicesLocal(Vector3 localPos, int maxCount, float maxDistance, List<int> result)
         {
             result.Clear();
-            if (!_socketsBuilt) BuildSockets();
+            if (!SocketsBuilt) BuildSockets();
             if (maxCount <= 0 || sockets.Count == 0) return;
 
             float maxSqr = maxDistance * maxDistance;
@@ -469,7 +508,7 @@ namespace Platforms
         /// Gets the world-space outward direction for a socket (accounts for platform rotation)
         public Vector3 GetSocketWorldOutwardDirection(int socketIndex)
         {
-            if (!_socketsBuilt) BuildSockets();
+            if (!SocketsBuilt) BuildSockets();
             if (socketIndex < 0 || socketIndex >= sockets.Count)
                 return Vector3.zero;
 
@@ -482,7 +521,7 @@ namespace Platforms
         /// Gets the grid cell adjacent to a socket (the cell the socket faces toward)
         public Vector2Int GetAdjacentCellForSocket(int socketIndex)
         {
-            if (!_socketsBuilt) BuildSockets();
+            if (!SocketsBuilt) BuildSockets();
             if (socketIndex < 0 || socketIndex >= sockets.Count || !_worldGrid)
                 return Vector2Int.zero;
 
@@ -618,18 +657,16 @@ namespace Platforms
             // Update module visibility
             foreach (int socketIndex in socketsToDisconnect)
             {
-                if (_socketToModules.TryGetValue(socketIndex, out var modules))
+                if (_socketToModules.TryGetValue(socketIndex, out var module))
                 {
-                    foreach (var module in modules)
                         SetModuleVisibility(module, visible: true);
                 }
             }
             
             foreach (int socketIndex in socketsToConnect)
             {
-                if (_socketToModules.TryGetValue(socketIndex, out var modules))
+                if (_socketToModules.TryGetValue(socketIndex, out var module))
                 {
-                    foreach (var module in modules)
                         SetModuleVisibility(module, visible: false);
                 }
             }
@@ -660,7 +697,7 @@ namespace Platforms
         /// Recompute every socket's status from current modules + connection state
         public void RefreshSocketStatuses()
         {
-            if (!_socketsBuilt) BuildSockets();
+            if (!SocketsBuilt) BuildSockets();
 
             for (int i = 0; i < sockets.Count; i++)
             {
@@ -680,15 +717,11 @@ namespace Platforms
                 }
 
                 bool blocked = false;
-                if (_socketToModules.TryGetValue(i, out var mods))
+                if (_socketToModules.TryGetValue(i, out var module))
                 {
-                    foreach (var go in mods)
-                    {
-                        if (!go) continue;
-                        if (!go.activeInHierarchy) continue;
-                        if (!_moduleRegs.TryGetValue(go, out var reg)) continue;
-                        if (reg.blocksLink) { blocked = true; break; }
-                    }
+                    if (!module.activeInHierarchy) continue;
+                    if (!_moduleRegs.TryGetValue(module, out var reg)) continue;
+                    if (reg.blocksLink) blocked = true;
                 }
 
                 s.SetStatus(blocked ? SocketStatus.Occupied : SocketStatus.Linkable);
@@ -708,7 +741,7 @@ namespace Platforms
         public void RegisterModuleOnSockets(GameObject moduleGo, bool occupiesSockets, IEnumerable<int> socketIndices)
         {
             if (!moduleGo) return;
-            if (!_socketsBuilt) BuildSockets();
+            if (!SocketsBuilt) BuildSockets();
 
             var list = new List<int>(socketIndices);
             
@@ -731,15 +764,15 @@ namespace Platforms
             var reg = new ModuleReg { go = moduleGo, socketIndices = list.ToArray(), blocksLink = blocks };
             _moduleRegs[moduleGo] = reg;
 
-            foreach (var sIdx in list)
+            /*foreach (var sIdx in list)
             {
-                if (!_socketToModules.TryGetValue(sIdx, out var l))
+                if (!_socketToModules.TryGetValue(sIdx, out var module))
                 {
-                    l = new List<GameObject>();
-                    _socketToModules[sIdx] = l;
+                    module = new GameObject();
+                    _socketToModules[sIdx] = module;
                 }
                 if (!l.Contains(moduleGo)) l.Add(moduleGo);
-            }
+            }*/
         }
 
 
@@ -752,11 +785,7 @@ namespace Platforms
             {
                 foreach (var sIdx in reg.socketIndices)
                 {
-                    if (_socketToModules.TryGetValue(sIdx, out var list))
-                    {
-                        list.Remove(moduleGo);
-                        if (list.Count == 0) _socketToModules.Remove(sIdx);
-                    }
+                    _socketToModules.Remove(sIdx, out var module);
                 }
             }
             _moduleRegs.Remove(moduleGo);

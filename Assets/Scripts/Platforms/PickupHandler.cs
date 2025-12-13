@@ -163,8 +163,10 @@ namespace Platforms
                 if (!modelRenderer) continue;
                 
                 Material[] materials = modelRenderer.sharedMaterials;
+                
                 for (int i = 0; i < materials.Length; i++)
                     materials[i] = previewMaterial;
+                
                 modelRenderer.sharedMaterials = materials;
             }
         }
@@ -180,22 +182,18 @@ namespace Platforms
         
         private void DisableColliders()
         {
-            if (!_platform) return;
-            
-            foreach (var col in _platform.CachedColliders)
+            foreach (Collider col in _platform.CachedColliders)
             {
-                if (col) col.enabled = false;
+                col.enabled = false;
             }
         }
         
         
         private void EnableColliders()
         {
-            if (!_platform) return;
-            
-            foreach (var col in _platform.CachedColliders)
+            foreach (Collider col in _platform.CachedColliders)
             {
-                if (col) col.enabled = true;
+                col.enabled = true;
             }
         }
         
@@ -278,7 +276,10 @@ namespace Platforms
             if (!_platformManager || !_platform) return false;
             
             List<Vector2Int> cells = _platformManager.GetCellsForPlatform(_platform);
-            return cells.Count != 0 && _platformManager.IsAreaEmpty(cells);
+            
+            bool isValid = cells.Count != 0 && _platformManager.IsAreaEmpty(cells);
+            
+            return isValid;
         }
         
         

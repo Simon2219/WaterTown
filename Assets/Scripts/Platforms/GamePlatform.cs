@@ -135,14 +135,11 @@ namespace Platforms
         
         
         #region IPickupable Implementation
-        
-        
-        private bool _isPickedUp;
-        private bool _isNewObject;
-        
-        public bool IsPickedUp => _isPickedUp;
-        public bool IsNewObject => _isNewObject;
-        
+
+        public bool IsPickedUp { get; private set; }
+
+        public bool IsNewObject { get; private set; }
+
         public bool CanBePlaced => _pickupHandler?.CanBePlaced ?? false;
         public Transform Transform => transform;
         public GameObject GameObject => gameObject;
@@ -151,8 +148,8 @@ namespace Platforms
         /// Initiates pickup - fires PickedUp event for sub-systems to react
         public void PickUp(bool isNewObject)
         {
-            _isNewObject = isNewObject;
-            _isPickedUp = true;
+            IsNewObject = isNewObject;
+            IsPickedUp = true;
             
             // Fire event - sub-systems (PickupHandler) listen and react
             // PlatformManager also listens to clear grid cells (safe for new objects - they have empty occupiedCells)
@@ -163,7 +160,7 @@ namespace Platforms
         /// Confirms placement - fires Placed event for sub-systems to react
         public void Place()
         {
-            _isPickedUp = false;
+            IsPickedUp = false;
             
             // Compute cells for the new position
             if (_platformManager)
@@ -179,14 +176,14 @@ namespace Platforms
         /// For existing objects: fires PlacementCancelled (handler restores position), then Place() is called
         public void CancelPlacement()
         {
-            _isPickedUp = false;
+            IsPickedUp = false;
             
             // Fire event - PickupHandler restores position (existing) or marks for destroy (new)
             PlacementCancelled?.Invoke(this);
             
             // For existing objects, re-place at original position (triggers Placed event)
             // Note: PickupHandler handles the actual position restore before this
-            if (!_isNewObject)
+            if (!IsNewObject)
             {
                 // Compute cells at restored position
                 if (_platformManager)

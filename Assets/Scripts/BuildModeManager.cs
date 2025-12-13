@@ -237,9 +237,10 @@ namespace Building
         /// <summary>
         /// Picks up an existing platform for moving/rotating.
         /// </summary>
-        public void PickupExistingPlatform(IPickupable pickupable)
+        private void PickupExistingPlatform(IPickupable pickupable)
         {
-            if (pickupable == null) return;
+            Debug.Log("LOL");
+            if (pickupable == null) {Debug.Log("Uhm okey"); return;}
 
             if (_currentPickup != null)
             {
@@ -292,7 +293,10 @@ namespace Building
         private void PlacePickup()
         {
             if (_currentPickup == null) return;
-            if (!_currentPickup.CanBePlaced) return;
+            if (!_currentPickup.CanBePlaced) {
+                Debug.LogWarning("[BuildModeManager] Cannot place platform at current position.");
+                return;
+            }
             
             _currentPickup.Place();
             _currentPickup = null;
