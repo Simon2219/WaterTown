@@ -8,7 +8,6 @@ namespace Agents
     /// <summary>
     /// Handles agent spawning and selection/movement commands via InputActions.
     /// Assign InputAction references in the Inspector.
-    /// Uses plane raycast at y=0 for accurate mouse-to-world position conversion.
     /// </summary>
     [DisallowMultipleComponent]
     public class NPCAgentSpawner : MonoBehaviour
@@ -22,19 +21,32 @@ namespace Agents
         [Tooltip("InputAction for selecting an agent or issuing a move command.")]
         [SerializeField] private InputActionReference selectMoveAction;
         
-        [Header("Spawn Settings")]
-        [Tooltip("Optional spawn point transform. If set, agents spawn here instead of mouse position.")]
+        [Header("Spawn Position Settings")]
+        [Tooltip("Optional spawn point transform. If set and 'Use Spawn Point' is true, agents spawn here.")]
         [SerializeField] private Transform spawnPoint;
         
         [Tooltip("Use spawn point instead of mouse cursor position.")]
         [SerializeField] private bool useSpawnPoint = false;
+        
+        [Tooltip("Layer mask for ground/platform detection when spawning.")]
+        [SerializeField] private LayerMask groundLayerMask = ~0;
+        
+        [Tooltip("Maximum raycast distance for ground detection.")]
+        [SerializeField] private float groundRaycastDistance = 1000f;
+        
+        [Header("Spawn Raycast Mode")]
+        [Tooltip("How to determine spawn position from mouse click.")]
+        [SerializeField] private SpawnRaycastMode raycastMode = SpawnRaycastMode.PhysicsRaycast;
+        
+        [Tooltip("Plane height for PlaneRaycast mode.")]
+        [SerializeField] private float planeHeight = 0f;
         
         [Header("Selection Settings")]
         [Tooltip("Layer mask for agent selection raycasts.")]
         [SerializeField] private LayerMask agentLayerMask = ~0;
         
         [Tooltip("Maximum raycast distance for agent selection.")]
-        [SerializeField] private float maxRaycastDistance = 1000f;
+        [SerializeField] private float maxSelectionRaycastDistance = 1000f;
         
         [Header("References")]
         [Tooltip("Main camera for raycasting. If null, uses Camera.main.")]
@@ -42,6 +54,23 @@ namespace Agents
         
         [Header("Debug")]
         [SerializeField] private bool debugLogs = false;
+        [SerializeField] private bool drawDebugRays = false;
+        
+        #endregion
+        
+        #region Enums
+        
+        public enum SpawnRaycastMode
+        {
+            [Tooltip("Physics raycast - detects actual collider surfaces (recommended).")]
+            PhysicsRaycast,
+            
+            [Tooltip("Plane raycast - raycasts to a horizontal plane at specified height.")]
+            PlaneRaycast,
+            
+            [Tooltip("NavMesh sample - finds nearest NavMesh point from plane intersection.")]
+            NavMeshSample
+        }
         
         #endregion
         
@@ -98,9 +127,7 @@ namespace Agents
             {
                 Debug.LogError("[NPCAgentSpawner] NPCManager not found in scene. Disabling spawner.");
                 enabled = false;
-                return;
             }
-            
         }
         
         private void OnEnable()
@@ -164,7 +191,7 @@ namespace Agents
             }
             else
             {
-                if (!TryGetMouseWorldPosition(out spawnPosition))
+                if (!TryGetSpawnPosition(out spawnPosition))
                 {
                     if (debugLogs)
                         Debug.Log("[NPCAgentSpawner] Failed to find valid spawn position from mouse cursor.");
@@ -217,7 +244,7 @@ namespace Agents
             Ray ray = mainCamera.ScreenPointToRay(mousePosition);
             
             // First, check if we're clicking on an agent (physics raycast for colliders)
-            if (Physics.Raycast(ray, out RaycastHit agentHit, maxRaycastDistance, agentLayerMask))
+            if (Physics.Raycast(ray, out RaycastHit agentHit, maxSelectionRaycastDistance, agentLayerMask))
             {
                 var clickedAgent = agentHit.collider.GetComponent<NPCAgent>();
                 if (!clickedAgent)
@@ -236,7 +263,7 @@ namespace Agents
             if (_selectedAgent)
             {
                 // We have a selected agent - try to issue move command
-                if (TryGetMouseWorldPosition(out Vector3 destination))
+                if (TryGetSpawnPosition(out Vector3 destination))
                 {
                     // Sample NavMesh at the destination
                     if (NavMesh.SamplePosition(destination, out NavMeshHit navHit, 5f, NavMesh.AllAreas))
@@ -332,10 +359,9 @@ namespace Agents
         }
         
         /// <summary>
-        /// Gets world position under mouse cursor using plane raycast at y=0.
-        /// Same approach as WorldGrid.RaycastToCell but without grid bounds check.
+        /// Gets spawn position based on configured raycast mode.
         /// </summary>
-        private bool TryGetMouseWorldPosition(out Vector3 worldPosition)
+        private bool TryGetSpawnPosition(out Vector3 worldPosition)
         {
             worldPosition = Vector3.zero;
             
@@ -344,8 +370,63 @@ namespace Agents
             Vector2 mousePosition = GetMouseScreenPosition();
             Ray ray = mainCamera.ScreenPointToRay(mousePosition);
             
-            // Plane raycast at y=0 (ground level) - same logic as WorldGrid.RaycastToCell
-            var groundPlane = new Plane(Vector3.up, Vector3.zero);
+            if (drawDebugRays)
+            {
+                Debug.DrawRay(ray.origin, ray.direction * groundRaycastDistance, Color.yellow, 2f);
+            }
+            
+            switch (raycastMode)
+            {
+                case SpawnRaycastMode.PhysicsRaycast:
+                    return TryPhysicsRaycast(ray, out worldPosition);
+                    
+                case SpawnRaycastMode.PlaneRaycast:
+                    return TryPlaneRaycast(ray, out worldPosition);
+                    
+                case SpawnRaycastMode.NavMeshSample:
+                    return TryNavMeshSample(ray, out worldPosition);
+                    
+                default:
+                    return TryPhysicsRaycast(ray, out worldPosition);
+            }
+        }
+        
+        /// <summary>
+        /// Physics raycast - hits actual collider surfaces.
+        /// </summary>
+        private bool TryPhysicsRaycast(Ray ray, out Vector3 worldPosition)
+        {
+            worldPosition = Vector3.zero;
+            
+            if (Physics.Raycast(ray, out RaycastHit hit, groundRaycastDistance, groundLayerMask))
+            {
+                worldPosition = hit.point;
+                
+                if (debugLogs)
+                    Debug.Log($"[NPCAgentSpawner] Physics raycast hit '{hit.collider.name}' at {hit.point}");
+                
+                if (drawDebugRays)
+                {
+                    Debug.DrawLine(ray.origin, hit.point, Color.green, 2f);
+                }
+                
+                return true;
+            }
+            
+            if (debugLogs)
+                Debug.Log("[NPCAgentSpawner] Physics raycast missed - no collider hit.");
+            
+            return false;
+        }
+        
+        /// <summary>
+        /// Plane raycast - hits horizontal plane at specified height.
+        /// </summary>
+        private bool TryPlaneRaycast(Ray ray, out Vector3 worldPosition)
+        {
+            worldPosition = Vector3.zero;
+            
+            var groundPlane = new Plane(Vector3.up, new Vector3(0, planeHeight, 0));
             
             if (groundPlane.Raycast(ray, out float distance))
             {
@@ -354,8 +435,48 @@ namespace Agents
                 if (debugLogs)
                     Debug.Log($"[NPCAgentSpawner] Plane raycast hit at {worldPosition}");
                 
+                if (drawDebugRays)
+                {
+                    Debug.DrawLine(ray.origin, worldPosition, Color.blue, 2f);
+                }
+                
                 return true;
             }
+            
+            return false;
+        }
+        
+        /// <summary>
+        /// NavMesh sample - plane raycast then find nearest NavMesh point.
+        /// </summary>
+        private bool TryNavMeshSample(Ray ray, out Vector3 worldPosition)
+        {
+            worldPosition = Vector3.zero;
+            
+            // First get plane intersection
+            if (!TryPlaneRaycast(ray, out Vector3 planeHit))
+            {
+                return false;
+            }
+            
+            // Then sample NavMesh
+            if (NavMesh.SamplePosition(planeHit, out NavMeshHit navHit, 10f, NavMesh.AllAreas))
+            {
+                worldPosition = navHit.position;
+                
+                if (debugLogs)
+                    Debug.Log($"[NPCAgentSpawner] NavMesh sample found at {worldPosition}");
+                
+                if (drawDebugRays)
+                {
+                    Debug.DrawLine(planeHit, worldPosition, Color.magenta, 2f);
+                }
+                
+                return true;
+            }
+            
+            if (debugLogs)
+                Debug.Log("[NPCAgentSpawner] NavMesh sample failed - no NavMesh nearby.");
             
             return false;
         }

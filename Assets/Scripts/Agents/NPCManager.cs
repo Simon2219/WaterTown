@@ -6,6 +6,21 @@ using UnityEngine.AI;
 namespace Agents
 {
     /// <summary>
+    /// How to calculate agent spawn height above ground.
+    /// </summary>
+    public enum SpawnHeightMode
+    {
+        [Tooltip("Automatically calculate based on capsule height (height/2 + offset).")]
+        AutoCapsule,
+        
+        [Tooltip("Use a fixed offset value.")]
+        FixedOffset,
+        
+        [Tooltip("No offset - spawn exactly at hit point (for custom prefabs).")]
+        None
+    }
+    
+    /// <summary>
     /// Central manager for all NPC agents.
     /// Handles spawning, registration, and performance optimization via LOD and culling.
     /// Designed for 500+ agents with batched updates.
@@ -45,9 +60,18 @@ namespace Agents
         [SerializeField] private float defaultAngularSpeed = 120f;
         [SerializeField] private float defaultAcceleration = 8f;
         [SerializeField] private float defaultStoppingDistance = 0.1f;
-        [SerializeField] private float heightOffset = 0.05f;
         [SerializeField] private float agentRadius = 0.3f;
         [SerializeField] private float agentHeight = 1.8f;
+        
+        [Header("Spawn Height Settings")]
+        [Tooltip("Extra height offset above ground (on top of automatic capsule height calculation).")]
+        [SerializeField] private float extraHeightOffset = 0.02f;
+        
+        [Tooltip("How to calculate spawn height.")]
+        [SerializeField] private SpawnHeightMode spawnHeightMode = SpawnHeightMode.AutoCapsule;
+        
+        [Tooltip("Fixed height offset when using FixedOffset mode.")]
+        [SerializeField] private float fixedHeightOffset = 0.9f;
         
         [Header("Status Colors")]
         [SerializeField] private Color idleColor = new Color(0.3f, 0.7f, 0.3f, 1f);
@@ -100,9 +124,9 @@ namespace Agents
         public float DefaultAngularSpeed => defaultAngularSpeed;
         public float DefaultAcceleration => defaultAcceleration;
         public float DefaultStoppingDistance => defaultStoppingDistance;
-        public float HeightOffset => heightOffset;
         public float AgentRadius => agentRadius;
         public float AgentHeight => agentHeight;
+        public float SpawnHeight => CalculateSpawnHeight();
         public float SelectedScaleMultiplier => selectedScaleMultiplier;
         
         public Color IdleColor => idleColor;
@@ -422,7 +446,9 @@ namespace Agents
                 return null;
             }
             
-            Vector3 spawnPos = hit.position + Vector3.up * heightOffset;
+            // Calculate proper spawn height
+            float heightAboveGround = CalculateSpawnHeight();
+            Vector3 spawnPos = hit.position + Vector3.up * heightAboveGround;
             
             GameObject agentGo;
             
@@ -453,6 +479,21 @@ namespace Agents
             npcAgent.Initialize(this, agentId);
             
             return npcAgent;
+        }
+        
+        /// <summary>
+        /// Calculate how high above ground to spawn the agent.
+        /// For capsules, pivot is at center, so we need height/2 to place bottom on ground.
+        /// </summary>
+        private float CalculateSpawnHeight()
+        {
+            return spawnHeightMode switch
+            {
+                SpawnHeightMode.AutoCapsule => (agentHeight / 2f) + extraHeightOffset,
+                SpawnHeightMode.FixedOffset => fixedHeightOffset,
+                SpawnHeightMode.None => 0f,
+                _ => (agentHeight / 2f) + extraHeightOffset
+            };
         }
         
         /// <summary>
@@ -495,7 +536,11 @@ namespace Agents
             navAgent.stoppingDistance = defaultStoppingDistance;
             navAgent.radius = agentRadius;
             navAgent.height = agentHeight;
-            navAgent.baseOffset = heightOffset;
+            
+            // BaseOffset determines where the agent's center is relative to NavMesh surface
+            // For procedural capsules, we want the visual center to match NavMeshAgent position
+            navAgent.baseOffset = CalculateSpawnHeight();
+            
             navAgent.areaMask = NavMesh.AllAreas;
             navAgent.autoTraverseOffMeshLink = true;
         }
