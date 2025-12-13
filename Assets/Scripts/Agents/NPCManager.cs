@@ -6,21 +6,6 @@ using UnityEngine.AI;
 namespace Agents
 {
     /// <summary>
-    /// How to calculate agent spawn height above ground.
-    /// </summary>
-    public enum SpawnHeightMode
-    {
-        [Tooltip("Automatically calculate based on capsule height (height/2 + offset).")]
-        AutoCapsule,
-        
-        [Tooltip("Use a fixed offset value.")]
-        FixedOffset,
-        
-        [Tooltip("No offset - spawn exactly at hit point (for custom prefabs).")]
-        None
-    }
-    
-    /// <summary>
     /// Central manager for all NPC agents.
     /// Handles spawning, registration, and performance optimization via LOD and culling.
     /// Designed for 500+ agents with batched updates.
@@ -67,15 +52,6 @@ namespace Agents
         [SerializeField] private float agentHeight = 1.8f;
         
         [Header("Spawn Settings")]
-        [Tooltip("How to calculate spawn height.")]
-        [SerializeField] private SpawnHeightMode spawnHeightMode = SpawnHeightMode.AutoCapsule;
-        
-        [Tooltip("Extra height offset above ground (on top of automatic capsule height calculation).")]
-        [SerializeField] private float extraHeightOffset = 0.02f;
-        
-        [Tooltip("Fixed height offset when using FixedOffset mode.")]
-        [SerializeField] private float fixedHeightOffset = 0.9f;
-        
         [Tooltip("Maximum distance to search for NavMesh when spawning.")]
         [SerializeField] private float navMeshSearchRadius = 2f;
         
@@ -136,7 +112,6 @@ namespace Agents
         public float DefaultStoppingDistance => defaultStoppingDistance;
         public float AgentRadius => agentRadius;
         public float AgentHeight => agentHeight;
-        public float SpawnHeight => CalculateSpawnHeight();
         public float SelectedScaleMultiplier => selectedScaleMultiplier;
         
         public Color IdleColor => idleColor;
@@ -434,86 +409,68 @@ namespace Agents
                 return null;
             }
             
-            // Use the NavMesh position (this is where the agent will actually walk)
+            // Use the NavMesh position
             Vector3 navMeshPosition = navHit.position;
-            
-            // Calculate visual position (raised by capsule height)
-            float heightOffset = CalculateSpawnHeight();
-            Vector3 visualPosition = navMeshPosition + Vector3.up * heightOffset;
             
             if (debugSpawnLogs)
             {
                 Debug.Log($"[NPCManager] Spawn:\n" +
                           $"  Requested: {worldPosition}\n" +
-                          $"  NavMesh: {navMeshPosition}\n" +
-                          $"  Visual: {visualPosition}");
+                          $"  NavMesh: {navMeshPosition}");
             }
             
-            // Create GameObject
+            // Create GameObject AT NAVMESH POSITION (important - NavMeshAgent needs to be on NavMesh)
             GameObject agentGo = agentPrefab 
-                ? Instantiate(agentPrefab, visualPosition, Quaternion.identity)
-                : CreateProceduralAgent(visualPosition);
+                ? Instantiate(agentPrefab, navMeshPosition, Quaternion.identity)
+                : CreateProceduralAgent(navMeshPosition);
             
-            // Set layer for selection raycasts (including children)
+            // Set layer for selection raycasts
             int layer = LayerMask.NameToLayer(agentLayerName);
             if (layer >= 0)
             {
                 SetLayerRecursively(agentGo, layer);
-                
-                if (debugSpawnLogs)
-                    Debug.Log($"[NPCManager] Set agent to layer '{agentLayerName}' ({layer})");
             }
             else
             {
-                Debug.LogWarning($"[NPCManager] Layer '{agentLayerName}' not found! Create it in Edit > Project Settings > Tags and Layers");
+                Debug.LogWarning($"[NPCManager] Layer '{agentLayerName}' not found!");
             }
             
-            // Ensure NPCAgent component
-            var npcAgent = agentGo.GetComponent<NPCAgent>();
-            if (!npcAgent)
-            {
-                npcAgent = agentGo.AddComponent<NPCAgent>();
-            }
-            
-            // Ensure NavMeshAgent component
+            // Get/Add NavMeshAgent FIRST (before NPCAgent, which requires it)
             var navAgent = agentGo.GetComponent<NavMeshAgent>();
             if (!navAgent)
             {
                 navAgent = agentGo.AddComponent<NavMeshAgent>();
             }
             
-            // Configure before warping
-            ConfigureNavMeshAgent(navAgent, overrideAgentTypeID);
-            
-            // Warp to NavMesh position (this properly places the agent)
+            // Configure and warp
+            ConfigureNavMeshAgent(navAgent);
             navAgent.Warp(navMeshPosition);
             
-            // Initialize NPCAgent
+            // Set agent type after warp
+            int finalAgentType = overrideAgentTypeID >= 0 ? overrideAgentTypeID : agentType.AgentTypeID;
+            if (finalAgentType != 0)
+            {
+                navAgent.agentTypeID = finalAgentType;
+            }
+            
+            // Now add NPCAgent (NavMeshAgent already exists)
+            var npcAgent = agentGo.GetComponent<NPCAgent>();
+            if (!npcAgent)
+            {
+                npcAgent = agentGo.AddComponent<NPCAgent>();
+            }
+            
+            // Initialize
             int agentId = _nextAgentId++;
             npcAgent.Initialize(this, agentId);
             npcAgent.UpdateVisuals();
             
             if (debugSpawnLogs)
             {
-                Debug.Log($"[NPCManager] ✓ Agent {agentId} spawned. OnNavMesh: {navAgent.isOnNavMesh}");
+                Debug.Log($"[NPCManager] ✓ Agent {agentId} spawned at {navMeshPosition}. OnNavMesh: {navAgent.isOnNavMesh}");
             }
             
             return npcAgent;
-        }
-        
-        /// <summary>
-        /// Calculate how high above ground to spawn the agent.
-        /// For capsules, pivot is at center, so we need height/2 to place bottom on ground.
-        /// </summary>
-        private float CalculateSpawnHeight()
-        {
-            return spawnHeightMode switch
-            {
-                SpawnHeightMode.AutoCapsule => (agentHeight / 2f) + extraHeightOffset,
-                SpawnHeightMode.FixedOffset => fixedHeightOffset,
-                SpawnHeightMode.None => 0f,
-                _ => (agentHeight / 2f) + extraHeightOffset
-            };
         }
         
         /// <summary>
@@ -548,14 +505,21 @@ namespace Agents
                 renderer.material = new Material(_sharedAgentMaterial);
             }
             
+            // Remove the default CapsuleCollider and add one sized for selection
+            var collider = go.GetComponent<CapsuleCollider>();
+            if (collider)
+            {
+                // Adjust collider to account for scale
+                collider.height = 2f; // Default capsule height before scale
+                collider.radius = 0.5f; // Default capsule radius before scale
+            }
+            
             return go;
         }
         
-        private void ConfigureNavMeshAgent(NavMeshAgent navAgent, int overrideAgentTypeID = -1)
+        private void ConfigureNavMeshAgent(NavMeshAgent navAgent)
         {
-            // Agent type MUST match the NavMeshSurface baking type for pathfinding to work
-            navAgent.agentTypeID = overrideAgentTypeID >= 0 ? overrideAgentTypeID : agentType.AgentTypeID;
-            
+            // Note: agentTypeID is set AFTER Warp() in SpawnAgent - must be on NavMesh first
             navAgent.speed = defaultSpeed;
             navAgent.angularSpeed = defaultAngularSpeed;
             navAgent.acceleration = defaultAcceleration;
@@ -563,9 +527,8 @@ namespace Agents
             navAgent.radius = agentRadius;
             navAgent.height = agentHeight;
             
-            // BaseOffset: how high above the NavMesh the agent's transform sits
-            // For our procedural capsule, this should match the spawn height
-            navAgent.baseOffset = CalculateSpawnHeight();
+            // BaseOffset: capsule pivot is at center, so height/2 places bottom on ground
+            navAgent.baseOffset = agentHeight / 2f;
             
             navAgent.areaMask = NavMesh.AllAreas;
             navAgent.autoTraverseOffMeshLink = true;
