@@ -40,6 +40,10 @@ public class PlatformManager : MonoBehaviour
              "Even single-socket connections get at least this width.")]
     [SerializeField] private float minLinkWidth = 0.6f;
     
+    [Tooltip("NavMesh Agent Type ID for links. Must match your NPC agent type.\n" +
+             "Set this to match your Navigation settings (Window > AI > Navigation).")]
+    [SerializeField] private int linkAgentTypeID = 0;
+    
     [Header("Debug")]
     [SerializeField] private bool debugNavMeshLinks;
 
@@ -964,8 +968,8 @@ public class PlatformManager : MonoBehaviour
         link.width = width;
         link.area = 0; // Walkable area
         
-        // Use -1 to allow ALL agent types to traverse this link
-        link.agentTypeID = -1;
+        // Agent type must match the NavMeshAgent type for pathfinding to work
+        link.agentTypeID = linkAgentTypeID;
         
         if (debugNavMeshLinks)
         {
