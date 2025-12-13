@@ -1,7 +1,7 @@
 #if UNITY_EDITOR
 using UnityEditor;
 using UnityEngine;
-using WaterTown.Platforms;
+using Platforms;
 
 namespace Editor
 {
@@ -50,7 +50,7 @@ namespace Editor
                     for (int j = i + 1; j < all.Length; j++)
                     {
                         var b = all[j];
-                        platformManager.ConnectPlatformsIfAdjacent(a, b, rebuildNavMesh: true);
+                        platformManager.ConnectPlatformsIfAdjacent(a, b);
                     }
                 }
             }

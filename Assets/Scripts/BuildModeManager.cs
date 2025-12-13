@@ -1,13 +1,12 @@
 using System;
 using System.Collections.Generic;
 using Grid;
+using Interfaces;
 using UnityEngine;
 using UnityEngine.InputSystem;
-using WaterTown.Building.UI;
-using WaterTown.Interfaces;
-using WaterTown.Platforms;
+using Platforms;
 
-namespace WaterTown.Building
+namespace Building
 {
     ///
     /// Manages build mode: spawning/moving pickupable objects, validating placement, and handling placement/cancellation
@@ -30,6 +29,7 @@ namespace WaterTown.Building
         [SerializeField] private InputActionReference cancelAction;
         [SerializeField] private InputActionReference rotateCWAction;
         [SerializeField] private InputActionReference rotateCCWAction;
+        [SerializeField] private InputActionReference pickupAction;
 
         [Header("Placement Settings")]
         [SerializeField] private LayerMask raycastLayers;
@@ -42,6 +42,7 @@ namespace WaterTown.Building
         
         // Reusable lists (avoid allocations)
         private readonly List<Vector2Int> _tempCellList = new List<Vector2Int>();
+
         
         #endregion
 
@@ -122,6 +123,12 @@ namespace WaterTown.Building
                 rotateCCWAction.action.Enable();
                 rotateCCWAction.action.performed += OnRotateCCWPerformed;
             }
+            
+            if (pickupAction?.action != null)
+            {
+                pickupAction.action.Enable();
+                pickupAction.action.performed += OnPickupPerformed;
+            }
         }
 
         private void OnDisable()
@@ -152,6 +159,12 @@ namespace WaterTown.Building
                 rotateCCWAction.action.performed -= OnRotateCCWPerformed;
                 rotateCCWAction.action.Disable();
             }
+            
+            if (pickupAction?.action != null)
+            {
+                pickupAction.action.performed -= OnPickupPerformed;
+                pickupAction.action.Disable();
+            }
 
             if (_currentPickup != null)
             {
@@ -164,14 +177,13 @@ namespace WaterTown.Building
             if (_currentPickup == null) return;
 
             UpdatePickupPosition();
-
-            bool isValid = _currentPickup.CanBePlaced;
-            _currentPickup.UpdateValidityVisuals(isValid);
             
-            // Trigger adjacency update for preview
-            if (_currentPickup is GamePlatform && platformManager != null)
+            _currentPickup.UpdateValidityVisuals();
+            
+            // Trigger adjacency update for preview (only for affected platforms, not all)
+            if (_currentPickup is GamePlatform platform && platformManager != null)
             {
-                platformManager.TriggerAdjacencyUpdate();
+                platformManager.TriggerAdjacencyUpdate(platform);
             }
         }
         
@@ -181,16 +193,12 @@ namespace WaterTown.Building
         
         private void OnBlueprintSelected(PlatformBlueprint blueprint)
         {
-            if (blueprint == null)
-            {
-                Debug.LogWarning("[BuildModeManager] Received null blueprint.");
-                return;
-            }
+            if (blueprint == null) return;
 
             _selectedBlueprint = blueprint;
             _currentRotation = 0f;
 
-            SpawnPlatformForPlacement(blueprint);
+            SpawnPlatform(blueprint);
         }
         
         #endregion
@@ -200,13 +208,9 @@ namespace WaterTown.Building
         /// <summary>
         /// Spawns a new platform for placement (build mode).
         /// </summary>
-        private void SpawnPlatformForPlacement(PlatformBlueprint blueprint)
+        private void SpawnPlatform(PlatformBlueprint blueprint)
         {
-            if (blueprint.RuntimePrefab == null)
-            {
-                Debug.LogWarning($"[BuildModeManager] Blueprint '{blueprint.DisplayName}' has no runtime prefab.");
-                return;
-            }
+            if (!blueprint.RuntimePrefab) return;
 
             // Cancel any existing pickup
             if (_currentPickup != null)
@@ -222,21 +226,21 @@ namespace WaterTown.Building
             var pickupable = spawnedPlatform.GetComponent<IPickupable>();
             if (pickupable == null)
             {
-                Debug.LogError($"[BuildModeManager] Spawned platform '{spawnedPlatform.name}' doesn't have IPickupable component!");
                 Destroy(spawnedPlatform);
                 return;
             }
 
             _currentPickup = pickupable;
-            _currentPickup.OnPickedUp(isNewObject: true);
+            _currentPickup.PickUp(isNewObject: true);
         }
 
         /// <summary>
         /// Picks up an existing platform for moving/rotating.
         /// </summary>
-        public void PickupExistingPlatform(IPickupable pickupable)
+        private void PickupExistingPlatform(IPickupable pickupable)
         {
-            if (pickupable == null) return;
+            Debug.Log("LOL");
+            if (pickupable == null) {Debug.Log("Uhm okey"); return;}
 
             if (_currentPickup != null)
             {
@@ -244,7 +248,7 @@ namespace WaterTown.Building
             }
 
             _currentPickup = pickupable;
-            _currentPickup.OnPickedUp(isNewObject: false);
+            _currentPickup.PickUp(isNewObject: false);
             _currentRotation = pickupable.Transform.eulerAngles.y;
         }
 
@@ -258,7 +262,6 @@ namespace WaterTown.Building
             // Use new Input System for mouse position
             Vector2 mousePosition = Mouse.current != null ? Mouse.current.position.ReadValue() : Vector2.zero;
             Ray ray = mainCamera.ScreenPointToRay(mousePosition);
-            Vector3Int levelRef = new Vector3Int(0, 0, 0);
 
             if (grid.RaycastToCell(ray, out Vector2Int hoveredCell, out Vector3 hitPoint))
             {
@@ -290,14 +293,12 @@ namespace WaterTown.Building
         private void PlacePickup()
         {
             if (_currentPickup == null) return;
-
-            if (!_currentPickup.CanBePlaced)
-            {
+            if (!_currentPickup.CanBePlaced) {
                 Debug.LogWarning("[BuildModeManager] Cannot place platform at current position.");
                 return;
             }
             
-            _currentPickup.OnPlaced();
+            _currentPickup.Place();
             _currentPickup = null;
             _selectedBlueprint = null;
         }
@@ -309,7 +310,7 @@ namespace WaterTown.Building
         {
             if (_currentPickup == null) return;
             
-            _currentPickup.OnPlacementCancelled();
+            _currentPickup.CancelPlacement();
             _currentPickup = null;
             _selectedBlueprint = null;
         }
@@ -356,6 +357,24 @@ namespace WaterTown.Building
             if (_currentRotation < 0f) _currentRotation += 360f;
 
             _currentPickup.Transform.rotation = Quaternion.Euler(0f, _currentRotation, 0f);
+        }
+        
+        private void OnPickupPerformed(InputAction.CallbackContext context)
+        {
+            if (_currentPickup != null) return;
+            if (!mainCamera) return;
+            
+            // Raycast from camera through mouse position
+            Vector2 mousePosition = Mouse.current != null ? Mouse.current.position.ReadValue() : Vector2.zero;
+            Ray ray = mainCamera.ScreenPointToRay(mousePosition);
+            
+            if (!Physics.Raycast(ray, out RaycastHit hit, 1000f, raycastLayers)) return;
+            
+            // Try to get GamePlatform from hit object (platforms have colliders on children)
+            var platform = hit.collider.GetComponentInParent<GamePlatform>();
+            if (!platform) return;
+            
+            PickupExistingPlatform(platform);
         }
         
         #endregion

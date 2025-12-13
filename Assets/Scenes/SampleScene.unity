@@ -788,14 +788,14 @@ Light:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 410087039}
   m_Enabled: 1
-  serializedVersion: 11
+  serializedVersion: 12
   m_Type: 1
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_Intensity: 2
   m_Range: 10
   m_SpotAngle: 30
   m_InnerSpotAngle: 21.80208
-  m_CookieSize: 10
+  m_CookieSize2D: {x: 10, y: 10}
   m_Shadows:
     m_Type: 2
     m_Resolution: -1
@@ -1003,6 +1003,7 @@ MeshRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
+  m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
 --- !u!33 &479294919
 MeshFilter:
@@ -1079,6 +1080,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: '::'
   townManager: {fileID: 479294921}
+  platformManager: {fileID: 479294923}
   grid: {fileID: 479294916}
   gameUI: {fileID: 928800693}
   mainCamera: {fileID: 330585545}
@@ -1086,9 +1088,10 @@ MonoBehaviour:
   cancelAction: {fileID: -5064841578966433523, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   rotateCWAction: {fileID: 5047978165416925723, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   rotateCCWAction: {fileID: -8065153930510576921, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+  pickupAction: {fileID: -9091121791413176343, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   raycastLayers:
     serializedVersion: 2
-    m_Bits: 0
+    m_Bits: 4294967295
   rotationStep: 90
 --- !u!114 &479294923
 MonoBehaviour:
@@ -1103,10 +1106,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::WaterTown.Town.PlatformManager
   navLinkWidth: 0.6
-  OnPlatformPlaced:
+  PlatformPlaced:
     m_PersistentCalls:
       m_Calls: []
-  OnPlatformRemoved:
+  PlatformRemoved:
     m_PersistentCalls:
       m_Calls: []
 --- !u!114 &522639835

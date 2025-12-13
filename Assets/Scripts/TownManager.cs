@@ -1,14 +1,13 @@
-using System;
 using System.Collections.Generic;
 using Grid;
 using UnityEngine;
 using UnityEngine.Events;
-using WaterTown.Platforms;
+using Platforms;
 
 
 ///
 /// High-level town orchestration manager
-/// Coordinates specialized subsystems (PlatformManager, etc) and provides
+/// Coordinates specialized subsystems (PlatformManager, etc.) and provides
 /// designer-facing events and feedback
 ///
 [DisallowMultipleComponent]
@@ -53,10 +52,11 @@ public class TownManager : MonoBehaviour
     ///
     /// Finds and validates all required dependencies
     /// Throws InvalidOperationException if any critical dependency is missing
+    /// Injects dependencies between systems to avoid FindFirstObjectByType at runtime
     ///
     private void FindDependencies() 
     {
-        // Auto-find WorldGrid
+        // Auto-find WorldGrid (once at startup)
         if (!_worldGrid)
         {
             _worldGrid = FindFirstObjectByType<WorldGrid>();
@@ -66,7 +66,7 @@ public class TownManager : MonoBehaviour
             }
         }
 
-        // Auto-find PlatformManager
+        // Auto-find PlatformManager (once at startup)
         if (!_platformManager)
         {
             _platformManager = FindFirstObjectByType<PlatformManager>();
@@ -75,22 +75,25 @@ public class TownManager : MonoBehaviour
                 throw ErrorHandler.MissingDependency(typeof(PlatformManager), this);
             }
         }
+        
+        // Inject WorldGrid into PlatformManager to avoid FindFirstObjectByType calls
+        _platformManager.SetWorldGrid(_worldGrid);
     }
 
 
     private void OnEnable()
     {
         // Subscribe to PlatformManager events to propagate town-level feedback
-        _platformManager.OnPlatformPlaced.AddListener(HandlePlatformPlaced);
-        _platformManager.OnPlatformRemoved.AddListener(HandlePlatformRemoved);
+        _platformManager.PlatformPlaced.AddListener(HandlePlatformPlaced);
+        _platformManager.PlatformRemoved.AddListener(HandlePlatformRemoved);
     }
 
 
     private void OnDisable()
     {
         // Unsubscribe from PlatformManager events
-        _platformManager.OnPlatformPlaced.RemoveListener(HandlePlatformPlaced);
-        _platformManager.OnPlatformRemoved.RemoveListener(HandlePlatformRemoved);
+        _platformManager.PlatformPlaced.RemoveListener(HandlePlatformPlaced);
+        _platformManager.PlatformRemoved.RemoveListener(HandlePlatformRemoved);
     }
     
     #endregion
@@ -121,7 +124,7 @@ public class TownManager : MonoBehaviour
     ///
     public bool IsAreaFree(List<Vector2Int> cells)
     {
-        return _platformManager.IsAreaFree(cells);
+        return _platformManager.IsAreaEmpty(cells);
     }
 
 
@@ -152,10 +155,12 @@ public class TownManager : MonoBehaviour
 
     ///
     /// Trigger adjacency update (delegates to PlatformManager)
+    /// Pass a platform to only update that platform and its neighbors
+    /// Pass null to update all platforms (expensive)
     ///
-    public void TriggerAdjacencyUpdate()
+    public void TriggerAdjacencyUpdate(GamePlatform platform = null)
     {
-        _platformManager.TriggerAdjacencyUpdate();
+        _platformManager.TriggerAdjacencyUpdate(platform);
     }
     
     

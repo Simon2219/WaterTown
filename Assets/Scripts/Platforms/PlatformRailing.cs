@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace WaterTown.Platforms
+namespace Platforms
 {
     [DisallowMultipleComponent]
     public class PlatformRailing : MonoBehaviour
@@ -81,5 +81,46 @@ namespace WaterTown.Platforms
         }
 
         public bool IsHidden => _isHidden;
+        
+        // ReSharper disable Unity.PerformanceAnalysis
+        /// <summary>
+        /// Updates this railing's visibility based on socket connection state.
+        /// Rails: Hidden when ALL their socket indices are Connected.
+        /// Posts: Hidden when ALL rails connected to the same sockets are hidden.
+        /// </summary>
+        public void UpdateVisibility()
+        {
+            if (!platform) return;
+            
+            var indices = socketIndices ?? System.Array.Empty<int>();
+            if (indices.Length == 0)
+            {
+                SetHidden(false);
+                return;
+            }
+
+            // For rails: hide if all sockets are connected
+            if (type == RailingType.Rail)
+            {
+                bool allSocketsConnected = true;
+                foreach (int socketIndex in indices)
+                {
+                    if (!platform.IsSocketConnected(socketIndex))
+                    {
+                        allSocketsConnected = false;
+                        break;
+                    }
+                }
+                SetHidden(allSocketsConnected && indices.Length > 0);
+                return;
+            }
+
+            // For posts: hide if all rails on the same sockets are hidden
+            if (type == RailingType.Post)
+            {
+                bool hasVisibleRail = platform.HasVisibleRailOnSockets(indices);
+                SetHidden(!hasVisibleRail && indices.Length > 0);
+            }
+        }
     }
 }
