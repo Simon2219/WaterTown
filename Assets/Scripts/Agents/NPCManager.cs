@@ -63,15 +63,21 @@ namespace Agents
         [SerializeField] private float agentRadius = 0.3f;
         [SerializeField] private float agentHeight = 1.8f;
         
-        [Header("Spawn Height Settings")]
-        [Tooltip("Extra height offset above ground (on top of automatic capsule height calculation).")]
-        [SerializeField] private float extraHeightOffset = 0.02f;
-        
+        [Header("Spawn Settings")]
         [Tooltip("How to calculate spawn height.")]
         [SerializeField] private SpawnHeightMode spawnHeightMode = SpawnHeightMode.AutoCapsule;
         
+        [Tooltip("Extra height offset above ground (on top of automatic capsule height calculation).")]
+        [SerializeField] private float extraHeightOffset = 0.02f;
+        
         [Tooltip("Fixed height offset when using FixedOffset mode.")]
         [SerializeField] private float fixedHeightOffset = 0.9f;
+        
+        [Tooltip("Maximum distance to search for NavMesh when spawning. Keep small for precise placement.")]
+        [SerializeField] private float navMeshSearchRadius = 1.5f;
+        
+        [Tooltip("If true, spawn at exact click position. If false, snap to nearest NavMesh point.")]
+        [SerializeField] private bool spawnAtExactPosition = true;
         
         [Header("Status Colors")]
         [SerializeField] private Color idleColor = new Color(0.3f, 0.7f, 0.3f, 1f);
@@ -115,6 +121,7 @@ namespace Agents
         
         [Header("Debug")]
         [SerializeField] private bool showPerformanceStats;
+        [SerializeField] private bool debugSpawnLogs;
         
         #endregion
         
@@ -246,10 +253,6 @@ namespace Agents
         
         #region LOD System
         
-        /// <summary>
-        /// Recalculates LOD levels for agents based on camera distance.
-        /// Processes in batches to distribute load.
-        /// </summary>
         private void UpdateLODLevels()
         {
             if (!_lodCamera)
@@ -263,7 +266,6 @@ namespace Agents
             
             if (agentCount == 0) return;
             
-            // Process a batch of agents
             int processed = 0;
             int startIndex = _lodUpdateIndex;
             
@@ -281,8 +283,6 @@ namespace Agents
             }
             
             _lodUpdateIndex = (startIndex + processed) % Mathf.Max(1, agentCount);
-            
-            // Update stats
             UpdateLODStats();
         }
         
@@ -318,7 +318,6 @@ namespace Agents
                 newLevel = AgentLODLevel.Low;
             }
             
-            // Move between buckets if LOD changed
             if (agent.LODLevel != newLevel)
             {
                 RemoveFromLODBucket(agent);
@@ -331,18 +330,10 @@ namespace Agents
         {
             switch (agent.LODLevel)
             {
-                case AgentLODLevel.High:
-                    _highLODAgents.Add(agent);
-                    break;
-                case AgentLODLevel.Medium:
-                    _mediumLODAgents.Add(agent);
-                    break;
-                case AgentLODLevel.Low:
-                    _lowLODAgents.Add(agent);
-                    break;
-                case AgentLODLevel.Culled:
-                    _culledAgents.Add(agent);
-                    break;
+                case AgentLODLevel.High: _highLODAgents.Add(agent); break;
+                case AgentLODLevel.Medium: _mediumLODAgents.Add(agent); break;
+                case AgentLODLevel.Low: _lowLODAgents.Add(agent); break;
+                case AgentLODLevel.Culled: _culledAgents.Add(agent); break;
             }
         }
         
@@ -350,18 +341,10 @@ namespace Agents
         {
             switch (agent.LODLevel)
             {
-                case AgentLODLevel.High:
-                    _highLODAgents.Remove(agent);
-                    break;
-                case AgentLODLevel.Medium:
-                    _mediumLODAgents.Remove(agent);
-                    break;
-                case AgentLODLevel.Low:
-                    _lowLODAgents.Remove(agent);
-                    break;
-                case AgentLODLevel.Culled:
-                    _culledAgents.Remove(agent);
-                    break;
+                case AgentLODLevel.High: _highLODAgents.Remove(agent); break;
+                case AgentLODLevel.Medium: _mediumLODAgents.Remove(agent); break;
+                case AgentLODLevel.Low: _lowLODAgents.Remove(agent); break;
+                case AgentLODLevel.Culled: _culledAgents.Remove(agent); break;
             }
         }
         
@@ -377,9 +360,6 @@ namespace Agents
         
         #region Agent Updates
         
-        /// <summary>
-        /// Process agent updates based on LOD tier.
-        /// </summary>
         private void ProcessAgentUpdates()
         {
             int updatedCount = 0;
@@ -436,22 +416,46 @@ namespace Agents
         #region Agent Factory
         
         /// <summary>
-        /// Spawn an agent at the specified NavMesh position.
+        /// Spawn an agent at the specified world position.
+        /// Position should be on or near a platform surface.
         /// </summary>
         public NPCAgent SpawnAgent(Vector3 worldPosition)
         {
-            if (!NavMesh.SamplePosition(worldPosition, out NavMeshHit hit, 10f, NavMesh.AllAreas))
+            // Verify there's NavMesh nearby (required for NavMeshAgent)
+            if (!NavMesh.SamplePosition(worldPosition, out NavMeshHit navHit, navMeshSearchRadius, NavMesh.AllAreas))
             {
-                Debug.LogWarning($"[NPCManager] Failed to find NavMesh position near {worldPosition}");
+                Debug.LogWarning($"[NPCManager] No NavMesh found within {navMeshSearchRadius}m of {worldPosition}");
                 return null;
             }
             
-            // Calculate proper spawn height
+            // Determine spawn XZ position
+            Vector3 spawnXZ;
+            if (spawnAtExactPosition)
+            {
+                // Spawn at exact click position (X, Z), only use NavMesh for Y validation
+                spawnXZ = new Vector3(worldPosition.x, navHit.position.y, worldPosition.z);
+            }
+            else
+            {
+                // Snap to NavMesh position
+                spawnXZ = navHit.position;
+            }
+            
+            // Calculate final spawn position with height offset
             float heightAboveGround = CalculateSpawnHeight();
-            Vector3 spawnPos = hit.position + Vector3.up * heightAboveGround;
+            Vector3 spawnPos = spawnXZ + Vector3.up * heightAboveGround;
             
+            if (debugSpawnLogs)
+            {
+                Debug.Log($"[NPCManager] Spawning agent:\n" +
+                          $"  Input position: {worldPosition}\n" +
+                          $"  NavMesh hit: {navHit.position}\n" +
+                          $"  Final spawn: {spawnPos}\n" +
+                          $"  Height offset: {heightAboveGround}");
+            }
+            
+            // Create the agent GameObject
             GameObject agentGo;
-            
             if (agentPrefab)
             {
                 agentGo = Instantiate(agentPrefab, spawnPos, Quaternion.identity);
@@ -461,6 +465,7 @@ namespace Agents
                 agentGo = CreateProceduralAgent(spawnPos);
             }
             
+            // Ensure components exist
             var npcAgent = agentGo.GetComponent<NPCAgent>();
             if (!npcAgent)
             {
@@ -473,10 +478,18 @@ namespace Agents
                 navAgent = agentGo.AddComponent<NavMeshAgent>();
             }
             
+            // Configure NavMeshAgent
             ConfigureNavMeshAgent(navAgent);
             
+            // Warp agent to ensure it's properly placed on NavMesh
+            navAgent.Warp(spawnXZ);
+            
+            // Initialize the NPCAgent component
             int agentId = _nextAgentId++;
             npcAgent.Initialize(this, agentId);
+            
+            // Apply initial visuals
+            npcAgent.UpdateVisuals();
             
             return npcAgent;
         }
@@ -515,10 +528,13 @@ namespace Agents
             go.name = $"NPC_Agent_{_agentsList.Count}";
             go.transform.position = position;
             
+            // Unity's default capsule is 2 units tall, 1 unit diameter
+            // Scale to match our agent dimensions
             float scaleY = agentHeight / 2f;
             float scaleXZ = agentRadius * 2f;
             go.transform.localScale = new Vector3(scaleXZ, scaleY, scaleXZ);
             
+            // Apply material
             var renderer = go.GetComponent<Renderer>();
             if (renderer)
             {
@@ -537,21 +553,19 @@ namespace Agents
             navAgent.radius = agentRadius;
             navAgent.height = agentHeight;
             
-            // BaseOffset determines where the agent's center is relative to NavMesh surface
-            // For procedural capsules, we want the visual center to match NavMeshAgent position
+            // BaseOffset: how high above the NavMesh the agent's transform sits
+            // For our procedural capsule, this should match the spawn height
             navAgent.baseOffset = CalculateSpawnHeight();
             
             navAgent.areaMask = NavMesh.AllAreas;
             navAgent.autoTraverseOffMeshLink = true;
+            navAgent.autoBraking = true;
         }
         
         #endregion
         
         #region Agent Registration
         
-        /// <summary>
-        /// Register an agent with the manager.
-        /// </summary>
         internal void RegisterAgent(NPCAgent agent)
         {
             if (!agent) return;
@@ -564,9 +578,6 @@ namespace Agents
             }
         }
         
-        /// <summary>
-        /// Unregister an agent from the manager.
-        /// </summary>
         internal void UnregisterAgent(NPCAgent agent)
         {
             if (!agent) return;
@@ -583,9 +594,6 @@ namespace Agents
         
         #region Utility
         
-        /// <summary>
-        /// Get color for a status.
-        /// </summary>
         public Color GetColorForStatus(AgentStatus status)
         {
             return status switch
@@ -599,17 +607,11 @@ namespace Agents
             };
         }
         
-        /// <summary>
-        /// Set the camera used for LOD calculations.
-        /// </summary>
         public void SetLODCamera(Camera camera)
         {
             _lodCamera = camera;
         }
         
-        /// <summary>
-        /// Force immediate LOD update for all agents.
-        /// </summary>
         public void ForceUpdateAllLOD()
         {
             if (!_lodCamera) return;
@@ -625,9 +627,6 @@ namespace Agents
             UpdateLODStats();
         }
         
-        /// <summary>
-        /// Enable/disable all agent visuals (for pause screens, etc.).
-        /// </summary>
         public void SetAllVisualsEnabled(bool enabled)
         {
             foreach (var agent in _agentsList)
@@ -639,9 +638,6 @@ namespace Agents
             }
         }
         
-        /// <summary>
-        /// Destroy all agents.
-        /// </summary>
         public void DestroyAllAgents()
         {
             var agentsCopy = new List<NPCAgent>(_agentsList);
@@ -661,9 +657,6 @@ namespace Agents
             _culledAgents.Clear();
         }
         
-        /// <summary>
-        /// Get agent by ID.
-        /// </summary>
         public NPCAgent GetAgentById(int agentId)
         {
             foreach (var agent in _agentsList)
@@ -676,9 +669,6 @@ namespace Agents
             return null;
         }
         
-        /// <summary>
-        /// Get all agents within a radius.
-        /// </summary>
         public List<NPCAgent> GetAgentsInRadius(Vector3 center, float radius)
         {
             var result = new List<NPCAgent>();
@@ -710,7 +700,7 @@ namespace Agents
             GUILayout.BeginArea(new Rect(10, 10, 250, 200));
             GUILayout.BeginVertical("box");
             
-            GUILayout.Label($"<b>NPC Performance Stats</b>");
+            GUILayout.Label("<b>NPC Performance Stats</b>");
             GUILayout.Label($"Total Agents: {AgentCount}");
             GUILayout.Label($"Updated This Frame: {AgentsUpdatedThisFrame}");
             GUILayout.Space(5);

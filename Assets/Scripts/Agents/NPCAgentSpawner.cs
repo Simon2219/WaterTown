@@ -55,6 +55,7 @@ namespace Agents
         [Header("Debug")]
         [SerializeField] private bool debugLogs = false;
         [SerializeField] private bool drawDebugRays = false;
+        [SerializeField] private bool drawDebugMarkers = false;
         
         #endregion
         
@@ -68,7 +69,7 @@ namespace Agents
             [Tooltip("Plane raycast - raycasts to a horizontal plane at specified height.")]
             PlaneRaycast,
             
-            [Tooltip("NavMesh sample - finds nearest NavMesh point from plane intersection.")]
+            [Tooltip("NavMesh sample - finds nearest NavMesh point from physics hit.")]
             NavMeshSample
         }
         
@@ -188,10 +189,13 @@ namespace Agents
             if (useSpawnPoint && spawnPoint)
             {
                 spawnPosition = spawnPoint.position;
+                
+                if (debugLogs)
+                    Debug.Log($"[NPCAgentSpawner] Using spawn point position: {spawnPosition}");
             }
             else
             {
-                if (!TryGetSpawnPosition(out spawnPosition))
+                if (!TryGetWorldPosition(out spawnPosition))
                 {
                     if (debugLogs)
                         Debug.Log("[NPCAgentSpawner] Failed to find valid spawn position from mouse cursor.");
@@ -199,14 +203,24 @@ namespace Agents
                 }
             }
             
+            if (drawDebugMarkers)
+            {
+                Debug.DrawRay(spawnPosition, Vector3.up * 3f, Color.green, 5f);
+            }
+            
             var agent = _manager.SpawnAgent(spawnPosition);
             
             if (agent)
             {
                 if (debugLogs)
-                    Debug.Log($"[NPCAgentSpawner] Spawned agent at {spawnPosition}");
+                    Debug.Log($"[NPCAgentSpawner] Spawned agent {agent.AgentId} at {agent.transform.position}");
                 
                 OnAgentSpawned?.Invoke(agent);
+            }
+            else
+            {
+                if (debugLogs)
+                    Debug.LogWarning($"[NPCAgentSpawner] Failed to spawn agent at {spawnPosition}");
             }
         }
         
@@ -243,7 +257,7 @@ namespace Agents
             Vector2 mousePosition = GetMouseScreenPosition();
             Ray ray = mainCamera.ScreenPointToRay(mousePosition);
             
-            // First, check if we're clicking on an agent (physics raycast for colliders)
+            // First, check if we're clicking on an agent
             if (Physics.Raycast(ray, out RaycastHit agentHit, maxSelectionRaycastDistance, agentLayerMask))
             {
                 var clickedAgent = agentHit.collider.GetComponent<NPCAgent>();
@@ -259,22 +273,22 @@ namespace Agents
                 }
             }
             
-            // Not clicking on an agent
+            // Not clicking on an agent - if we have one selected, issue move command
             if (_selectedAgent)
             {
-                // We have a selected agent - try to issue move command
-                if (TryGetSpawnPosition(out Vector3 destination))
+                if (TryGetWorldPosition(out Vector3 destination))
                 {
-                    // Sample NavMesh at the destination
-                    if (NavMesh.SamplePosition(destination, out NavMeshHit navHit, 5f, NavMesh.AllAreas))
+                    if (drawDebugMarkers)
                     {
-                        IssueMoveCommand(navHit.position);
+                        Debug.DrawRay(destination, Vector3.up * 2f, Color.blue, 3f);
                     }
-                    else
-                    {
-                        if (debugLogs)
-                            Debug.Log("[NPCAgentSpawner] Clicked position is not on NavMesh.");
-                    }
+                    
+                    IssueMoveCommand(destination);
+                }
+                else
+                {
+                    if (debugLogs)
+                        Debug.Log("[NPCAgentSpawner] Could not determine move destination.");
                 }
             }
             else
@@ -340,9 +354,14 @@ namespace Agents
             if (success)
             {
                 if (debugLogs)
-                    Debug.Log($"[NPCAgentSpawner] Issued move command to agent {_selectedAgent.AgentId} -> {destination}");
+                    Debug.Log($"[NPCAgentSpawner] Move command sent to agent {_selectedAgent.AgentId} -> {destination}");
                 
                 OnMoveCommandIssued?.Invoke(_selectedAgent, destination);
+            }
+            else
+            {
+                if (debugLogs)
+                    Debug.LogWarning($"[NPCAgentSpawner] Move command failed for agent {_selectedAgent.AgentId}");
             }
         }
         
@@ -359,9 +378,9 @@ namespace Agents
         }
         
         /// <summary>
-        /// Gets spawn position based on configured raycast mode.
+        /// Gets world position based on configured raycast mode.
         /// </summary>
-        private bool TryGetSpawnPosition(out Vector3 worldPosition)
+        private bool TryGetWorldPosition(out Vector3 worldPosition)
         {
             worldPosition = Vector3.zero;
             
@@ -403,7 +422,7 @@ namespace Agents
                 worldPosition = hit.point;
                 
                 if (debugLogs)
-                    Debug.Log($"[NPCAgentSpawner] Physics raycast hit '{hit.collider.name}' at {hit.point}");
+                    Debug.Log($"[NPCAgentSpawner] Physics hit '{hit.collider.name}' at {hit.point}");
                 
                 if (drawDebugRays)
                 {
@@ -414,7 +433,7 @@ namespace Agents
             }
             
             if (debugLogs)
-                Debug.Log("[NPCAgentSpawner] Physics raycast missed - no collider hit.");
+                Debug.Log("[NPCAgentSpawner] Physics raycast missed.");
             
             return false;
         }
@@ -433,7 +452,7 @@ namespace Agents
                 worldPosition = ray.GetPoint(distance);
                 
                 if (debugLogs)
-                    Debug.Log($"[NPCAgentSpawner] Plane raycast hit at {worldPosition}");
+                    Debug.Log($"[NPCAgentSpawner] Plane hit at {worldPosition}");
                 
                 if (drawDebugRays)
                 {
@@ -447,38 +466,41 @@ namespace Agents
         }
         
         /// <summary>
-        /// NavMesh sample - plane raycast then find nearest NavMesh point.
+        /// NavMesh sample - physics raycast then find nearest NavMesh point.
         /// </summary>
         private bool TryNavMeshSample(Ray ray, out Vector3 worldPosition)
         {
             worldPosition = Vector3.zero;
             
-            // First get plane intersection
-            if (!TryPlaneRaycast(ray, out Vector3 planeHit))
+            // First do physics raycast
+            if (!TryPhysicsRaycast(ray, out Vector3 hitPoint))
             {
                 return false;
             }
             
-            // Then sample NavMesh
-            if (NavMesh.SamplePosition(planeHit, out NavMeshHit navHit, 10f, NavMesh.AllAreas))
+            // Then sample NavMesh at that point
+            if (NavMesh.SamplePosition(hitPoint, out NavMeshHit navHit, 5f, NavMesh.AllAreas))
             {
                 worldPosition = navHit.position;
                 
                 if (debugLogs)
-                    Debug.Log($"[NPCAgentSpawner] NavMesh sample found at {worldPosition}");
+                    Debug.Log($"[NPCAgentSpawner] NavMesh sample at {worldPosition}");
                 
                 if (drawDebugRays)
                 {
-                    Debug.DrawLine(planeHit, worldPosition, Color.magenta, 2f);
+                    Debug.DrawLine(hitPoint, worldPosition, Color.magenta, 2f);
                 }
                 
                 return true;
             }
             
-            if (debugLogs)
-                Debug.Log("[NPCAgentSpawner] NavMesh sample failed - no NavMesh nearby.");
+            // Fall back to physics hit if no NavMesh found
+            worldPosition = hitPoint;
             
-            return false;
+            if (debugLogs)
+                Debug.Log($"[NPCAgentSpawner] No NavMesh found, using physics hit at {worldPosition}");
+            
+            return true;
         }
         
         #endregion
