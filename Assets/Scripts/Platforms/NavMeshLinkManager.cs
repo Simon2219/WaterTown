@@ -372,43 +372,34 @@ public class NavMeshLinkManager : MonoBehaviour
         EnsureLinksContainer();
         
         // The boundary is exactly between the two segment centers
-        // Both segments face each other, so we average their positions for the midpoint
         Vector3 boundaryPoint = (segA.CenterPosition + segB.CenterPosition) * 0.5f;
         
         // Get platform surface height
         float surfaceY = Mathf.Max(platformA.transform.position.y, platformB.transform.position.y);
-        boundaryPoint.y = surfaceY + heightOffset;
         
         // Determine link direction (from A to B)
-        // Use segment A's outward direction (which points toward B)
-        Vector3 linkDirection = segA.OutwardDirection;
-        
-        // Snap to cardinal direction for clean 90-degree alignment
-        linkDirection = SnapToCardinal(linkDirection);
+        Vector3 linkDirection = SnapToCardinal(segA.OutwardDirection);
         
         // Calculate start and end points
-        // Start: inside platform A (opposite of its outward direction)
-        // End: inside platform B (opposite of its outward direction)
         Vector3 startPoint = boundaryPoint - linkDirection * linkDepth;
         Vector3 endPoint = boundaryPoint + linkDirection * linkDepth;
         
-        // Ensure both points are at the same height
+        // Set Y to platform surface + offset
         startPoint.y = surfaceY + heightOffset;
         endPoint.y = surfaceY + heightOffset;
         
         // Ensure the perpendicular coordinate is identical (for straight link)
-        // If link runs along X, ensure Z is same; if along Z, ensure X is same
         if (Mathf.Abs(linkDirection.x) > Mathf.Abs(linkDirection.z))
         {
             // Link runs along X axis - Z should be same
-            float avgZ = (startPoint.z + endPoint.z) * 0.5f;
+            float avgZ = boundaryPoint.z;
             startPoint.z = avgZ;
             endPoint.z = avgZ;
         }
         else
         {
             // Link runs along Z axis - X should be same
-            float avgX = (startPoint.x + endPoint.x) * 0.5f;
+            float avgX = boundaryPoint.x;
             startPoint.x = avgX;
             endPoint.x = avgX;
         }
@@ -417,22 +408,16 @@ public class NavMeshLinkManager : MonoBehaviour
         int socketCount = Mathf.Max(segA.SocketIndices.Count, segB.SocketIndices.Count);
         float linkWidth = socketCount * widthPerSocket;
         
-        // Create link GameObject
+        // Create link GameObject at ORIGIN (transform stays at 0,0,0)
         string linkName = $"Link_{platformA.name}_{platformB.name}_x{socketCount}";
         var go = new GameObject(linkName);
-        go.transform.SetParent(_linksContainer, true);
-        go.transform.position = boundaryPoint;
+        go.transform.SetParent(_linksContainer, false);
+        // Transform stays at origin - start/end are in world space
         
-        // Set rotation to face along the link direction
-        if (linkDirection.sqrMagnitude > 0.001f)
-        {
-            go.transform.rotation = Quaternion.LookRotation(linkDirection, Vector3.up);
-        }
-        
-        // Add NavMeshLink
+        // Add NavMeshLink - since transform is at origin, local coords = world coords
         var link = go.AddComponent<NavMeshLink>();
-        link.startPoint = go.transform.InverseTransformPoint(startPoint);
-        link.endPoint = go.transform.InverseTransformPoint(endPoint);
+        link.startPoint = startPoint;
+        link.endPoint = endPoint;
         link.width = linkWidth;
         link.bidirectional = true;
         link.area = 0; // Walkable
@@ -447,15 +432,13 @@ public class NavMeshLinkManager : MonoBehaviour
         if (debugLogs)
         {
             Debug.Log($"[NavMeshLinkManager] Created: {linkName}\n" +
-                      $"  Boundary: {boundaryPoint}\n" +
                       $"  Start: {startPoint}, End: {endPoint}\n" +
-                      $"  Direction: {linkDirection}, Width: {linkWidth}m");
+                      $"  Width: {linkWidth}m, Height: {surfaceY + heightOffset}");
         }
         
         if (drawDebugGizmos)
         {
             Debug.DrawLine(startPoint, endPoint, Color.green, debugDrawDuration);
-            Debug.DrawRay(boundaryPoint, Vector3.up * 0.5f, Color.yellow, debugDrawDuration);
             Debug.DrawRay(startPoint, Vector3.up * 0.3f, Color.cyan, debugDrawDuration);
             Debug.DrawRay(endPoint, Vector3.up * 0.3f, Color.magenta, debugDrawDuration);
         }
