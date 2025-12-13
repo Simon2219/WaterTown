@@ -5,10 +5,10 @@ using Platforms;
 
 /// <summary>
 /// Manages NavMesh link creation between platforms.
-/// All links are stored under a single global GameObject for easy management.
+/// All links are stored under a single global "NavMeshLinks" GameObject.
 /// 
-/// Links are created per SEGMENT - a segment is a continuous stretch of connected sockets
-/// on the same edge, connecting to the SAME target platform.
+/// Links are created per SEGMENT - a continuous stretch of connected sockets on the same edge.
+/// Link endpoints are positioned to ensure proper NavMesh connectivity.
 /// </summary>
 [DisallowMultipleComponent]
 public class NavMeshLinkManager : MonoBehaviour
@@ -26,7 +26,7 @@ public class NavMeshLinkManager : MonoBehaviour
     [Tooltip("Width per connected socket (meters). Default 1m matches grid cell size.")]
     [SerializeField] private float widthPerSocket = 1f;
     
-    [Tooltip("How far the link extends INTO each platform from the edge (meters).\n" +
+    [Tooltip("How far the link extends INTO each platform from the boundary (meters).\n" +
              "Should be > agent radius to ensure endpoints land on valid NavMesh.")]
     [SerializeField] private float linkDepth = 0.5f;
     
@@ -40,6 +40,7 @@ public class NavMeshLinkManager : MonoBehaviour
     [Header("Debug")]
     [SerializeField] private bool debugLogs;
     [SerializeField] private bool drawDebugGizmos = true;
+    [SerializeField] private float debugDrawDuration = 10f;
     
     #endregion
     
@@ -48,8 +49,7 @@ public class NavMeshLinkManager : MonoBehaviour
     private Transform _linksContainer;
     
     // Track links by platform pair for easy cleanup
-    // Key: (platformA.GetInstanceID(), platformB.GetInstanceID()) sorted
-    private readonly Dictionary<(int, int), List<NavMeshLink>> _linksByPlatformPair = new();
+    private readonly Dictionary<(int, int), List<GameObject>> _linksByPlatformPair = new();
     
     #endregion
     
@@ -78,35 +78,55 @@ public class NavMeshLinkManager : MonoBehaviour
     #region Public API
     
     /// <summary>
+    /// Creates NavMesh links for a newly placed platform to all its neighbors.
+    /// Call this ONLY when a platform is placed (not during preview/movement).
+    /// </summary>
+    public void CreateLinksForPlacedPlatform(GamePlatform platform, PlatformManager platformManager)
+    {
+        if (!platform || !platformManager) return;
+        
+        // Get all neighbors this platform connects to
+        var neighbors = GetNeighborPlatforms(platform, platformManager);
+        
+        if (debugLogs)
+            Debug.Log($"[NavMeshLinkManager] Creating links for {platform.name} to {neighbors.Count} neighbor(s)");
+        
+        foreach (var neighbor in neighbors)
+        {
+            CreateLinksBetweenPlatforms(platform, neighbor);
+        }
+    }
+    
+    /// <summary>
     /// Creates NavMesh links between two connected platforms.
-    /// Called when platforms detect they are neighbors.
     /// </summary>
     public void CreateLinksBetweenPlatforms(GamePlatform platformA, GamePlatform platformB)
     {
         if (!platformA || !platformB) return;
         
-        // Clear existing links between these platforms
+        // Clear existing links first
         ClearLinksBetween(platformA, platformB);
         
-        // Get sockets from each platform that connect to the other
+        // Get sockets that connect these platforms
         var socketsAToB = platformA.GetSocketsConnectedToNeighbor(platformB);
         var socketsBToA = platformB.GetSocketsConnectedToNeighbor(platformA);
         
         if (socketsAToB.Count == 0 || socketsBToA.Count == 0)
         {
-            if (debugLogs) Debug.Log($"[NavMeshLinkManager] No connections between {platformA.name} and {platformB.name}");
+            if (debugLogs) 
+                Debug.Log($"[NavMeshLinkManager] No connections between {platformA.name} and {platformB.name}");
             return;
         }
         
-        // Group sockets into segments (adjacent sockets on same edge)
+        // Group sockets into segments
         var segmentsA = GroupSocketsIntoSegments(platformA, socketsAToB);
         var segmentsB = GroupSocketsIntoSegments(platformB, socketsBToA);
         
         if (debugLogs)
         {
-            Debug.Log($"[NavMeshLinkManager] Creating links: {platformA.name} <-> {platformB.name}\n" +
-                      $"  A: {socketsAToB.Count} sockets in {segmentsA.Count} segment(s)\n" +
-                      $"  B: {socketsBToA.Count} sockets in {segmentsB.Count} segment(s)");
+            Debug.Log($"[NavMeshLinkManager] {platformA.name} <-> {platformB.name}:\n" +
+                      $"  A: {socketsAToB.Count} sockets, {segmentsA.Count} segment(s)\n" +
+                      $"  B: {socketsBToA.Count} sockets, {segmentsB.Count} segment(s)");
         }
         
         // Match segments and create links
@@ -124,27 +144,25 @@ public class NavMeshLinkManager : MonoBehaviour
         
         if (_linksByPlatformPair.TryGetValue(key, out var links))
         {
-            int count = links.Count;
-            foreach (var link in links)
+            foreach (var go in links)
             {
-                if (link && link.gameObject)
+                if (go)
                 {
                     if (Application.isPlaying)
-                        Destroy(link.gameObject);
+                        Destroy(go);
                     else
-                        DestroyImmediate(link.gameObject);
+                        DestroyImmediate(go);
                 }
             }
             _linksByPlatformPair.Remove(key);
             
-            if (debugLogs && count > 0)
-                Debug.Log($"[NavMeshLinkManager] Cleared {count} link(s) between {platformA.name} and {platformB.name}");
+            if (debugLogs)
+                Debug.Log($"[NavMeshLinkManager] Cleared links between {platformA.name} and {platformB.name}");
         }
     }
     
     /// <summary>
     /// Clears all links involving a specific platform.
-    /// Call when a platform is removed.
     /// </summary>
     public void ClearAllLinksForPlatform(GamePlatform platform)
     {
@@ -157,14 +175,14 @@ public class NavMeshLinkManager : MonoBehaviour
         {
             if (kvp.Key.Item1 == platformId || kvp.Key.Item2 == platformId)
             {
-                foreach (var link in kvp.Value)
+                foreach (var go in kvp.Value)
                 {
-                    if (link && link.gameObject)
+                    if (go)
                     {
                         if (Application.isPlaying)
-                            Destroy(link.gameObject);
+                            Destroy(go);
                         else
-                            DestroyImmediate(link.gameObject);
+                            DestroyImmediate(go);
                     }
                 }
                 keysToRemove.Add(kvp.Key);
@@ -180,89 +198,105 @@ public class NavMeshLinkManager : MonoBehaviour
     
     #endregion
     
+    #region Neighbor Discovery
+    
+    private HashSet<GamePlatform> GetNeighborPlatforms(GamePlatform platform, PlatformManager platformManager)
+    {
+        var neighbors = new HashSet<GamePlatform>();
+        
+        var sockets = platform.Sockets;
+        if (sockets == null) return neighbors;
+        
+        for (int i = 0; i < sockets.Count; i++)
+        {
+            if (!platform.IsSocketConnected(i)) continue;
+            
+            Vector2Int adjacentCell = platform.GetAdjacentCellForSocket(i);
+            if (platformManager.GetPlatformAtCell(adjacentCell, out var neighbor))
+            {
+                if (neighbor && neighbor != platform)
+                    neighbors.Add(neighbor);
+            }
+        }
+        
+        return neighbors;
+    }
+    
+    #endregion
+    
     #region Segment Grouping
     
-    /// <summary>
-    /// Groups connected sockets into segments.
-    /// A segment is a continuous run of adjacent sockets on the same edge.
-    /// </summary>
-    private List<SegmentData> GroupSocketsIntoSegments(GamePlatform platform, List<int> connectedSockets)
+    private struct SegmentInfo
     {
-        var segments = new List<SegmentData>();
+        public List<int> SocketIndices;
+        public Vector3 CenterPosition;      // Average socket world position
+        public Vector3 OutwardDirection;    // Direction facing OUT of platform (normalized)
+    }
+    
+    private List<SegmentInfo> GroupSocketsIntoSegments(GamePlatform platform, List<int> connectedSockets)
+    {
+        var segments = new List<SegmentInfo>();
         if (connectedSockets.Count == 0) return segments;
         
-        // Get edge boundaries for this platform's footprint
+        // Get edge boundaries
         var footprint = platform.Footprint;
         int width = Mathf.Max(1, footprint.x);
         int length = Mathf.Max(1, footprint.y);
-        
-        // Edge boundaries: North[0,width), South[width,2*width), East[2*width,2*width+length), West[2*width+length,...)
         int[] edgeBounds = { 0, width, width * 2, width * 2 + length, width * 2 + length * 2 };
         
-        // Sort sockets and group by edge first
-        var sortedSockets = new List<int>(connectedSockets);
-        sortedSockets.Sort();
+        // Sort sockets
+        var sorted = new List<int>(connectedSockets);
+        sorted.Sort();
         
-        // Group into segments: adjacent indices on same edge
-        var currentSegment = new List<int> { sortedSockets[0] };
-        int currentEdge = GetEdgeIndex(sortedSockets[0], edgeBounds);
+        // Group adjacent sockets on same edge
+        var currentGroup = new List<int> { sorted[0] };
+        int currentEdge = GetEdgeIndex(sorted[0], edgeBounds);
         
-        for (int i = 1; i < sortedSockets.Count; i++)
+        for (int i = 1; i < sorted.Count; i++)
         {
-            int socket = sortedSockets[i];
+            int socket = sorted[i];
             int edge = GetEdgeIndex(socket, edgeBounds);
-            int prevSocket = sortedSockets[i - 1];
+            bool adjacent = (socket - sorted[i - 1]) == 1;
             
-            // Check if this socket continues the current segment
-            bool isAdjacent = (socket - prevSocket) == 1;
-            bool sameEdge = edge == currentEdge;
-            
-            if (isAdjacent && sameEdge)
+            if (adjacent && edge == currentEdge)
             {
-                currentSegment.Add(socket);
+                currentGroup.Add(socket);
             }
             else
             {
-                // Finish current segment and start new one
-                segments.Add(CreateSegmentData(platform, currentSegment, currentEdge));
-                currentSegment = new List<int> { socket };
+                segments.Add(CreateSegmentInfo(platform, currentGroup));
+                currentGroup = new List<int> { socket };
                 currentEdge = edge;
             }
         }
         
-        // Add final segment
-        segments.Add(CreateSegmentData(platform, currentSegment, currentEdge));
-        
+        segments.Add(CreateSegmentInfo(platform, currentGroup));
         return segments;
     }
     
-    private SegmentData CreateSegmentData(GamePlatform platform, List<int> socketIndices, int edgeIndex)
+    private SegmentInfo CreateSegmentInfo(GamePlatform platform, List<int> socketIndices)
     {
-        // Calculate segment center and direction
         Vector3 center = Vector3.zero;
-        Vector3 outwardDir = Vector3.zero;
+        Vector3 outward = Vector3.zero;
         
         foreach (int idx in socketIndices)
         {
             center += platform.GetSocketWorldPosition(idx);
+            
             var socket = platform.GetSocket(idx);
-            outwardDir += new Vector3(socket.OutwardOffset.x, 0, socket.OutwardOffset.y);
+            // OutwardOffset is in local space (x, y as x, z)
+            Vector3 localOutward = new Vector3(socket.OutwardOffset.x, 0, socket.OutwardOffset.y);
+            outward += platform.transform.TransformDirection(localOutward);
         }
         
         center /= socketIndices.Count;
-        outwardDir = platform.transform.TransformDirection(outwardDir.normalized);
+        outward = outward.normalized;
         
-        // Calculate segment width direction (perpendicular to outward, along the edge)
-        Vector3 widthDir = Vector3.Cross(Vector3.up, outwardDir).normalized;
-        
-        return new SegmentData
+        return new SegmentInfo
         {
             SocketIndices = socketIndices,
-            EdgeIndex = edgeIndex,
-            Center = center,
-            OutwardDirection = outwardDir,
-            WidthDirection = widthDir,
-            SocketCount = socketIndices.Count
+            CenterPosition = center,
+            OutwardDirection = outward
         };
     }
     
@@ -276,26 +310,16 @@ public class NavMeshLinkManager : MonoBehaviour
         return 3;
     }
     
-    private struct SegmentData
-    {
-        public List<int> SocketIndices;
-        public int EdgeIndex;
-        public Vector3 Center;
-        public Vector3 OutwardDirection;
-        public Vector3 WidthDirection;
-        public int SocketCount;
-    }
-    
     #endregion
     
     #region Link Creation
     
-    private void CreateLinksForMatchedSegments(GamePlatform platformA, List<SegmentData> segmentsA,
-                                                GamePlatform platformB, List<SegmentData> segmentsB)
+    private void CreateLinksForMatchedSegments(GamePlatform platformA, List<SegmentInfo> segmentsA,
+                                                GamePlatform platformB, List<SegmentInfo> segmentsB)
     {
         var usedB = new HashSet<int>();
         
-        // Match each segment from A to closest segment from B
+        // Match each A segment to closest B segment
         foreach (var segA in segmentsA)
         {
             int bestIdx = -1;
@@ -304,8 +328,7 @@ public class NavMeshLinkManager : MonoBehaviour
             for (int i = 0; i < segmentsB.Count; i++)
             {
                 if (usedB.Contains(i)) continue;
-                
-                float dist = Vector3.Distance(segA.Center, segmentsB[i].Center);
+                float dist = Vector3.Distance(segA.CenterPosition, segmentsB[i].CenterPosition);
                 if (dist < bestDist)
                 {
                     bestDist = dist;
@@ -316,23 +339,22 @@ public class NavMeshLinkManager : MonoBehaviour
             if (bestIdx >= 0)
             {
                 usedB.Add(bestIdx);
-                CreateLink(platformA, segA, platformB, segmentsB[bestIdx]);
+                CreateLinkForSegmentPair(platformA, segA, platformB, segmentsB[bestIdx]);
             }
         }
         
-        // Handle any unmatched B segments
+        // Handle unmatched B segments
         for (int i = 0; i < segmentsB.Count; i++)
         {
             if (usedB.Contains(i)) continue;
             
             // Find closest A segment (allow reuse)
-            var segB = segmentsB[i];
             int bestIdx = 0;
             float bestDist = float.MaxValue;
             
             for (int j = 0; j < segmentsA.Count; j++)
             {
-                float dist = Vector3.Distance(segB.Center, segmentsA[j].Center);
+                float dist = Vector3.Distance(segmentsB[i].CenterPosition, segmentsA[j].CenterPosition);
                 if (dist < bestDist)
                 {
                     bestDist = dist;
@@ -340,50 +362,74 @@ public class NavMeshLinkManager : MonoBehaviour
                 }
             }
             
-            CreateLink(platformA, segmentsA[bestIdx], platformB, segB);
+            CreateLinkForSegmentPair(platformA, segmentsA[bestIdx], platformB, segmentsB[i]);
         }
     }
     
-    private void CreateLink(GamePlatform platformA, SegmentData segA,
-                            GamePlatform platformB, SegmentData segB)
+    private void CreateLinkForSegmentPair(GamePlatform platformA, SegmentInfo segA,
+                                           GamePlatform platformB, SegmentInfo segB)
     {
         EnsureLinksContainer();
         
-        // Use the larger socket count for width
-        int socketCount = Mathf.Max(segA.SocketCount, segB.SocketCount);
-        float linkWidth = socketCount * widthPerSocket;
+        // The boundary is exactly between the two segment centers
+        // Both segments face each other, so we average their positions for the midpoint
+        Vector3 boundaryPoint = (segA.CenterPosition + segB.CenterPosition) * 0.5f;
         
-        // Get platform surface height (use platform's transform Y as base)
+        // Get platform surface height
         float surfaceY = Mathf.Max(platformA.transform.position.y, platformB.transform.position.y);
+        boundaryPoint.y = surfaceY + heightOffset;
         
-        // Calculate link endpoints:
-        // Start: segment A center, moved INWARD (opposite of outward direction)
-        // End: segment B center, moved INWARD
-        Vector3 startPoint = segA.Center - segA.OutwardDirection * linkDepth;
+        // Determine link direction (from A to B)
+        // Use segment A's outward direction (which points toward B)
+        Vector3 linkDirection = segA.OutwardDirection;
+        
+        // Snap to cardinal direction for clean 90-degree alignment
+        linkDirection = SnapToCardinal(linkDirection);
+        
+        // Calculate start and end points
+        // Start: inside platform A (opposite of its outward direction)
+        // End: inside platform B (opposite of its outward direction)
+        Vector3 startPoint = boundaryPoint - linkDirection * linkDepth;
+        Vector3 endPoint = boundaryPoint + linkDirection * linkDepth;
+        
+        // Ensure both points are at the same height
         startPoint.y = surfaceY + heightOffset;
-        
-        Vector3 endPoint = segB.Center - segB.OutwardDirection * linkDepth;
         endPoint.y = surfaceY + heightOffset;
         
-        // Create link GameObject
-        string linkName = $"Link_{platformA.name}_to_{platformB.name}_x{socketCount}";
-        var go = new GameObject(linkName);
-        go.transform.SetParent(_linksContainer, true);
-        
-        // Position at midpoint
-        Vector3 midpoint = (startPoint + endPoint) * 0.5f;
-        go.transform.position = midpoint;
-        
-        // Align rotation to the connection direction (snapped to 90 degrees)
-        Vector3 linkDir = (endPoint - startPoint).normalized;
-        if (linkDir.sqrMagnitude > 0.001f)
+        // Ensure the perpendicular coordinate is identical (for straight link)
+        // If link runs along X, ensure Z is same; if along Z, ensure X is same
+        if (Mathf.Abs(linkDirection.x) > Mathf.Abs(linkDirection.z))
         {
-            // Snap direction to nearest 90-degree axis
-            linkDir = SnapToCardinalDirection(linkDir);
-            go.transform.rotation = Quaternion.LookRotation(linkDir, Vector3.up);
+            // Link runs along X axis - Z should be same
+            float avgZ = (startPoint.z + endPoint.z) * 0.5f;
+            startPoint.z = avgZ;
+            endPoint.z = avgZ;
+        }
+        else
+        {
+            // Link runs along Z axis - X should be same
+            float avgX = (startPoint.x + endPoint.x) * 0.5f;
+            startPoint.x = avgX;
+            endPoint.x = avgX;
         }
         
-        // Add NavMeshLink component
+        // Calculate width
+        int socketCount = Mathf.Max(segA.SocketIndices.Count, segB.SocketIndices.Count);
+        float linkWidth = socketCount * widthPerSocket;
+        
+        // Create link GameObject
+        string linkName = $"Link_{platformA.name}_{platformB.name}_x{socketCount}";
+        var go = new GameObject(linkName);
+        go.transform.SetParent(_linksContainer, true);
+        go.transform.position = boundaryPoint;
+        
+        // Set rotation to face along the link direction
+        if (linkDirection.sqrMagnitude > 0.001f)
+        {
+            go.transform.rotation = Quaternion.LookRotation(linkDirection, Vector3.up);
+        }
+        
+        // Add NavMeshLink
         var link = go.AddComponent<NavMeshLink>();
         link.startPoint = go.transform.InverseTransformPoint(startPoint);
         link.endPoint = go.transform.InverseTransformPoint(endPoint);
@@ -392,33 +438,31 @@ public class NavMeshLinkManager : MonoBehaviour
         link.area = 0; // Walkable
         link.agentTypeID = agentType.AgentTypeID;
         
-        // Track this link
+        // Track link
         var key = GetPlatformPairKey(platformA, platformB);
         if (!_linksByPlatformPair.ContainsKey(key))
-            _linksByPlatformPair[key] = new List<NavMeshLink>();
-        _linksByPlatformPair[key].Add(link);
+            _linksByPlatformPair[key] = new List<GameObject>();
+        _linksByPlatformPair[key].Add(go);
         
         if (debugLogs)
         {
             Debug.Log($"[NavMeshLinkManager] Created: {linkName}\n" +
+                      $"  Boundary: {boundaryPoint}\n" +
                       $"  Start: {startPoint}, End: {endPoint}\n" +
-                      $"  Width: {linkWidth}m, Sockets: {socketCount}");
+                      $"  Direction: {linkDirection}, Width: {linkWidth}m");
         }
         
         if (drawDebugGizmos)
         {
-            Debug.DrawLine(startPoint, endPoint, Color.green, 10f);
-            Debug.DrawRay(startPoint, Vector3.up * 0.5f, Color.cyan, 10f);
-            Debug.DrawRay(endPoint, Vector3.up * 0.5f, Color.magenta, 10f);
+            Debug.DrawLine(startPoint, endPoint, Color.green, debugDrawDuration);
+            Debug.DrawRay(boundaryPoint, Vector3.up * 0.5f, Color.yellow, debugDrawDuration);
+            Debug.DrawRay(startPoint, Vector3.up * 0.3f, Color.cyan, debugDrawDuration);
+            Debug.DrawRay(endPoint, Vector3.up * 0.3f, Color.magenta, debugDrawDuration);
         }
     }
     
-    /// <summary>
-    /// Snaps a direction vector to the nearest cardinal direction (90-degree aligned).
-    /// </summary>
-    private Vector3 SnapToCardinalDirection(Vector3 dir)
+    private Vector3 SnapToCardinal(Vector3 dir)
     {
-        // Find which axis has the largest component
         float absX = Mathf.Abs(dir.x);
         float absZ = Mathf.Abs(dir.z);
         
@@ -436,7 +480,6 @@ public class NavMeshLinkManager : MonoBehaviour
     {
         if (_linksContainer) return;
         
-        // Look for existing container
         var existing = GameObject.Find("NavMeshLinks");
         if (existing)
         {
@@ -444,7 +487,6 @@ public class NavMeshLinkManager : MonoBehaviour
             return;
         }
         
-        // Create new container
         var go = new GameObject("NavMeshLinks");
         _linksContainer = go.transform;
         _linksContainer.position = Vector3.zero;

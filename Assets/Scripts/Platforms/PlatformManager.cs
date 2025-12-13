@@ -246,8 +246,7 @@ public class PlatformManager : MonoBehaviour
 
 
     /// Event handler called when ANY platform is placed
-    /// Registers platform in grid, triggers adjacency update, and rebuilds NavMesh
-    /// NavMesh links are created automatically when platforms detect connections
+    /// Registers platform in grid, triggers adjacency update, rebuilds NavMesh, and creates links
     ///
     private void OnPlatformPlaced(GamePlatform platform)
     {
@@ -259,6 +258,16 @@ public class PlatformManager : MonoBehaviour
         // Mark this platform and its neighbors for adjacency update
         MarkAdjacencyDirtyForPlatform(platform);
         
+        // Force immediate adjacency computation so connections are known
+        RecomputeAdjacencyForAffectedPlatforms();
+        
+        // Create NavMesh links for this platform to all its neighbors
+        var linkManager = NavMeshLinkManager.Instance;
+        if (linkManager)
+        {
+            linkManager.CreateLinksForPlacedPlatform(platform, this);
+        }
+        
         // Rebuild NavMesh for this platform and all affected neighbors
         RebuildNavMeshForPlatformAndNeighbors(platform);
     }
@@ -266,11 +275,14 @@ public class PlatformManager : MonoBehaviour
 
  
     /// Event handler called when ANY platform is picked up
-    /// Clears Occupied flags and cell ownership, marks adjacency dirty
+    /// Clears Occupied flags, cell ownership, NavMesh links, and marks adjacency dirty
     ///
     private void OnPlatformPickedUp(GamePlatform platform)
     {
         if (!platform) return;
+        
+        // Clear all NavMesh links for this platform
+        NavMeshLinkManager.Instance?.ClearAllLinksForPlatform(platform);
         
         // Clear Occupied flags and cell ownership for cells this platform was occupying
         if (platform.occupiedCells != null)
@@ -562,21 +574,13 @@ public class PlatformManager : MonoBehaviour
     /// 
     /// <summary>
     /// Requests NavMesh link creation between two platforms.
-    /// Delegates to NavMeshLinkManager for actual link creation.
+    /// NOTE: This is now handled automatically in OnPlatformPlaced.
+    /// This method is kept for compatibility but does nothing during preview/movement.
     /// </summary>
     public void RequestNavMeshLink(GamePlatform platformA, GamePlatform platformB)
     {
-        if (!platformA || !platformB) return;
-        
-        var linkManager = NavMeshLinkManager.Instance;
-        if (linkManager)
-        {
-            linkManager.CreateLinksBetweenPlatforms(platformA, platformB);
-        }
-        else
-        {
-            Debug.LogWarning("[PlatformManager] NavMeshLinkManager not found. Add it to the scene to enable NavMesh links.");
-        }
+        // Links are now created only when platforms are placed (not during movement/preview)
+        // See OnPlatformPlaced for the actual link creation
     }
 
 
