@@ -422,7 +422,6 @@ public class NavMeshLinkManager : MonoBehaviour
         link.bidirectional = true;
         link.area = 0; // Walkable
         link.agentTypeID = agentType.AgentTypeID;
-        link.autoUpdatePosition = false; // Let agent traverse at normal speed
         
         // Track link
         var key = GetPlatformPairKey(platformA, platformB);
