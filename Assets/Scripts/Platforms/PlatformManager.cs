@@ -637,8 +637,8 @@ public class PlatformManager : MonoBehaviour
         }
     
         // Each platform updates its own sockets - NavMesh links are requested automatically
-        platformA.UpdateSocketStatusesFromGrid();
-        platformB.UpdateSocketStatusesFromGrid();
+        platformA.RefreshSocketStatuses();
+        platformB.RefreshSocketStatuses();
     }
 
 
@@ -661,7 +661,7 @@ public class PlatformManager : MonoBehaviour
         foreach (var platform in _platformsNeedingAdjacencyUpdate)
         {
             if (!platform || !platform.isActiveAndEnabled) continue;
-            platform.UpdateSocketStatusesFromGrid();
+            platform.RefreshSocketStatuses();
         }
     
         // Clear the set after processing

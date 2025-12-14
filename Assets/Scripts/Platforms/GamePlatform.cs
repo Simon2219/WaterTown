@@ -473,16 +473,8 @@ namespace Platforms
             => _socketSystem?.GetAdjacentCellForSocket(socketIndex) ?? Vector2Int.zero;
 
 
-        public void UpdateSocketStatusesFromGrid() 
-            => _socketSystem?.UpdateSocketStatusesFromGrid();
-
-
         public List<int> GetSocketsConnectedToNeighbor(GamePlatform neighbor) 
             => _socketSystem?.GetSocketsConnectedToNeighbor(neighbor) ?? new List<int>();
-
-
-        public void UpdateConnections(HashSet<int> newConnectedSockets) 
-            => _socketSystem?.UpdateConnections(newConnectedSockets);
 
 
         public void ResetConnections() 

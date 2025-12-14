@@ -65,7 +65,8 @@ namespace Grid
             Buildable     = 1 << 1,
             Occupied      = 1 << 2,
             OccupyPreview = 1 << 3,
-            // Extend as needed: ServiceZone = 1<<4, etc.
+            ModuleBlocked = 1 << 4,  // Cell has a blocking module on its edge (prevents socket connection)
+            // Extend as needed: ServiceZone = 1<<5, etc.
         }
         
         #endregion

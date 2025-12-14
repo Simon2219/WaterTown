@@ -240,72 +240,79 @@ public class PlatformSocketSystem : MonoBehaviour
     
     
     /// Build sockets along the perimeter of the footprint, in local space
-    /// One socket per 1m edge segment
+    /// One socket per cell edge segment
     /// Order: +Z edge, -Z edge, +X edge, -X edge (for compat with Edge API)
     public void BuildSockets()
     {
-        if (!_platform) return;
-        
         var footprintSize = _platform.Footprint;
         
-        var prev = new Dictionary<Vector3, SocketStatus>();
+        // Preserve existing socket statuses when rebuilding
+        var previousStatuses = new Dictionary<Vector3, SocketStatus>();
         foreach (var s in sockets)
-            prev[s.LocalPos] = s.Status;
+            previousStatuses[s.LocalPos] = s.Status;
 
         sockets.Clear();
         SocketsBuilt = false;
 
         int footprintWidth = Mathf.Max(1, footprintSize.x);
         int footprintLength = Mathf.Max(1, footprintSize.y);
-        float halfWidth = footprintWidth * 0.5f;
-        float halfLength = footprintLength * 0.5f;
+        
+        // Use WorldGrid.CellSize for consistency with grid system
+        float cellSize = WorldGrid.CellSize;
+        float halfCellSize = cellSize * 0.5f;
+        float halfWidth = footprintWidth * halfCellSize;
+        float halfLength = footprintLength * halfCellSize;
 
         int socketIndex = 0;
 
-        // +Z edge (local z ≈ +halfLength), outward direction is (0, +1)
+        // +Z edge (North - local z ≈ +halfLength), outward direction is (0, +1)
         Vector2Int outwardPlusZ = new Vector2Int(0, 1);
         for (int segmentIndex = 0; segmentIndex < footprintWidth; segmentIndex++)
         {
-            float localX = -halfWidth + 0.5f + segmentIndex;
+            float localX = -halfWidth + halfCellSize + (segmentIndex * cellSize);
             Vector3 localPosition = new Vector3(localX, 0f, +halfLength);
             var socketData = new SocketData();
-            socketData.Initialize(socketIndex, localPosition, outwardPlusZ, prev.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
+            socketData.Initialize(socketIndex, localPosition, outwardPlusZ, 
+                previousStatuses.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
             sockets.Add(socketData);
             socketIndex++;
         }
 
-        // -Z edge (local z ≈ -halfLength), outward direction is (0, -1)
+        // -Z edge (South - local z ≈ -halfLength), outward direction is (0, -1)
         Vector2Int outwardMinusZ = new Vector2Int(0, -1);
         for (int segmentIndex = 0; segmentIndex < footprintWidth; segmentIndex++)
         {
-            float localX = -halfWidth + 0.5f + segmentIndex;
+            float localX = -halfWidth + halfCellSize + (segmentIndex * cellSize);
             Vector3 localPosition = new Vector3(localX, 0f, -halfLength);
             var socketData = new SocketData();
-            socketData.Initialize(socketIndex, localPosition, outwardMinusZ, prev.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
+            socketData.Initialize(socketIndex, localPosition, outwardMinusZ, 
+                previousStatuses.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
             sockets.Add(socketData);
             socketIndex++;
         }
 
-        // +X edge (local x ≈ +halfWidth), outward direction is (+1, 0)
+        // +X edge (East - local x ≈ +halfWidth), outward direction is (+1, 0)
         Vector2Int outwardPlusX = new Vector2Int(1, 0);
         for (int segmentIndex = 0; segmentIndex < footprintLength; segmentIndex++)
         {
-            float localZ = +halfLength - 0.5f - segmentIndex;
+            float localZ = +halfLength - halfCellSize - (segmentIndex * cellSize);
             Vector3 localPosition = new Vector3(+halfWidth, 0f, localZ);
             var socketData = new SocketData();
-            socketData.Initialize(socketIndex, localPosition, outwardPlusX, prev.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
+            socketData.Initialize(socketIndex, localPosition, outwardPlusX, 
+                previousStatuses.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
             sockets.Add(socketData);
             socketIndex++;
         }
 
-        // -X edge (local x ≈ -halfWidth), outward direction is (-1, 0)
+        // -X edge (West - local x ≈ -halfWidth), outward direction is (-1, 0)
         Vector2Int outwardMinusX = new Vector2Int(-1, 0);
         for (int segmentIndex = 0; segmentIndex < footprintLength; segmentIndex++)
         {
-            float localZ = +halfLength - 0.5f - segmentIndex;
+            float localZ = +halfLength - halfCellSize - (segmentIndex * cellSize);
             Vector3 localPosition = new Vector3(-halfWidth, 0f, localZ);
             var socketData = new SocketData();
-            socketData.Initialize(socketIndex, localPosition, outwardMinusX, prev.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
+            socketData.Initialize(socketIndex, localPosition, outwardMinusX, 
+                previousStatuses.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
             sockets.Add(socketData);
             socketIndex++;
         }
@@ -390,7 +397,6 @@ public class PlatformSocketSystem : MonoBehaviour
     /// Length in whole meters along the given edge (number of segments)
     public int EdgeLengthMeters(Edge edge)
     {
-        if (!_platform) return 0;
         var footprintSize = _platform.Footprint;
         return (edge == Edge.North || edge == Edge.South) ? footprintSize.x : footprintSize.y;
     }
@@ -400,7 +406,6 @@ public class PlatformSocketSystem : MonoBehaviour
     public void GetSocketIndexRangeForEdge(Edge edge, out int startIndex, out int endIndex)
     {
         if (!SocketsBuilt) BuildSockets();
-        if (!_platform) { startIndex = 0; endIndex = 0; return; }
 
         var footprintSize = _platform.Footprint;
         int footprintWidth = Mathf.Max(1, footprintSize.x);
@@ -433,7 +438,6 @@ public class PlatformSocketSystem : MonoBehaviour
     public int GetSocketIndexByEdgeMark(Edge edge, int mark)
     {
         if (!SocketsBuilt) BuildSockets();
-        if (!_platform) return 0;
 
         var footprintSize = _platform.Footprint;
         int width = Mathf.Max(1, footprintSize.x);
@@ -534,7 +538,7 @@ public class PlatformSocketSystem : MonoBehaviour
     public Vector2Int GetAdjacentCellForSocket(int socketIndex)
     {
         if (!SocketsBuilt) BuildSockets();
-        if (socketIndex < 0 || socketIndex >= sockets.Count || !_worldGrid)
+        if (socketIndex < 0 || socketIndex >= sockets.Count)
             return Vector2Int.zero;
 
         Vector3 socketWorldPos = GetSocketWorldPosition(socketIndex);
@@ -545,82 +549,42 @@ public class PlatformSocketSystem : MonoBehaviour
     }
 
 
-    /// Updates socket connection statuses based on adjacent grid cell occupancy
-    public void UpdateSocketStatusesFromGrid()
+    /// Gets the grid cell behind a socket (the cell this platform occupies at the socket)
+    /// This is the cell on the platform's side of the socket edge
+    private Vector2Int GetCellBehindSocket(int socketIndex)
     {
-        var newConnectedSockets = new HashSet<int>();
-        var newNeighbors = new HashSet<GamePlatform>();
-        var previousNeighbors = GetCurrentNeighbors();
+        if (!SocketsBuilt) BuildSockets();
+        if (socketIndex < 0 || socketIndex >= sockets.Count)
+            return Vector2Int.zero;
+
+        Vector3 socketWorldPos = GetSocketWorldPosition(socketIndex);
+        Vector3 worldOutward = GetSocketWorldOutwardDirection(socketIndex);
+        // Move inward (opposite of outward) to get the cell behind the socket
+        Vector3 cellBehindPos = socketWorldPos - worldOutward * 0.5f;
+        
+        return _worldGrid.WorldToCell(cellBehindPos);
+    }
+
+
+    /// Gets all sockets that are connected to a specific neighbor platform
+    /// Uses neighbor's occupiedCells for efficient O(1) lookup per socket
+    public List<int> GetSocketsConnectedToNeighbor(GamePlatform neighbor)
+    {
+        var result = new List<int>();
+        if (!neighbor || neighbor.occupiedCells == null || neighbor.occupiedCells.Count == 0) 
+            return result;
+
+        // Create HashSet from neighbor's cells for O(1) lookup
+        var neighborCells = new HashSet<Vector2Int>(neighbor.occupiedCells);
 
         for (int i = 0; i < sockets.Count; i++)
         {
             var socket = sockets[i];
-            
-            if (socket.Status == SocketStatus.Locked || socket.Status == SocketStatus.Disabled)
-                continue;
+            if (socket.Status != SocketStatus.Connected) continue;
 
-            Vector2Int neighborCell = GetAdjacentCellForSocket(i);
-            
-            if (_platformManager.GetPlatformAtCell(neighborCell, out var neighborPlatform))
-            {
-                if (neighborPlatform && neighborPlatform != _platform)
-                {
-                    newConnectedSockets.Add(i);
-                    newNeighbors.Add(neighborPlatform);
-                }
-            }
-        }
-
-        bool hadChanges = !newConnectedSockets.SetEquals(_connectedSockets);
-        if (hadChanges)
-        {
-            UpdateConnections(newConnectedSockets);
-        }
-        
-        // Notify about new neighbors (for NavMesh link creation)
-        if (!_platform.IsPickedUp)
-        {
-            foreach (var neighbor in newNeighbors)
-            {
-                if (!previousNeighbors.Contains(neighbor))
-                {
-                    NewNeighborDetected?.Invoke(neighbor);
-                }
-            }
-        }
-    }
-
-
-    /// Gets current neighbor platforms based on connected sockets
-    private HashSet<GamePlatform> GetCurrentNeighbors()
-    {
-        var neighbors = new HashSet<GamePlatform>();
-        if (!_platformManager) return neighbors;
-
-        foreach (int socketIndex in _connectedSockets)
-        {
-            Vector2Int adjacentCell = GetAdjacentCellForSocket(socketIndex);
-            if (_platformManager.GetPlatformAtCell(adjacentCell, out GamePlatform neighbor)
-                && neighbor && neighbor != _platform)
-            {
-                neighbors.Add(neighbor);
-            }
-        }
-        return neighbors;
-    }
-
-
-    /// Gets all sockets that are currently connected to a specific neighbor platform
-    public List<int> GetSocketsConnectedToNeighbor(GamePlatform neighbor)
-    {
-        var result = new List<int>();
-
-        for (int i = 0; i < sockets.Count; i++)
-        {
-            if (!_connectedSockets.Contains(i)) continue;
-
+            // Check if this socket's adjacent cell is one of the neighbor's cells
             Vector2Int adjacentCell = GetAdjacentCellForSocket(i);
-            if (_platformManager.GetPlatformAtCell(adjacentCell, out var occupant) && occupant == neighbor)
+            if (neighborCells.Contains(adjacentCell))
             {
                 result.Add(i);
             }
@@ -638,106 +602,196 @@ public class PlatformSocketSystem : MonoBehaviour
     #region Connection Management
     
     
-    /// Incrementally updates connections - only modifies sockets that changed
-    public void UpdateConnections(HashSet<int> newConnectedSockets)
+    /// <summary>
+    /// Single entry point for refreshing all socket statuses from grid state.
+    /// Queries the WorldGrid directly to determine each socket's status.
+    /// Updates the _connectedSockets cache, socket statuses, and module visibility.
+    /// </summary>
+    public void RefreshAllSocketStatuses()
     {
-        if (newConnectedSockets == null) newConnectedSockets = new HashSet<int>();
+        if (!SocketsBuilt) BuildSockets();
         
-        var socketsToDisconnect = new List<int>();
-        foreach (int socketIndex in _connectedSockets)
+        var previousNeighbors = GetCurrentNeighborPlatforms();
+        var newNeighbors = new HashSet<GamePlatform>();
+        
+        bool anyStatusChanged = false;
+        bool anyConnectionChanged = false;
+        
+        for (int i = 0; i < sockets.Count; i++)
         {
-            if (!newConnectedSockets.Contains(socketIndex))
-                socketsToDisconnect.Add(socketIndex);
-        }
-        
-        var socketsToConnect = new List<int>();
-        foreach (int socketIndex in newConnectedSockets)
-        {
-            if (!_connectedSockets.Contains(socketIndex))
-                socketsToConnect.Add(socketIndex);
-        }
-        
-        if (socketsToDisconnect.Count == 0 && socketsToConnect.Count == 0)
-            return;
-        
-        // Update connection state
-        foreach (int socketIndex in socketsToDisconnect)
-            _connectedSockets.Remove(socketIndex);
-        foreach (int socketIndex in socketsToConnect)
-            _connectedSockets.Add(socketIndex);
-        
-        // Update module visibility
-        foreach (int socketIndex in socketsToDisconnect)
-        {
-            if (_socketToModules.TryGetValue(socketIndex, out var module))
+            var socket = sockets[i];
+            
+            // Skip permanently locked/disabled sockets
+            if (socket.Status == SocketStatus.Locked || socket.Status == SocketStatus.Disabled)
+                continue;
+            
+            // Determine new status by querying grid
+            SocketStatus newStatus = DetermineSocketStatusFromGrid(i, out GamePlatform neighborPlatform);
+            
+            // Track neighbors for NavMesh link creation
+            if (neighborPlatform != null)
+                newNeighbors.Add(neighborPlatform);
+            
+            // Update socket status if changed
+            if (socket.Status != newStatus)
             {
+                socket.SetStatus(newStatus);
+                sockets[i] = socket;
+                anyStatusChanged = true;
+            }
+            
+            // Update _connectedSockets cache
+            bool shouldBeConnected = (newStatus == SocketStatus.Connected);
+            bool wasConnected = _connectedSockets.Contains(i);
+            
+            if (shouldBeConnected && !wasConnected)
+            {
+                _connectedSockets.Add(i);
+                anyConnectionChanged = true;
+                
+                // Hide module on newly connected socket
+                if (_socketToModules.TryGetValue(i, out var module))
+                    SetModuleVisibility(module, visible: false);
+            }
+            else if (!shouldBeConnected && wasConnected)
+            {
+                _connectedSockets.Remove(i);
+                anyConnectionChanged = true;
+                
+                // Show module on newly disconnected socket
+                if (_socketToModules.TryGetValue(i, out var module))
                     SetModuleVisibility(module, visible: true);
             }
         }
         
-        foreach (int socketIndex in socketsToConnect)
+        // Fire events if anything changed
+        if (anyStatusChanged || anyConnectionChanged)
         {
-            if (_socketToModules.TryGetValue(socketIndex, out var module))
+            SocketsChanged?.Invoke();
+        }
+        
+        // Notify about new neighbors (for NavMesh link creation)
+        if (!_platform.IsPickedUp)
+        {
+            foreach (var neighbor in newNeighbors)
             {
-                    SetModuleVisibility(module, visible: false);
+                if (!previousNeighbors.Contains(neighbor))
+                {
+                    NewNeighborDetected?.Invoke(neighbor);
+                }
+            }
+        }
+    }
+    
+    
+    /// <summary>
+    /// Determines a socket's status by querying the grid directly.
+    /// Rules:
+    /// - No neighbor platform in adjacent cell → Linkable (or Occupied if blocked by own module)
+    /// - Neighbor exists + this socket blocked by own module → Occupied
+    /// - Neighbor exists + adjacent cell has ModuleBlocked flag → Occupied (neighbor has blocking module)
+    /// - Neighbor exists + no blocking → Connected
+    /// </summary>
+    private SocketStatus DetermineSocketStatusFromGrid(int socketIndex, out GamePlatform neighborPlatform)
+    {
+        neighborPlatform = null;
+        
+        Vector2Int adjacentCell = GetAdjacentCellForSocket(socketIndex);
+        
+        // Check if this socket has a blocking module
+        bool thisSocketBlocked = IsSocketBlockedByModule(socketIndex);
+        
+        // Early exit: check WorldGrid Occupied flag first (fast array lookup)
+        // If cell isn't occupied, no need to query PlatformManager
+        if (!_worldGrid.CellHasAnyFlag(adjacentCell, WorldGrid.CellFlag.Occupied))
+        {
+            return thisSocketBlocked ? SocketStatus.Occupied : SocketStatus.Linkable;
+        }
+        
+        // Cell is occupied - get the actual platform to track neighbors
+        if (!_platformManager.GetPlatformAtCell(adjacentCell, out neighborPlatform) 
+            || !neighborPlatform 
+            || neighborPlatform == _platform)
+        {
+            // Occupied but not by another platform (shouldn't happen, but handle gracefully)
+            return thisSocketBlocked ? SocketStatus.Occupied : SocketStatus.Linkable;
+        }
+        
+        // Adjacent cell has a neighbor platform
+        
+        // If this socket has a blocking module → Occupied (module stays visible, railings show)
+        if (thisSocketBlocked)
+            return SocketStatus.Occupied;
+        
+        // If adjacent cell has ModuleBlocked flag → Occupied (neighbor has blocking module facing us)
+        if (_worldGrid.CellHasAnyFlag(adjacentCell, WorldGrid.CellFlag.ModuleBlocked))
+            return SocketStatus.Occupied;
+        
+        // Neither side has a blocking module → Connected
+        return SocketStatus.Connected;
+    }
+    
+    
+    /// Gets current neighbor platforms using WorldGrid's neighbor cell detection
+    /// More efficient than looping through all sockets individually
+    private HashSet<GamePlatform> GetCurrentNeighborPlatforms()
+    {
+        var neighbors = new HashSet<GamePlatform>();
+        if (_platform.occupiedCells == null || _platform.occupiedCells.Count == 0) 
+            return neighbors;
+
+        // Get all 4-directional neighbor cells at once (sockets only face cardinal directions)
+        var neighborCells = _worldGrid.GetNeighborCells(_platform.occupiedCells, include8Directional: false);
+        
+        // Check which neighbor cells contain platforms
+        foreach (var cell in neighborCells)
+        {
+            if (_platformManager.GetPlatformAtCell(cell, out GamePlatform neighbor)
+                && neighbor && neighbor != _platform)
+            {
+                neighbors.Add(neighbor);
             }
         }
         
-        RefreshSocketStatuses();
-        SocketsChanged?.Invoke();
+        return neighbors;
     }
 
 
-    /// Resets all connections to baseline
+    /// Resets all connections to baseline (used when platform is unregistered)
     public void ResetConnections()
     {
         // Show all modules
-        if (_platform)
+        foreach (var m in _platform.CachedModules)
         {
-            foreach (var m in _platform.CachedModules)
-            {
-                if (m) m.SetHidden(false);
-            }
+            if (m) m.SetHidden(false);
         }
 
+        // Clear connection cache and reset all socket statuses to Linkable/Occupied
         _connectedSockets.Clear();
-        RefreshSocketStatuses();
+        
+        for (int i = 0; i < sockets.Count; i++)
+        {
+            var socket = sockets[i];
+            if (socket.Status == SocketStatus.Locked || socket.Status == SocketStatus.Disabled)
+                continue;
+            
+            // Without neighbors, status is Linkable (or Occupied if blocked by own module)
+            socket.SetStatus(IsSocketBlockedByModule(i) ? SocketStatus.Occupied : SocketStatus.Linkable);
+            sockets[i] = socket;
+        }
+        
         SocketsChanged?.Invoke();
     }
 
 
-    /// Recompute every socket's status from current modules + connection state
+    /// <summary>
+    /// Recompute every socket's status from grid state.
+    /// This is the public API for triggering a full socket status refresh.
+    /// Queries the WorldGrid to determine each socket's actual status.
+    /// </summary>
     public void RefreshSocketStatuses()
     {
-        if (!SocketsBuilt) BuildSockets();
-
-        for (int i = 0; i < sockets.Count; i++)
-        {
-            var socket = sockets[i];
-
-            // Skip permanently locked/disabled sockets - they don't change
-            if (socket.Status == SocketStatus.Locked || socket.Status == SocketStatus.Disabled)
-                continue;
-
-            // Determine new status based on connection and module state
-            SocketStatus newStatus;
-            
-            if (_connectedSockets.Contains(i))
-            {
-                newStatus = SocketStatus.Connected;
-            }
-            else if (IsSocketBlockedByModule(i))
-            {
-                newStatus = SocketStatus.Occupied;
-            }
-            else
-            {
-                newStatus = SocketStatus.Linkable;
-            }
-
-            socket.SetStatus(newStatus);
-            sockets[i] = socket;
-            }
+        RefreshAllSocketStatuses();
     }
     
     
@@ -774,15 +828,12 @@ public class PlatformSocketSystem : MonoBehaviour
         
         // Find module in platform's cached list
         PlatformModule pm = null;
-        if (_platform)
+        foreach (var cachedModule in _platform.CachedModules)
         {
-            foreach (var cachedModule in _platform.CachedModules)
+            if (cachedModule && cachedModule.gameObject == moduleGo)
             {
-                if (cachedModule && cachedModule.gameObject == moduleGo)
-                {
-                    pm = cachedModule;
-                    break;
-                }
+                pm = cachedModule;
+                break;
             }
         }
         if (!pm) pm = moduleGo.GetComponent<PlatformModule>();
@@ -796,6 +847,17 @@ public class PlatformSocketSystem : MonoBehaviour
         {
             _socketToModules[sIdx] = moduleGo;
         }
+        
+        // If module blocks linking, mark the cells behind each socket with ModuleBlocked flag
+        // This allows neighboring platforms to know there's a blocking module facing them
+        if (blocks)
+        {
+            foreach (var sIdx in list)
+            {
+                Vector2Int cellBehindSocket = GetCellBehindSocket(sIdx);
+                _worldGrid.TrySetCellFlag(cellBehindSocket, WorldGrid.CellFlag.ModuleBlocked, enforcePriority: false);
+            }
+        }
     }
 
 
@@ -803,6 +865,16 @@ public class PlatformSocketSystem : MonoBehaviour
     {
         if (!moduleGo) return;
         if (!_moduleRegs.TryGetValue(moduleGo, out var reg)) return;
+
+        // Clear ModuleBlocked flag from cells if this module was blocking
+        if (reg.blocksLink && reg.socketIndices != null)
+        {
+            foreach (var sIdx in reg.socketIndices)
+            {
+                Vector2Int cellBehindSocket = GetCellBehindSocket(sIdx);
+                _worldGrid.TryClearCellFlags(cellBehindSocket, WorldGrid.CellFlag.ModuleBlocked);
+            }
+        }
 
         if (reg.socketIndices != null)
         {
@@ -820,15 +892,12 @@ public class PlatformSocketSystem : MonoBehaviour
         if (!moduleGo) return;
 
         PlatformModule pm = null;
-        if (_platform)
+        foreach (var cachedModule in _platform.CachedModules)
         {
-            foreach (var cachedModule in _platform.CachedModules)
+            if (cachedModule && cachedModule.gameObject == moduleGo)
             {
-                if (cachedModule && cachedModule.gameObject == moduleGo)
-                {
-                    pm = cachedModule;
-                    break;
-                }
+                pm = cachedModule;
+                break;
             }
         }
         if (!pm) pm = moduleGo.GetComponent<PlatformModule>();
@@ -845,15 +914,12 @@ public class PlatformSocketSystem : MonoBehaviour
         if (!moduleGo) return;
         
         PlatformModule pm = null;
-        if (_platform)
+        foreach (var cachedModule in _platform.CachedModules)
         {
-            foreach (var cachedModule in _platform.CachedModules)
+            if (cachedModule && cachedModule.gameObject == moduleGo)
             {
-                if (cachedModule && cachedModule.gameObject == moduleGo)
-                {
-                    pm = cachedModule;
-                    break;
-                }
+                pm = cachedModule;
+                break;
             }
         }
         
@@ -864,8 +930,6 @@ public class PlatformSocketSystem : MonoBehaviour
 
     public void EnsureChildrenModulesRegistered()
     {
-        if (!_platform) return;
-        
         foreach (var m in _platform.CachedModules)
         {
             if (m) m.EnsureRegistered();
