@@ -248,29 +248,200 @@ namespace Navigation
         #endregion
         
         
-        #region Public API - Link Management (Multi-Level)
+        #region Public API - Link Management
         
         /// <summary>
-        /// Creates NavMesh links for a platform to all its neighbors.
-        /// Only needed for multi-level connections (same-level handled by global bake).
+        /// Creates NavMesh links for a platform using the consolidated per-edge approach.
+        /// Creates ONE link per contiguous connected segment on each edge, regardless of which
+        /// neighbor(s) those sockets connect to. This prevents the "step back before crossing"
+        /// issue when adjacent sockets connect to different platforms.
         /// </summary>
         public void CreateLinksForPlatform(GamePlatform platform, PlatformManager platformManager)
         {
             if (!platform || !platformManager) return;
             
-            var neighbors = GetNeighborPlatforms(platform, platformManager);
+            // Clear existing links for this platform first
+            ClearAllLinksForPlatform(platform);
+            
+            // Get all connected sockets grouped by edge
+            var edgeSegments = GetConnectedSegmentsByEdge(platform);
             
             if (debugLogs)
-                Debug.Log($"[NavMeshManager] Creating links for {platform.name} to {neighbors.Count} neighbor(s)");
-            
-            foreach (var neighbor in neighbors)
             {
-                // Only create links if there's a height difference
-                float heightDiff = Mathf.Abs(platform.transform.position.y - neighbor.transform.position.y);
-                if (heightDiff > 0.1f)
+                int totalSegments = 0;
+                foreach (var edge in edgeSegments)
+                    totalSegments += edge.Value.Count;
+                Debug.Log($"[NavMeshManager] Creating links for {platform.name}: {totalSegments} segment(s) across {edgeSegments.Count} edge(s)");
+            }
+            
+            // Create one link per segment
+            foreach (var edgeKvp in edgeSegments)
+            {
+                foreach (var segment in edgeKvp.Value)
                 {
-                    CreateLinksBetweenPlatforms(platform, neighbor);
+                    CreateLinkForEdgeSegment(platform, segment, platformManager);
                 }
+            }
+        }
+        
+        /// <summary>
+        /// Gets all connected sockets grouped by edge, with contiguous sockets grouped into segments.
+        /// </summary>
+        private Dictionary<int, List<EdgeSegment>> GetConnectedSegmentsByEdge(GamePlatform platform)
+        {
+            var result = new Dictionary<int, List<EdgeSegment>>();
+            var sockets = platform.Sockets;
+            if (sockets == null || sockets.Count == 0) return result;
+            
+            var footprint = platform.Footprint;
+            int width = Mathf.Max(1, footprint.x);
+            int length = Mathf.Max(1, footprint.y);
+            int[] edgeBounds = { 0, width, width * 2, width * 2 + length, width * 2 + length * 2 };
+            
+            // Collect all connected socket indices per edge
+            var connectedByEdge = new Dictionary<int, List<int>>();
+            for (int i = 0; i < sockets.Count; i++)
+            {
+                if (!platform.IsSocketConnected(i)) continue;
+                
+                int edge = GetEdgeIndex(i, edgeBounds);
+                if (!connectedByEdge.ContainsKey(edge))
+                    connectedByEdge[edge] = new List<int>();
+                connectedByEdge[edge].Add(i);
+            }
+            
+            // Group contiguous sockets on each edge into segments
+            foreach (var kvp in connectedByEdge)
+            {
+                int edge = kvp.Key;
+                var socketIndices = kvp.Value;
+                socketIndices.Sort();
+                
+                var segments = new List<EdgeSegment>();
+                var currentSegment = new List<int> { socketIndices[0] };
+                
+                for (int i = 1; i < socketIndices.Count; i++)
+                {
+                    // Check if this socket is adjacent to the previous one
+                    if (socketIndices[i] - socketIndices[i - 1] == 1)
+                    {
+                        currentSegment.Add(socketIndices[i]);
+                    }
+                    else
+                    {
+                        // Start a new segment
+                        segments.Add(CreateEdgeSegment(platform, currentSegment, edge));
+                        currentSegment = new List<int> { socketIndices[i] };
+                    }
+                }
+                
+                // Add the last segment
+                segments.Add(CreateEdgeSegment(platform, currentSegment, edge));
+                result[edge] = segments;
+            }
+            
+            return result;
+        }
+        
+        private struct EdgeSegment
+        {
+            public List<int> SocketIndices;
+            public int EdgeIndex;
+            public Vector3 CenterPosition;
+            public Vector3 OutwardDirection;
+        }
+        
+        private EdgeSegment CreateEdgeSegment(GamePlatform platform, List<int> socketIndices, int edgeIndex)
+        {
+            Vector3 center = Vector3.zero;
+            Vector3 outward = Vector3.zero;
+            
+            foreach (int idx in socketIndices)
+            {
+                center += platform.GetSocketWorldPosition(idx);
+                
+                var socket = platform.GetSocket(idx);
+                Vector3 localOutward = new Vector3(socket.OutwardOffset.x, 0, socket.OutwardOffset.y);
+                outward += platform.transform.TransformDirection(localOutward);
+            }
+            
+            center /= socketIndices.Count;
+            outward = outward.normalized;
+            
+            return new EdgeSegment
+            {
+                SocketIndices = socketIndices,
+                EdgeIndex = edgeIndex,
+                CenterPosition = center,
+                OutwardDirection = outward
+            };
+        }
+        
+        /// <summary>
+        /// Creates a single NavMesh link for an edge segment.
+        /// The link spans the entire segment width, regardless of how many different neighbors connect.
+        /// </summary>
+        private void CreateLinkForEdgeSegment(GamePlatform platform, EdgeSegment segment, PlatformManager platformManager)
+        {
+            EnsureLinksContainer();
+            
+            // Get the outward direction and calculate link endpoints
+            Vector3 linkDirection = SnapToCardinal(segment.OutwardDirection);
+            float platformY = platform.transform.position.y;
+            
+            // Link start is inside the platform, end is outside (at the boundary)
+            Vector3 startPoint = segment.CenterPosition - linkDirection * linkDepth;
+            Vector3 endPoint = segment.CenterPosition + linkDirection * linkDepth;
+            
+            startPoint.y = platformY + heightOffset;
+            endPoint.y = platformY + heightOffset;
+            
+            // Align perpendicular coordinate
+            if (Mathf.Abs(linkDirection.x) > Mathf.Abs(linkDirection.z))
+            {
+                startPoint.z = segment.CenterPosition.z;
+                endPoint.z = segment.CenterPosition.z;
+            }
+            else
+            {
+                startPoint.x = segment.CenterPosition.x;
+                endPoint.x = segment.CenterPosition.x;
+            }
+            
+            // Calculate link width based on number of sockets
+            float linkWidth = segment.SocketIndices.Count * widthPerSocket;
+            
+            // Create the link GameObject
+            string edgeName = segment.EdgeIndex switch { 0 => "N", 1 => "S", 2 => "E", _ => "W" };
+            string linkName = $"Link_{platform.name}_{edgeName}_{segment.SocketIndices[0]}-{segment.SocketIndices[^1]}";
+            
+            var go = new GameObject(linkName);
+            go.transform.SetParent(_linksContainer, false);
+            
+            var link = go.AddComponent<NavMeshLink>();
+            link.startPoint = startPoint;
+            link.endPoint = endPoint;
+            link.width = linkWidth;
+            link.bidirectional = true;
+            link.area = 0; // Walkable
+            
+            // Track link by platform (using platform's own ID as both keys since it's per-edge, not per-pair)
+            var key = (platform.GetInstanceID(), platform.GetInstanceID());
+            if (!_linksByPlatformPair.ContainsKey(key))
+                _linksByPlatformPair[key] = new List<GameObject>();
+            _linksByPlatformPair[key].Add(go);
+            
+            if (debugLogs)
+            {
+                Debug.Log($"[NavMeshManager] Created link: {linkName}\n" +
+                          $"  Start: {startPoint}, End: {endPoint}, Width: {linkWidth}m, Sockets: {segment.SocketIndices.Count}");
+            }
+            
+            if (drawDebugGizmos)
+            {
+                Debug.DrawLine(startPoint, endPoint, Color.green, debugDrawDuration);
+                Debug.DrawRay(startPoint, Vector3.up * 0.3f, Color.cyan, debugDrawDuration);
+                Debug.DrawRay(endPoint, Vector3.up * 0.3f, Color.magenta, debugDrawDuration);
             }
         }
         
