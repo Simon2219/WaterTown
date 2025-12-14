@@ -664,8 +664,8 @@ public class PlatformSocketSystem : MonoBehaviour
         
         Vector2Int adjacentCell = GetAdjacentCellForSocket(socketIndex);
         
-        // Check if adjacent cell is occupied by a platform
-        if (!_worldGrid.CellHasAnyFlag(adjacentCell, WorldGrid.CellFlag.Occupied))
+        // Check if adjacent cell is occupied by a platform (including preview/moving platforms)
+        if (!_worldGrid.CellHasAnyFlag(adjacentCell, WorldGrid.CellFlag.Occupied | WorldGrid.CellFlag.OccupyPreview))
             return SocketStatus.Linkable;
         
         // Verify it's actually a neighbor platform (not self or non-platform)
