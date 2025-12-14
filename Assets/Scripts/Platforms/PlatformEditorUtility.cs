@@ -136,7 +136,7 @@ namespace Platforms
 
             if (!_socketSystem) return;
             
-            var sockets = _socketSystem.Sockets;
+            var sockets = _socketSystem.PlatformSockets;
             if (sockets is not { Count: > 0 }) return;
 
             int footprintWidth = Mathf.Max(1, footprintSize.x);

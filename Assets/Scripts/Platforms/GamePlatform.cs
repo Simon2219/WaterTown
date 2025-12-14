@@ -325,7 +325,7 @@ namespace Platforms
             _socketSystem?.BuildSockets();
             _socketSystem?.EnsureChildrenModulesRegistered();
             _railingSystem?.EnsureChildrenRailingsRegistered();
-            _socketSystem?.RefreshSocketStatuses();
+            _socketSystem?.RefreshAllSocketStatuses();
         }
         
         
@@ -410,7 +410,7 @@ namespace Platforms
         public enum SocketLocation { Edge = 0, Corner = 1 }
         
         /// Access to socket system (read-only list)
-        public IReadOnlyList<PlatformSocketSystem.SocketData> Sockets => _socketSystem?.Sockets;
+        public IReadOnlyList<PlatformSocketSystem.SocketData> Sockets => _socketSystem?.PlatformSockets;
         
         public int SocketCount => _socketSystem?.SocketCount ?? 0;
         
@@ -482,7 +482,7 @@ namespace Platforms
 
 
         public void RefreshSocketStatuses() 
-            => _socketSystem?.RefreshSocketStatuses();
+            => _socketSystem?.RefreshAllSocketStatuses();
 
 
         public void BuildSockets() 
