@@ -143,6 +143,36 @@ namespace Editor
         }
         
         
+        /// <summary>
+        /// Ensures all child railings are registered with a platform in editor mode.
+        /// </summary>
+        public static void EnsureChildrenRailingsRegistered(GamePlatform platform)
+        {
+            if (!platform) return;
+            
+            var railings = platform.GetComponentsInChildren<PlatformRailing>(true);
+            foreach (var r in railings)
+            {
+                if (r) r.EnsureRegistered();
+            }
+        }
+        
+        
+        /// <summary>
+        /// Ensures all child modules are registered with a platform in editor mode.
+        /// </summary>
+        public static void EnsureChildrenModulesRegistered(GamePlatform platform)
+        {
+            if (!platform) return;
+            
+            var modules = platform.GetComponentsInChildren<PlatformModule>(true);
+            foreach (var m in modules)
+            {
+                if (m) m.EnsureRegistered();
+            }
+        }
+        
+        
         #endregion
     }
 }

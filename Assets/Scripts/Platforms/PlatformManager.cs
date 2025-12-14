@@ -259,14 +259,8 @@ public class PlatformManager : MonoBehaviour
         MarkAdjacencyDirtyForPlatform(platform);
 
         // Force immediate adjacency computation so connections are known
+        // This also recreates NavMesh links for all affected platforms
         RecomputeAdjacencyForAffectedPlatforms();
-
-        // Create NavMesh links for this platform to all its neighbors
-        var navMeshManager = Navigation.NavMeshManager.Instance;
-        if (navMeshManager)
-        {
-            navMeshManager.CreateLinksForPlatform(platform, this);
-        }
 
         // Rebuild NavMesh for this platform and all affected neighbors
         RebuildNavMeshForPlatformAndNeighbors(platform);
@@ -646,11 +640,24 @@ public class PlatformManager : MonoBehaviour
         if (_isRecomputingAdjacency) return;
         _isRecomputingAdjacency = true;
 
-        // Update only the affected platforms
+        // Update socket statuses for all affected platforms
         foreach (var platform in _platformsNeedingAdjacencyUpdate)
         {
             if (!platform || !platform.isActiveAndEnabled) continue;
             platform.RefreshSocketStatuses();
+        }
+        
+        // Recreate NavMesh links for affected platforms (only placed platforms, not picked-up ones)
+        var navMeshManager = Navigation.NavMeshManager.Instance;
+        if (navMeshManager)
+        {
+            foreach (var platform in _platformsNeedingAdjacencyUpdate)
+            {
+                if (!platform || !platform.isActiveAndEnabled) continue;
+                if (platform.IsPickedUp) continue;
+                
+                navMeshManager.CreateLinksForPlatform(platform, this);
+            }
         }
 
         // Clear the set after processing
