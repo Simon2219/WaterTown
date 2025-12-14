@@ -776,15 +776,11 @@ public class PlatformSocketSystem : MonoBehaviour
         var reg = new ModuleReg { go = moduleGo, socketIndices = list.ToArray(), blocksLink = blocks };
         _moduleRegs[moduleGo] = reg;
 
-        /*foreach (var sIdx in list)
+        // Map each socket to this module (1:1 relationship - one module max per socket)
+        foreach (var sIdx in list)
         {
-            if (!_socketToModules.TryGetValue(sIdx, out var module))
-            {
-                module = new GameObject();
-                _socketToModules[sIdx] = module;
-            }
-            if (!l.Contains(moduleGo)) l.Add(moduleGo);
-        }*/
+            _socketToModules[sIdx] = moduleGo;
+        }
     }
 
 
@@ -797,7 +793,7 @@ public class PlatformSocketSystem : MonoBehaviour
         {
             foreach (var sIdx in reg.socketIndices)
             {
-                _socketToModules.Remove(sIdx, out var module);
+                _socketToModules.Remove(sIdx);
             }
         }
         _moduleRegs.Remove(moduleGo);

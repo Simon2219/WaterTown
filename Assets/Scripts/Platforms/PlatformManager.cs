@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using System.Linq;
+uusing System.Linq;
 using Grid;
 using UnityEngine;
 using UnityEngine.Events;
@@ -727,7 +727,3 @@ public class PlatformManager : MonoBehaviour
 
     #endregion
 }
-}
-
-
-
