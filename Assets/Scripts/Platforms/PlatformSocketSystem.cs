@@ -228,12 +228,41 @@ public class PlatformSocketSystem : MonoBehaviour
     #region Socket Building
     
     
+    /// <summary>
+    /// Gets the platform footprint safely, with fallback for editor mode
+    /// where dependencies may not be injected yet.
+    /// </summary>
+    private bool TryGetFootprint(out Vector2Int footprintSize)
+    {
+        if (_platform)
+        {
+            footprintSize = _platform.Footprint;
+            return true;
+        }
+        
+        // Fallback for editor mode: get GamePlatform from same GameObject
+        var gp = GetComponent<GamePlatform>();
+        if (gp)
+        {
+            footprintSize = gp.Footprint;
+            return true;
+        }
+        
+        footprintSize = Vector2Int.one;
+        return false;
+    }
+    
+    
     /// Build sockets along the perimeter of the footprint, in local space
     /// One socket per cell edge segment
     /// Order: +Z edge, -Z edge, +X edge, -X edge (for compat with Edge API)
     public void BuildSockets()
     {
-        var footprintSize = _platform.Footprint;
+        if (!TryGetFootprint(out var footprintSize))
+        {
+            Debug.LogWarning($"[PlatformSocketSystem] Cannot build sockets: no GamePlatform found on {name}");
+            return;
+        }
         
         // Preserve existing socket statuses when rebuilding
         var previousStatuses = new Dictionary<Vector3, SocketStatus>();
@@ -391,7 +420,7 @@ public class PlatformSocketSystem : MonoBehaviour
     /// Length in whole meters along the given edge (number of segments)
     public int EdgeLengthMeters(Edge edge)
     {
-        var footprintSize = _platform.Footprint;
+        if (!TryGetFootprint(out var footprintSize)) return 1;
         return (edge == Edge.North || edge == Edge.South) ? footprintSize.x : footprintSize.y;
     }
 
@@ -401,7 +430,12 @@ public class PlatformSocketSystem : MonoBehaviour
     {
         if (!SocketsBuilt) BuildSockets();
 
-        var footprintSize = _platform.Footprint;
+        if (!TryGetFootprint(out var footprintSize))
+        {
+            startIndex = 0;
+            endIndex = 0;
+            return;
+        }
         int footprintWidth = Mathf.Max(1, footprintSize.x);
         int footprintLength = Mathf.Max(1, footprintSize.y);
 
@@ -433,7 +467,7 @@ public class PlatformSocketSystem : MonoBehaviour
     {
         if (!SocketsBuilt) BuildSockets();
 
-        var footprintSize = _platform.Footprint;
+        if (!TryGetFootprint(out var footprintSize)) return 0;
         int width = Mathf.Max(1, footprintSize.x);
         int length = Mathf.Max(1, footprintSize.y);
 
