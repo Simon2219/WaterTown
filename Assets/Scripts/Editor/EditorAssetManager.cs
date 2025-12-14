@@ -1,11 +1,8 @@
 #if UNITY_EDITOR
 using System.Collections.Generic;
-using System.IO;
-using Unity.AI.Navigation;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
-using UnityEngine.AI;
 using Platforms;
 
 namespace Editor
@@ -182,7 +179,7 @@ namespace Editor
                                 // (WorldGrid, PlatformManager) that don't exist in editor prefab mode.
                                 // Socket statuses will be calculated at runtime when the platform is placed.
 
-                                // Generate NavMesh floor geometry (before NavMeshSurface setup)
+                                // Generate NavMesh floor geometry (used by global NavMeshManager at runtime)
                                 if (_generateNavMeshFloor)
                                 {
                                     GenerateNavMeshFloorGeometry(root, _wCells, _lCells, 
@@ -190,12 +187,12 @@ namespace Editor
                                         _navMeshFloorThickness, _navMeshFloorYOffset);
                                 }
 
-                                EnsureNavMeshSurface(root, _generateNavMeshFloor);
-
                                 SpawnRailingsAndRegister(root, gp, _wCells, _lCells, _railY, _inset,
                                     _postPrefab, _railPrefab, _railForwardAxis);
-
-                                BuildAndSaveNavMeshForPrefab(gp, root);
+                                
+                                // Note: NavMesh is now baked globally by NavMeshManager at runtime,
+                                // not per-platform. The floor geometry on NavMeshGeometry layer is
+                                // what gets baked.
 
                                 EditorSceneManager.MarkSceneDirty(root.gameObject.scene);
                                 EditorGUIUtility.PingObject(root);
@@ -213,10 +210,8 @@ namespace Editor
                                 "This will:\n" +
                                 "• Ensure the prefab has a GamePlatform component\n" +
                                 "• Build perimeter sockets\n" +
-                                "• Generate NavMesh floor geometry (extends past edge for proper NavMesh coverage)\n" +
-                                "• Ensure a NavMeshSurface on the prefab root\n" +
-                                "• Spawn posts & rails and bind them to socket indices\n" +
-                                "• Build and save a per-platform NavMeshData asset",
+                                "• Generate NavMesh floor geometry (used by global NavMeshManager at runtime)\n" +
+                                "• Spawn posts & rails and bind them to socket indices",
                                 MessageType.Warning);
                         }
                     }
@@ -283,47 +278,32 @@ namespace Editor
                     EditorGUI.indentLevel--;
                 }
 
-                // -------- Submenu: Nav Mesh --------
-                _foldNavMesh = EditorGUILayout.Foldout(_foldNavMesh, "Nav Mesh", true);
+                // -------- Submenu: Nav Mesh Info --------
+                _foldNavMesh = EditorGUILayout.Foldout(_foldNavMesh, "Nav Mesh Info", true);
                 if (_foldNavMesh)
                 {
                     EditorGUI.indentLevel++;
-                    H("Nav Mesh");
+                    H("Nav Mesh Info");
 
                     using (new EditorGUILayout.VerticalScope("box"))
                     {
                         var (prefabMode, transform) = GetActivePrefabRoot();
-                        GamePlatform gp = null;
-                        if (prefabMode && transform) gp = transform.GetComponent<GamePlatform>();
                         
                         // Check if this platform has NavMesh floor geometry
                         bool hasNavMeshFloor = transform && transform.Find(NavMeshGeometryChildName);
                         
-                        if (prefabMode && gp)
+                        if (prefabMode && transform)
                         {
-                            EditorGUILayout.LabelField("NavMesh Floor:", hasNavMeshFloor ? "Present" : "Not found");
-                        }
-
-                        using (new EditorGUI.DisabledScope(!(prefabMode && gp)))
-                        {
-                            if (GUILayout.Button("Rebuild NavMesh (Active Prefab)"))
-                            {
-                                Undo.RegisterFullObjectHierarchyUndo(transform.gameObject, "Rebuild NavMesh (Prefab)");
-                                EnsureNavMeshSurface(transform, hasNavMeshFloor);
-                                BuildAndSaveNavMeshForPrefab(gp, transform);
-                                EditorSceneManager.MarkSceneDirty(transform.gameObject.scene);
-                            }
-                        }
-
-                        if (GUILayout.Button("Rebuild NavMesh for ALL GamePlatforms in Open Scenes"))
-                        {
-                            RebuildAllPlatformsInOpenScenes();
+                            EditorGUILayout.LabelField("NavMesh Floor Geometry:", hasNavMeshFloor ? "Present" : "Not found");
                         }
 
                         EditorGUILayout.HelpBox(
-                            "Use the first button while editing a prefab.\n" +
-                            "Use the second to batch-rebuild every GamePlatform in all open scenes.\n\n" +
-                            "Note: If NavMesh Floor geometry exists, NavMesh will be built from that layer only.",
+                            "NavMesh is now baked globally by NavMeshManager at runtime.\n\n" +
+                            "Each platform contributes a floor collider on the '" + NavMeshGeometryLayerName + "' layer.\n" +
+                            "Adjacent platforms' NavMesh automatically connects - no links needed!\n\n" +
+                            "To test in editor:\n" +
+                            "1. Ensure NavMeshManager exists in scene with NavMeshSurface\n" +
+                            "2. Run the game or use NavMeshManager's context menu to rebuild",
                             MessageType.Info);
                     }
 
@@ -602,77 +582,6 @@ namespace Editor
                       $"{floorWidth:F2}x{floorLength:F2}m (platform: {widthCells}x{lengthCells}m, extension: {totalExtension:F2}m per side)");
         }
 
-        private static void EnsureNavMeshSurface(Transform root, bool useNavMeshFloorLayer = false)
-        {
-            if (!root) return;
-
-            var surface = root.GetComponent<NavMeshSurface>();
-            if (!surface)
-            {
-                surface = Undo.AddComponent<NavMeshSurface>(root.gameObject);
-            }
-
-            surface.collectObjects = CollectObjects.Children;
-            surface.useGeometry = NavMeshCollectGeometry.PhysicsColliders;
-            
-            // Configure layer mask based on whether we're using NavMesh floor geometry
-            if (useNavMeshFloorLayer)
-            {
-                int navMeshLayer = LayerMask.NameToLayer(NavMeshGeometryLayerName);
-                if (navMeshLayer != -1)
-                {
-                    // Only collect from NavMeshGeometry layer
-                    surface.layerMask = 1 << navMeshLayer;
-                    Debug.Log($"[EditorAssetManager] NavMeshSurface configured to use '{NavMeshGeometryLayerName}' layer only.");
-                }
-                else
-                {
-                    Debug.LogWarning($"[EditorAssetManager] Layer '{NavMeshGeometryLayerName}' not found. Using default layer mask.");
-                }
-            }
-            // else: keep existing/default layer mask
-            
-            // Agent Type can be configured in the NavMeshSurface Inspector
-            // Must match the agent type used by your NPCs
-        }
-
-        private static void BuildAndSaveNavMeshForPrefab(GamePlatform gp, Transform root)
-        {
-            if (!gp || !root) return;
-
-            var surface = gp.GetComponent<NavMeshSurface>();
-            if (!surface)
-            {
-                surface = Undo.AddComponent<NavMeshSurface>(root.gameObject);
-                surface.collectObjects = CollectObjects.Children;
-            }
-
-            surface.BuildNavMesh();
-
-            var data = surface.navMeshData;
-            if (data == null) return;
-
-            string existingPath = AssetDatabase.GetAssetPath(data);
-            if (!string.IsNullOrEmpty(existingPath))
-            {
-                Debug.Log($"[EditorAssetManager] Rebuilt existing NavMeshData at {existingPath}", surface);
-                return;
-            }
-
-            string prefabPath = AssetDatabase.GetAssetPath(root.gameObject);
-            string folder = string.IsNullOrEmpty(prefabPath)
-                ? "Assets"
-                : Path.GetDirectoryName(prefabPath);
-
-            string fileName = $"{root.name}_NavMesh.asset";
-            string targetPath = AssetDatabase.GenerateUniqueAssetPath(Path.Combine(folder, fileName));
-
-            AssetDatabase.CreateAsset(data, targetPath);
-            AssetDatabase.SaveAssets();
-            EditorUtility.SetDirty(surface);
-            Debug.Log($"[EditorAssetManager] Saved NavMeshData asset: {targetPath}", surface);
-        }
-
         // -------- Utilities --------
         private static (bool inPrefabMode, Transform root) GetActivePrefabRoot()
         {
@@ -702,45 +611,6 @@ namespace Editor
         {
             for (int i = t.childCount - 1; i >= 0; i--)
                 Undo.DestroyObjectImmediate(t.GetChild(i).gameObject);
-        }
-
-        private void RebuildAllPlatformsInOpenScenes()
-        {
-            int total = 0;
-            int withNavMeshFloor = 0;
-            
-            for (int i = 0; i < EditorSceneManager.sceneCount; i++)
-            {
-                var scene = EditorSceneManager.GetSceneAt(i);
-                if (!scene.isLoaded) continue;
-
-                foreach (var root in scene.GetRootGameObjects())
-                {
-                    var platforms = root.GetComponentsInChildren<GamePlatform>(true);
-                    foreach (var p in platforms)
-                    {
-                        var surface = p.GetComponent<NavMeshSurface>();
-                        if (!surface) continue;
-                        
-                        Undo.RegisterFullObjectHierarchyUndo(p.gameObject, "Rebuild All NavMeshes");
-                        
-                        // Check if this platform has NavMesh floor geometry
-                        bool hasNavMeshFloor = p.transform.Find(NavMeshGeometryChildName);
-                        if (hasNavMeshFloor)
-                        {
-                            withNavMeshFloor++;
-                            // Ensure surface is configured to use NavMesh floor layer
-                            EnsureNavMeshSurface(p.transform, useNavMeshFloorLayer: true);
-                        }
-                        
-                        surface.BuildNavMesh();
-                        total++;
-                    }
-                }
-
-                EditorSceneManager.MarkSceneDirty(scene);
-            }
-            Debug.Log($"[EditorAssetManager] Rebuilt NavMesh on {total} GamePlatform(s) across open scenes ({withNavMeshFloor} with NavMesh floor geometry).");
         }
     }
 }

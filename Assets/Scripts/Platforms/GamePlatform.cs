@@ -1,7 +1,5 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
-using Unity.AI.Navigation;
 using UnityEngine;
 using Grid;
 using Interfaces;
@@ -9,12 +7,14 @@ using Interfaces;
 namespace Platforms
 {
     /// <summary>
-    /// Core platform component - manages identity, lifecycle, footprint, NavMesh, and coordinates sub-systems
+    /// Core platform component - manages identity, lifecycle, footprint, and coordinates sub-systems
     /// Sub-components handle specific responsibilities: Sockets, Railings, Pickup, Editor utilities
     /// External systems should call facade methods on GamePlatform rather than accessing sub-components directly
+    /// 
+    /// Note: NavMesh is handled globally by NavMeshManager, not per-platform.
+    /// Each platform contributes a floor collider on the NavMeshGeometry layer.
     /// </summary>
     [DisallowMultipleComponent]
-    [RequireComponent(typeof(NavMeshSurface))]
     [RequireComponent(typeof(PlatformSocketSystem))]
     [RequireComponent(typeof(PlatformRailingSystem))]
     [RequireComponent(typeof(PickupHandler))]
@@ -110,24 +110,9 @@ namespace Platforms
         
         
         [Header("NavMesh Rebuild")]
-        [SerializeField]
-        [Tooltip("Delay before rebuilding this platform's NavMesh after changes.")]
-        private float rebuildDebounceSeconds = 0.1f;
-
-        
-        // Cached transform for "Links" GameObject
-        private Transform _linksParentTransform;
-        public Transform LinksParentTransform => _linksParentTransform;
-        
-        private NavMeshSurface _navSurface;
-        public NavMeshSurface NavSurface => _navSurface;
-        
-        
         private Vector3 _lastPos;
         private Quaternion _lastRot;
         private Vector3 _lastScale;
-
-        private Coroutine _pendingRebuild;
         
         
         #endregion
@@ -208,9 +193,6 @@ namespace Platforms
         
         private void Awake()
         {
-            if(!TryGetComponent(out _navSurface))
-                throw ErrorHandler.MissingDependency($"[GamePlatform] NavMesh Surface '{nameof(NavMeshSurface)}' not found.", this);
-            
             if(!TryGetComponent(out _socketSystem))
                 throw ErrorHandler.MissingDependency($"[GamePlatform] Socket System '{nameof(PlatformSocketSystem)}' not found.", this);
 
@@ -526,39 +508,6 @@ namespace Platforms
 
         public void EnsureChildrenRailingsRegistered() 
             => _railingSystem?.EnsureChildrenRailingsRegistered();
-        
-        
-        #endregion
-        
-        
-        
-        #region NavMesh Interface Methods
-        
-        
-        public void BuildLocalNavMesh()
-        {
-            if (NavSurface) NavSurface.BuildNavMesh();
-        }
-
-
-        public void QueueRebuild()
-        {
-            if (!NavSurface) return;
-            if (!gameObject.activeInHierarchy) return;
-            
-            if (_pendingRebuild != null)
-                StopCoroutine(_pendingRebuild);
-            _pendingRebuild = StartCoroutine(RebuildAfterDelay(rebuildDebounceSeconds));
-        }
-
-
-        private IEnumerator RebuildAfterDelay(float delay)
-        {
-            yield return new WaitForSeconds(delay);
-            if (NavSurface)
-                NavSurface.BuildNavMesh();
-            _pendingRebuild = null;
-        }
         
         
         #endregion

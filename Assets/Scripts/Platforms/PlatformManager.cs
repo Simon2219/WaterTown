@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Grid;
+using Navigation;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.Serialization;
@@ -261,15 +262,8 @@ public class PlatformManager : MonoBehaviour
         // Force immediate adjacency computation so connections are known
         RecomputeAdjacencyForAffectedPlatforms();
 
-        // Create NavMesh links for this platform to all its neighbors
-        var linkManager = NavMeshLinkManager.Instance;
-        if (linkManager)
-        {
-            linkManager.CreateLinksForPlacedPlatform(platform, this);
-        }
-
-        // Rebuild NavMesh for this platform and all affected neighbors
-        RebuildNavMeshForPlatformAndNeighbors(platform);
+        // Rebuild global NavMesh (all platforms baked together, no links needed)
+        NavMeshManager.Instance?.RebuildNavMesh();
     }
 
 
@@ -281,8 +275,7 @@ public class PlatformManager : MonoBehaviour
     {
         if (!platform) return;
 
-        // Clear all NavMesh links for this platform
-        NavMeshLinkManager.Instance?.ClearAllLinksForPlatform(platform);
+        // Note: No NavMesh rebuild during pickup - agent uses existing NavMesh while platform is moving
 
         // Store current cells as previous BEFORE clearing (needed for GetAffectedPlatforms)
         platform.previousOccupiedCells.Clear();
@@ -517,14 +510,14 @@ public class PlatformManager : MonoBehaviour
         if (platform.gameObject.activeInHierarchy)
             platform.ResetConnections();
 
-        // Clear all NavMesh links involving this platform
-        NavMeshLinkManager.Instance?.ClearAllLinksForPlatform(platform);
-
         // Invoke UnityEvent for platform removed
         PlatformRemoved?.Invoke(platform);
 
         // Mark affected platforms (neighbors) for adjacency update
         MarkAdjacencyDirtyForPlatform(platform);
+        
+        // Rebuild global NavMesh (platform removed)
+        NavMeshManager.Instance?.RebuildNavMesh();
     }
 
     #endregion
@@ -572,24 +565,6 @@ public class PlatformManager : MonoBehaviour
         }
 
         return affected;
-    }
-
-
-    ///
-    /// Rebuilds NavMesh for a platform and all its neighbors
-    /// Called only when platform is successfully placed (not while moving)
-    ///
-    private void RebuildNavMeshForPlatformAndNeighbors(GamePlatform platform)
-    {
-        if (!platform) return;
-
-        var affectedPlatforms = GetAffectedPlatforms(platform);
-
-        foreach (var p in affectedPlatforms)
-        {
-            if (p && !p.IsPickedUp)
-                p.QueueRebuild();
-        }
     }
 
 
