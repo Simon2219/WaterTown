@@ -151,9 +151,11 @@ namespace Platforms
 
         public void EnsureChildrenRailingsRegistered()
         {
-            if (!_platform) return;
+            // Get platform via fallback if needed (for editor mode)
+            var platform = _platform ? _platform : GetComponent<GamePlatform>();
+            if (!platform) return;
             
-            foreach (var r in _platform.CachedRailings)
+            foreach (var r in platform.CachedRailings)
             {
                 if (r) r.EnsureRegistered();
             }

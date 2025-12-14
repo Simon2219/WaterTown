@@ -177,8 +177,8 @@ namespace Editor
                                 so.FindProperty("footprintSize").vector2IntValue = new Vector2Int(_wCells, _lCells);
                                 so.ApplyModifiedProperties();
 
-                                gp.BuildSockets();
-                                gp.RefreshSocketStatuses();
+                                EditorPlatformTools.BuildSockets(gp);
+                                EditorPlatformTools.RefreshSocketStatuses(gp);
 
                                 // Generate NavMesh floor geometry (before NavMeshSurface setup)
                                 if (_generateNavMeshFloor)
@@ -352,8 +352,8 @@ namespace Editor
             float hx = wCells * 0.5f;
             float hz = lCells * 0.5f;
 
-            gp.BuildSockets();
-            gp.RefreshSocketStatuses();
+            EditorPlatformTools.BuildSockets(gp);
+            EditorPlatformTools.RefreshSocketStatuses(gp);
 
             // Determine prefab forward axis (local length axis of the rail)
             Vector3 localForward = railForwardAxis switch
@@ -414,7 +414,13 @@ namespace Editor
             }
 
             // ---- RAILS: one per socket ----
-            var sockets = gp.Sockets;
+            var sockets = EditorPlatformTools.GetSockets(gp);
+            if (sockets == null || sockets.Count == 0)
+            {
+                Debug.LogError($"[EditorAssetManager] No sockets found on platform '{gp.name}'. Make sure BuildSockets was called.");
+                return;
+            }
+            
             for (int sIdx = 0; sIdx < sockets.Count; sIdx++)
             {
                 var s = sockets[sIdx];
@@ -432,7 +438,7 @@ namespace Editor
 
                 // Only register as module if the prefab has a PlatformModule component
                 var pm = go.GetComponent<PlatformModule>();
-                if (pm) gp.RegisterModuleOnSockets(pm, occupiesSockets: true, new[] { sIdx });
+                if (pm) EditorPlatformTools.RegisterModuleOnSockets(gp, pm, occupiesSockets: true, new[] { sIdx });
 
                 CreateRailingComponent(go, gp, PlatformRailing.RailingType.Rail, new[] { sIdx });
             }
@@ -463,7 +469,7 @@ namespace Editor
 
                 // Bind to up to 2 nearest sockets
                 tmpSockets.Clear();
-                gp.FindNearestSocketIndicesLocal(t.localPosition, maxCount: 2, maxDistance: 1.5f, result: tmpSockets);
+                EditorPlatformTools.FindNearestSocketIndicesLocal(gp, t.localPosition, maxCount: 2, maxDistance: 1.5f, result: tmpSockets);
                 CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, tmpSockets.ToArray());
             }
 
@@ -488,7 +494,7 @@ namespace Editor
                 t.localPosition = new Vector3(x, yLocal, z);
 
                 tmpSockets.Clear();
-                gp.FindNearestSocketIndicesLocal(t.localPosition, maxCount: 2, maxDistance: 1.5f, result: tmpSockets);
+                EditorPlatformTools.FindNearestSocketIndicesLocal(gp, t.localPosition, maxCount: 2, maxDistance: 1.5f, result: tmpSockets);
                 CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, tmpSockets.ToArray());
             }
 
@@ -508,7 +514,7 @@ namespace Editor
                 t.localPosition = new Vector3(x, yLocal, z);
 
                 tmpSockets.Clear();
-                gp.FindNearestSocketIndicesLocal(t.localPosition, maxCount: 2, maxDistance: 1.5f, result: tmpSockets);
+                EditorPlatformTools.FindNearestSocketIndicesLocal(gp, t.localPosition, maxCount: 2, maxDistance: 1.5f, result: tmpSockets);
                 CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, tmpSockets.ToArray());
             }
 
@@ -528,7 +534,7 @@ namespace Editor
                 t.localPosition = new Vector3(x, yLocal, z);
 
                 tmpSockets.Clear();
-                gp.FindNearestSocketIndicesLocal(t.localPosition, maxCount: 2, maxDistance: 1.5f, result: tmpSockets);
+                EditorPlatformTools.FindNearestSocketIndicesLocal(gp, t.localPosition, maxCount: 2, maxDistance: 1.5f, result: tmpSockets);
                 CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, tmpSockets.ToArray());
             }
 

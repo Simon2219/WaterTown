@@ -229,27 +229,17 @@ public class PlatformSocketSystem : MonoBehaviour
     
     
     /// <summary>
-    /// Gets the platform footprint safely, with fallback for editor mode
-    /// where dependencies may not be injected yet.
+    /// Gets the footprint from the GamePlatform component.
+    /// Works in both runtime (via _platform) and editor (via GetComponent).
     /// </summary>
-    private bool TryGetFootprint(out Vector2Int footprintSize)
+    private Vector2Int GetFootprint()
     {
-        if (_platform)
-        {
-            footprintSize = _platform.Footprint;
-            return true;
-        }
+        // Use injected dependency if available (runtime)
+        if (_platform) return _platform.Footprint;
         
-        // Fallback for editor mode: get GamePlatform from same GameObject
+        // Fallback to GetComponent (editor mode, or if called before SetDependencies)
         var gp = GetComponent<GamePlatform>();
-        if (gp)
-        {
-            footprintSize = gp.Footprint;
-            return true;
-        }
-        
-        footprintSize = Vector2Int.one;
-        return false;
+        return gp ? gp.Footprint : Vector2Int.one;
     }
     
     
@@ -258,11 +248,7 @@ public class PlatformSocketSystem : MonoBehaviour
     /// Order: +Z edge, -Z edge, +X edge, -X edge (for compat with Edge API)
     public void BuildSockets()
     {
-        if (!TryGetFootprint(out var footprintSize))
-        {
-            Debug.LogWarning($"[PlatformSocketSystem] Cannot build sockets: no GamePlatform found on {name}");
-            return;
-        }
+        var footprintSize = GetFootprint();
         
         // Preserve existing socket statuses when rebuilding
         var previousStatuses = new Dictionary<Vector3, SocketStatus>();
@@ -420,7 +406,7 @@ public class PlatformSocketSystem : MonoBehaviour
     /// Length in whole meters along the given edge (number of segments)
     public int EdgeLengthMeters(Edge edge)
     {
-        if (!TryGetFootprint(out var footprintSize)) return 1;
+        var footprintSize = GetFootprint();
         return (edge == Edge.North || edge == Edge.South) ? footprintSize.x : footprintSize.y;
     }
 
@@ -430,12 +416,7 @@ public class PlatformSocketSystem : MonoBehaviour
     {
         if (!SocketsBuilt) BuildSockets();
 
-        if (!TryGetFootprint(out var footprintSize))
-        {
-            startIndex = 0;
-            endIndex = 0;
-            return;
-        }
+        var footprintSize = GetFootprint();
         int footprintWidth = Mathf.Max(1, footprintSize.x);
         int footprintLength = Mathf.Max(1, footprintSize.y);
 
@@ -467,7 +448,7 @@ public class PlatformSocketSystem : MonoBehaviour
     {
         if (!SocketsBuilt) BuildSockets();
 
-        if (!TryGetFootprint(out var footprintSize)) return 0;
+        var footprintSize = GetFootprint();
         int width = Mathf.Max(1, footprintSize.x);
         int length = Mathf.Max(1, footprintSize.y);
 
@@ -720,9 +701,12 @@ public class PlatformSocketSystem : MonoBehaviour
     public void ResetConnections()
     {
         // Show all modules
-        foreach (var m in _platform.CachedModules)
+        if (_platform)
         {
-            if (m) m.SetHidden(false);
+            foreach (var m in _platform.CachedModules)
+            {
+                if (m) m.SetHidden(false);
+            }
         }
 
         // Reset all socket statuses to Linkable/Occupied (no neighbors)
@@ -829,6 +813,8 @@ public class PlatformSocketSystem : MonoBehaviour
 
     public void EnsureChildrenModulesRegistered()
     {
+        if (!_platform) return;
+        
         foreach (var m in _platform.CachedModules)
         {
             if (m) m.EnsureRegistered();
