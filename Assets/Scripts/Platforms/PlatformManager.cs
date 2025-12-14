@@ -284,6 +284,10 @@ public class PlatformManager : MonoBehaviour
         // Clear all NavMesh links for this platform
         NavMeshLinkManager.Instance?.ClearAllLinksForPlatform(platform);
 
+        // Store current cells as previous BEFORE clearing (needed for GetAffectedPlatforms)
+        platform.previousOccupiedCells.Clear();
+        platform.previousOccupiedCells.AddRange(platform.occupiedCells);
+
         // Clear Occupied flags and cell ownership for cells this platform was occupying
         if (platform.occupiedCells != null)
         {
@@ -296,7 +300,6 @@ public class PlatformManager : MonoBehaviour
                 }
             }
 
-            // Clear occupiedCells since platform no longer occupies any cells until it moves
             platform.occupiedCells.Clear();
         }
 
@@ -313,8 +316,13 @@ public class PlatformManager : MonoBehaviour
     private void OnPlatformHasMoved(GamePlatform platform)
     {
         // Store current cells as previous for the next update
-        platform.previousOccupiedCells.Clear();
-        platform.previousOccupiedCells.AddRange(platform.occupiedCells);
+        // On first move after pickup, occupiedCells is empty but previousOccupiedCells has the pre-pickup position
+        // Don't overwrite previousOccupiedCells if occupiedCells is empty (preserve pre-pickup position)
+        if (platform.occupiedCells.Count > 0)
+        {
+            platform.previousOccupiedCells.Clear();
+            platform.previousOccupiedCells.AddRange(platform.occupiedCells);
+        }
 
         // Clear old preview/occupied flags for this platform's old cells
         foreach (Vector2Int cell in platform.occupiedCells)
