@@ -568,22 +568,6 @@ public class PlatformManager : MonoBehaviour
 
 
     ///
-    /// Public method for GamePlatform to request NavMesh link creation
-    /// Called by GamePlatform when it detects a new neighbor connection
-    /// 
-    /// <summary>
-    /// Requests NavMesh link creation between two platforms.
-    /// NOTE: This is now handled automatically in OnPlatformPlaced.
-    /// This method is kept for compatibility but does nothing during preview/movement.
-    /// </summary>
-    public void RequestNavMeshLink(GamePlatform platformA, GamePlatform platformB)
-    {
-        // Links are now created only when platforms are placed (not during movement/preview)
-        // See OnPlatformPlaced for the actual link creation
-    }
-
-
-    ///
     /// Rebuilds NavMesh for a platform and all its neighbors
     /// Called only when platform is successfully placed (not while moving)
     ///

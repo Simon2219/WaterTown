@@ -333,14 +333,12 @@ namespace Platforms
         private void SubscribeToSubComponentEvents()
         {
             _socketSystem.SocketsChanged += OnSocketsChanged;
-            _socketSystem.NewNeighborDetected += OnNewNeighborDetected;
         }
         
         
         private void UnsubscribeFromSubComponentEvents()
         {
             _socketSystem.SocketsChanged -= OnSocketsChanged;
-            _socketSystem.NewNeighborDetected -= OnNewNeighborDetected;
         }
 
 
@@ -387,13 +385,6 @@ namespace Platforms
             _railingSystem?.RefreshAllRailingsVisibility();
             
             ConnectionsChanged?.Invoke(this);
-        }
-
-
-        private void OnNewNeighborDetected(GamePlatform neighbor)
-        {
-            // Request NavMesh link creation from PlatformManager
-            _platformManager?.RequestNavMeshLink(this, neighbor);
         }
         
         

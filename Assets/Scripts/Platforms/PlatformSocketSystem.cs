@@ -22,9 +22,6 @@ public class PlatformSocketSystem : MonoBehaviour
     /// Fired when socket connection state changes (sockets connected/disconnected)
     public event Action SocketsChanged;
     
-    /// Fired when a new neighbor platform is detected (for NavMesh link creation)
-    public event Action<GamePlatform> NewNeighborDetected;
-    
     #endregion
     
     #region Dependencies
@@ -601,133 +598,87 @@ public class PlatformSocketSystem : MonoBehaviour
     
     /// <summary>
     /// Refreshes all socket statuses by querying the grid.
-    /// Simple flow: determine status → update → fire events.
     /// </summary>
     public void RefreshAllSocketStatuses()
     {
         if (!SocketsBuilt) BuildSockets();
         
-        var previousNeighbors = GetCurrentNeighborPlatforms();
-        var currentNeighbors = new HashSet<GamePlatform>();
         bool anyChanged = false;
         
-        // Update each socket's status from grid state
         for (int i = 0; i < _platformSockets.Count; i++)
         {
-            var socket = _platformSockets[i];
-            
-            // Skip permanently locked/disabled sockets
-            if (socket.Status == SocketStatus.Locked || socket.Status == SocketStatus.Disabled)
+            if (_platformSockets[i].Status is SocketStatus.Locked or SocketStatus.Disabled)
                 continue;
             
-            // Query grid for new status
-            SocketStatus oldStatus = socket.Status;
-            SocketStatus newStatus = DetermineSocketStatus(i, out GamePlatform neighbor);
-            
-            // Track neighbor platforms
-            if (neighbor != null)
-                currentNeighbors.Add(neighbor);
-            
-            // Apply status change
-            if (oldStatus != newStatus)
-            {
-                socket.SetStatus(newStatus);
-                _platformSockets[i] = socket;
+            SocketStatus newStatus = DetermineSocketStatus(i);
+            if (ApplySocketStatus(i, newStatus))
                 anyChanged = true;
-                
-                // Update module visibility on connection change
-                if (_socketToModules.TryGetValue(i, out var pm))
-                {
-                    bool nowConnected = (newStatus == SocketStatus.Connected);
-                    bool wasConnected = (oldStatus == SocketStatus.Connected);
-                    if (nowConnected && !wasConnected) pm.SetHidden(true);
-                    else if (!nowConnected && wasConnected) pm.SetHidden(false);
-                }
-            }
         }
         
         if (anyChanged)
             SocketsChanged?.Invoke();
-        
-        // Notify about newly discovered neighbors (for NavMesh links)
-        if (!_platform.IsPickedUp)
-        {
-            foreach (var neighbor in currentNeighbors)
-            {
-                if (!previousNeighbors.Contains(neighbor))
-                    NewNeighborDetected?.Invoke(neighbor);
-            }
-        }
     }
     
     
     /// <summary>
-    /// Determines a socket's status by querying the grid directly.
-    /// Always attempts to find the neighbor platform first (for NavMesh link tracking),
-    /// then determines status based on blocking conditions.
+    /// Applies a new status to a socket, handling module visibility changes.
+    /// Returns true if status actually changed.
     /// </summary>
-    private SocketStatus DetermineSocketStatus(int socketIndex, out GamePlatform neighborPlatform)
+    private bool ApplySocketStatus(int socketIndex, SocketStatus newStatus)
     {
-        neighborPlatform = null;
-        Vector2Int adjacentCell = GetAdjacentCellForSocket(socketIndex);
+        var socket = _platformSockets[socketIndex];
+        SocketStatus oldStatus = socket.Status;
         
-        // Check if this socket has a blocking module
-        bool thisSocketBlocked = IsSocketBlockedByModule(socketIndex);
+        if (oldStatus == newStatus)
+            return false;
         
-        // Check if adjacent cell is occupied (fast WorldGrid lookup)
-        if (!_worldGrid.CellHasAnyFlag(adjacentCell, WorldGrid.CellFlag.Occupied))
+        socket.SetStatus(newStatus);
+        _platformSockets[socketIndex] = socket;
+        
+        // Update module visibility when connection state changes
+        if (_socketToModules.TryGetValue(socketIndex, out var pm))
         {
-            // No neighbor - status depends only on own blocking module
-            return thisSocketBlocked ? SocketStatus.Occupied : SocketStatus.Linkable;
+            if (newStatus == SocketStatus.Connected && oldStatus != SocketStatus.Connected)
+                pm.SetHidden(true);
+            else if (newStatus != SocketStatus.Connected && oldStatus == SocketStatus.Connected)
+                pm.SetHidden(false);
         }
         
-        // Cell is occupied - always try to get the platform for neighbor tracking
-        if (!_platformManager.GetPlatformAtCell(adjacentCell, out neighborPlatform) 
-            || !neighborPlatform 
-            || neighborPlatform == _platform)
-        {
-            // Occupied but not by a valid neighbor platform
-            neighborPlatform = null;
-            return thisSocketBlocked ? SocketStatus.Occupied : SocketStatus.Linkable;
-        }
-        
-        // We have a valid neighbor platform - now determine connection status
-        
-        // If this socket has a blocking module → Occupied (module stays visible, railings show)
-        if (thisSocketBlocked)
-            return SocketStatus.Occupied;
-        
-        // If neighbor has a blocking module facing us → Occupied
-        if (_worldGrid.CellHasAnyFlag(adjacentCell, WorldGrid.CellFlag.ModuleBlocked))
-            return SocketStatus.Occupied;
-        
-        // Neither side blocked → Connected
-        return SocketStatus.Connected;
+        return true;
     }
     
     
-    /// Gets current neighbor platforms using WorldGrid's neighbor cell detection
-    /// More efficient than looping through all sockets individually
-    private HashSet<GamePlatform> GetCurrentNeighborPlatforms()
+    /// <summary>
+    /// Determines a socket's status by querying the grid.
+    /// Rules:
+    /// - Blocked by own module → Occupied
+    /// - No neighbor platform → Linkable
+    /// - Neighbor has blocking module → Occupied  
+    /// - Otherwise → Connected
+    /// </summary>
+    private SocketStatus DetermineSocketStatus(int socketIndex)
     {
-        var neighbors = new HashSet<GamePlatform>();
-        if (_platform.occupiedCells == null || _platform.occupiedCells.Count == 0) 
-            return neighbors;
-
-        // Get all 4-directional neighbor cells at once (sockets only face cardinal directions)
-        var neighborCells = _worldGrid.GetNeighborCells(_platform.occupiedCells, include8Directional: false);
+        // Check if this socket has a blocking module
+        if (IsSocketBlockedByModule(socketIndex))
+            return SocketStatus.Occupied;
         
-        // Check which neighbor cells contain platforms
-        foreach (var cell in neighborCells)
-        {
-            if (_platformManager.GetPlatformAtCell(cell, out GamePlatform neighbor)
-                && neighbor && neighbor != _platform)
-            {
-                neighbors.Add(neighbor);
-            }
-        }
+        Vector2Int adjacentCell = GetAdjacentCellForSocket(socketIndex);
         
-        return neighbors;
+        // Check if adjacent cell is occupied by a platform
+        if (!_worldGrid.CellHasAnyFlag(adjacentCell, WorldGrid.CellFlag.Occupied))
+            return SocketStatus.Linkable;
+        
+        // Verify it's actually a neighbor platform (not self or non-platform)
+        if (!_platformManager.GetPlatformAtCell(adjacentCell, out var neighbor) 
+            || !neighbor 
+            || neighbor == _platform)
+            return SocketStatus.Linkable;
+        
+        // Check if neighbor has a blocking module facing us
+        if (_worldGrid.CellHasAnyFlag(adjacentCell, WorldGrid.CellFlag.ModuleBlocked))
+            return SocketStatus.Occupied;
+        
+        return SocketStatus.Connected;
     }
 
 
