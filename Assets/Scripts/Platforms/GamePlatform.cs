@@ -413,8 +413,6 @@ namespace Platforms
         public IReadOnlyList<PlatformSocketSystem.SocketData> Sockets => _socketSystem?.PlatformSockets;
         
         public int SocketCount => _socketSystem?.SocketCount ?? 0;
-        
-        public IReadOnlyCollection<int> ConnectedSockets => _socketSystem?.ConnectedSockets;
 
 
         public PlatformSocketSystem.SocketData GetSocket(int index) 
