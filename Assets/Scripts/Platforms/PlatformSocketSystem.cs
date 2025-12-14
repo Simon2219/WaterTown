@@ -713,32 +713,47 @@ public class PlatformSocketSystem : MonoBehaviour
 
         for (int i = 0; i < sockets.Count; i++)
         {
-            var s = sockets[i];
+            var socket = sockets[i];
 
-            if (s.Status == SocketStatus.Locked || s.Status == SocketStatus.Disabled)
-            {
-                sockets[i] = s;
+            // Skip permanently locked/disabled sockets - they don't change
+            if (socket.Status == SocketStatus.Locked || socket.Status == SocketStatus.Disabled)
                 continue;
-            }
 
+            // Determine new status based on connection and module state
+            SocketStatus newStatus;
+            
             if (_connectedSockets.Contains(i))
             {
-                s.SetStatus(SocketStatus.Connected);
-                sockets[i] = s;
-                continue;
+                newStatus = SocketStatus.Connected;
             }
-
-            bool blocked = false;
-            if (_socketToModules.TryGetValue(i, out var module))
+            else if (IsSocketBlockedByModule(i))
             {
-                if (!module.activeInHierarchy) continue;
-                if (!_moduleRegs.TryGetValue(module, out var reg)) continue;
-                if (reg.blocksLink) blocked = true;
+                newStatus = SocketStatus.Occupied;
+            }
+            else
+            {
+                newStatus = SocketStatus.Linkable;
             }
 
-            s.SetStatus(blocked ? SocketStatus.Occupied : SocketStatus.Linkable);
-            sockets[i] = s;
-        }
+            socket.SetStatus(newStatus);
+            sockets[i] = socket;
+            }
+    }
+    
+    
+    /// Checks if a socket is blocked by an active module that blocks linking
+    private bool IsSocketBlockedByModule(int socketIndex)
+    {
+        if (!_socketToModules.TryGetValue(socketIndex, out var module))
+            return false;
+        
+        if (!module.activeInHierarchy)
+            return false;
+        
+        if (!_moduleRegs.TryGetValue(module, out var reg))
+            return false;
+        
+        return reg.blocksLink;
     }
     
     
