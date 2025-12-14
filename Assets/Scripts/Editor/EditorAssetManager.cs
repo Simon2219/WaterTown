@@ -178,7 +178,9 @@ namespace Editor
                                 so.ApplyModifiedProperties();
 
                                 EditorPlatformTools.BuildSockets(gp);
-                                EditorPlatformTools.RefreshSocketStatuses(gp);
+                                // Note: RefreshSocketStatuses is NOT called here - it requires runtime dependencies
+                                // (WorldGrid, PlatformManager) that don't exist in editor prefab mode.
+                                // Socket statuses will be calculated at runtime when the platform is placed.
 
                                 // Generate NavMesh floor geometry (before NavMeshSurface setup)
                                 if (_generateNavMeshFloor)
@@ -353,7 +355,7 @@ namespace Editor
             float hz = lCells * 0.5f;
 
             EditorPlatformTools.BuildSockets(gp);
-            EditorPlatformTools.RefreshSocketStatuses(gp);
+            // Note: No RefreshSocketStatuses - requires runtime dependencies
 
             // Determine prefab forward axis (local length axis of the rail)
             Vector3 localForward = railForwardAxis switch

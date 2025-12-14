@@ -82,14 +82,9 @@ namespace Editor
         }
         
         
-        /// <summary>
-        /// Refreshes all socket statuses in editor mode.
-        /// </summary>
-        public static void RefreshSocketStatuses(GamePlatform platform)
-        {
-            var socketSystem = GetSocketSystem(platform);
-            socketSystem?.RefreshAllSocketStatuses();
-        }
+        // Note: RefreshSocketStatuses is intentionally NOT provided here.
+        // It requires runtime dependencies (WorldGrid, PlatformManager) that don't exist
+        // in editor prefab mode. Socket statuses are calculated at runtime.
         
         
         /// <summary>
