@@ -367,7 +367,9 @@ namespace Editor
                                   RailInsetOffset(sockLocal, hx, hz, inset);
                 t.localRotation = RailRotationForLocalPos(sockLocal, hx, hz);
 
-                gp.RegisterModuleOnSockets(go, occupiesSockets: true, new[] { sIdx });
+                // Only register as module if the prefab has a PlatformModule component
+                var pm = go.GetComponent<PlatformModule>();
+                if (pm) gp.RegisterModuleOnSockets(pm, occupiesSockets: true, new[] { sIdx });
 
                 CreateRailingComponent(go, gp, PlatformRailing.RailingType.Rail, new[] { sIdx });
             }

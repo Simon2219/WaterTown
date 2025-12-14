@@ -47,13 +47,13 @@ namespace Platforms
         private void OnDisable()
         {
             if (IsEditingPrefab()) return;
-            if (_platform) { _platform.UnregisterModule(gameObject); _platform.RefreshSocketStatuses(); }
+            if (_platform) { _platform.UnregisterModule(this); _platform.RefreshSocketStatuses(); }
         }
 
         private void OnDestroy()
         {
             if (IsEditingPrefab()) return;
-            if (_platform) { _platform.UnregisterModule(gameObject); _platform.RefreshSocketStatuses(); }
+            if (_platform) { _platform.UnregisterModule(this); _platform.RefreshSocketStatuses(); }
         }
 
 #if UNITY_EDITOR
@@ -65,7 +65,7 @@ namespace Platforms
 
             if (_platform && isActiveAndEnabled)
             {
-                _platform.UnregisterModule(gameObject);
+                _platform.UnregisterModule(this);
                 RebindAndRegister();
                 ApplyVisibilityImmediate();
                 _platform.RefreshSocketStatuses();
@@ -79,7 +79,7 @@ namespace Platforms
             if (!_platform) _platform = GetComponentInParent<GamePlatform>();
             if (!_platform) return;
 
-            _platform.UnregisterModule(gameObject);
+            _platform.UnregisterModule(this);
             if (!enabled) enabled = true;
 
             RebindAndRegister();
@@ -92,7 +92,7 @@ namespace Platforms
         {
             _boundSocketIndices = ComputeSocketIndices(_platform);
             if (_boundSocketIndices.Count > 0)
-                _platform.RegisterModuleOnSockets(gameObject, occupiesSockets: true, _boundSocketIndices);
+                _platform.RegisterModuleOnSockets(this, occupiesSockets: true, _boundSocketIndices);
         }
 
         private List<int> ComputeSocketIndices(GamePlatform platform)

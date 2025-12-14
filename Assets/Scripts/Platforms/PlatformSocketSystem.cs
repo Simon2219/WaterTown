@@ -132,7 +132,7 @@ public class PlatformSocketSystem : MonoBehaviour
     [Serializable]
     public struct ModuleReg
     {
-        public GameObject go;
+        public PlatformModule module;
         public int[] socketIndices;
         public bool blocksLink;
     }
@@ -190,8 +190,8 @@ public class PlatformSocketSystem : MonoBehaviour
     #region Module Registry
     
     
-    private readonly Dictionary<GameObject, ModuleReg> _moduleRegs = new();
-    private readonly Dictionary<int, GameObject> _socketToModules = new();
+    private readonly Dictionary<PlatformModule, ModuleReg> _moduleRegs = new();
+    private readonly Dictionary<int, PlatformModule> _socketToModules = new();
     
     
     #endregion
@@ -650,8 +650,8 @@ public class PlatformSocketSystem : MonoBehaviour
                 anyConnectionChanged = true;
                 
                 // Hide module on newly connected socket
-                if (_socketToModules.TryGetValue(i, out var module))
-                    SetModuleVisibility(module, visible: false);
+                if (_socketToModules.TryGetValue(i, out var pm))
+                    pm.SetHidden(true);
             }
             else if (!shouldBeConnected && wasConnected)
             {
@@ -659,8 +659,8 @@ public class PlatformSocketSystem : MonoBehaviour
                 anyConnectionChanged = true;
                 
                 // Show module on newly disconnected socket
-                if (_socketToModules.TryGetValue(i, out var module))
-                    SetModuleVisibility(module, visible: true);
+                if (_socketToModules.TryGetValue(i, out var pm))
+                    pm.SetHidden(false);
             }
         }
         
@@ -798,16 +798,13 @@ public class PlatformSocketSystem : MonoBehaviour
     /// Checks if a socket is blocked by an active module that blocks linking
     private bool IsSocketBlockedByModule(int socketIndex)
     {
-        if (!_socketToModules.TryGetValue(socketIndex, out var module))
+        if (!_socketToModules.TryGetValue(socketIndex, out var pm))
             return false;
         
-        if (!module.activeInHierarchy)
+        if (!pm.gameObject.activeInHierarchy)
             return false;
         
-        if (!_moduleRegs.TryGetValue(module, out var reg))
-            return false;
-        
-        return reg.blocksLink;
+        return pm.blocksLink;
     }
     
     
@@ -819,33 +816,21 @@ public class PlatformSocketSystem : MonoBehaviour
     #region Module Registry
     
     
-    public void RegisterModuleOnSockets(GameObject moduleGo, bool occupiesSockets, IEnumerable<int> socketIndices)
+    public void RegisterModuleOnSockets(PlatformModule module, bool occupiesSockets, IEnumerable<int> socketIndices)
     {
-        if (!moduleGo) return;
+        if (!module) return;
         if (!SocketsBuilt) BuildSockets();
 
         var list = new List<int>(socketIndices);
-        
-        // Find module in platform's cached list
-        PlatformModule pm = null;
-        foreach (var cachedModule in _platform.CachedModules)
-        {
-            if (cachedModule && cachedModule.gameObject == moduleGo)
-            {
-                pm = cachedModule;
-                break;
-            }
-        }
-        if (!pm) pm = moduleGo.GetComponent<PlatformModule>();
-        bool blocks = pm && pm.blocksLink;
+        bool blocks = module.blocksLink;
 
-        var reg = new ModuleReg { go = moduleGo, socketIndices = list.ToArray(), blocksLink = blocks };
-        _moduleRegs[moduleGo] = reg;
+        var reg = new ModuleReg { module = module, socketIndices = list.ToArray(), blocksLink = blocks };
+        _moduleRegs[module] = reg;
 
         // Map each socket to this module (1:1 relationship - one module max per socket)
         foreach (var sIdx in list)
         {
-            _socketToModules[sIdx] = moduleGo;
+            _socketToModules[sIdx] = module;
         }
         
         // If module blocks linking, mark the cells behind each socket with ModuleBlocked flag
@@ -861,10 +846,10 @@ public class PlatformSocketSystem : MonoBehaviour
     }
 
 
-    public void UnregisterModule(GameObject moduleGo)
+    public void UnregisterModule(PlatformModule module)
     {
-        if (!moduleGo) return;
-        if (!_moduleRegs.TryGetValue(moduleGo, out var reg)) return;
+        if (!module) return;
+        if (!_moduleRegs.TryGetValue(module, out var reg)) return;
 
         // Clear ModuleBlocked flag from cells if this module was blocking
         if (reg.blocksLink && reg.socketIndices != null)
@@ -883,48 +868,16 @@ public class PlatformSocketSystem : MonoBehaviour
                 _socketToModules.Remove(sIdx);
             }
         }
-        _moduleRegs.Remove(moduleGo);
+        _moduleRegs.Remove(module);
     }
 
 
-    public void SetModuleHidden(GameObject moduleGo, bool hidden)
+    public void SetModuleHidden(PlatformModule module, bool hidden)
     {
-        if (!moduleGo) return;
-
-        PlatformModule pm = null;
-        foreach (var cachedModule in _platform.CachedModules)
-        {
-            if (cachedModule && cachedModule.gameObject == moduleGo)
-            {
-                pm = cachedModule;
-                break;
-            }
-        }
-        if (!pm) pm = moduleGo.GetComponent<PlatformModule>();
+        if (!module) return;
         
-        if (pm) pm.SetHidden(hidden);
-        else moduleGo.SetActive(!hidden);
-
+        module.SetHidden(hidden);
         RefreshSocketStatuses();
-    }
-
-
-    private void SetModuleVisibility(GameObject moduleGo, bool visible)
-    {
-        if (!moduleGo) return;
-        
-        PlatformModule pm = null;
-        foreach (var cachedModule in _platform.CachedModules)
-        {
-            if (cachedModule && cachedModule.gameObject == moduleGo)
-            {
-                pm = cachedModule;
-                break;
-            }
-        }
-        
-        if (pm) pm.SetHidden(!visible);
-        else moduleGo.SetActive(visible);
     }
 
 

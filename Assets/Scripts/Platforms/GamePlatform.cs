@@ -496,16 +496,16 @@ namespace Platforms
         #region Module Interface Methods
         
         
-        public void RegisterModuleOnSockets(GameObject moduleGo, bool occupiesSockets, IEnumerable<int> socketIndices) 
-            => _socketSystem?.RegisterModuleOnSockets(moduleGo, occupiesSockets, socketIndices);
+        public void RegisterModuleOnSockets(PlatformModule module, bool occupiesSockets, IEnumerable<int> socketIndices) 
+            => _socketSystem?.RegisterModuleOnSockets(module, occupiesSockets, socketIndices);
 
 
-        public void UnregisterModule(GameObject moduleGo) 
-            => _socketSystem?.UnregisterModule(moduleGo);
+        public void UnregisterModule(PlatformModule module) 
+            => _socketSystem?.UnregisterModule(module);
 
 
-        public void SetModuleHidden(GameObject moduleGo, bool hidden) 
-            => _socketSystem?.SetModuleHidden(moduleGo, hidden);
+        public void SetModuleHidden(PlatformModule module, bool hidden) 
+            => _socketSystem?.SetModuleHidden(module, hidden);
 
 
         public void EnsureChildrenModulesRegistered() 
