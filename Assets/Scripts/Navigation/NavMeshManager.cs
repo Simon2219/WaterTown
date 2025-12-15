@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using Platforms;
 using Unity.AI.Navigation;
 using UnityEngine;
+using UnityEngine.AI;
 
 namespace Navigation
 {
@@ -34,6 +35,23 @@ namespace Navigation
         
         
         #region Configuration
+        
+        [Header("Agent & Area Settings")]
+        [Tooltip("The NavMesh agent type these links are for. Select from dropdown.")]
+        [SerializeField] private NavMeshAgentType agentType;
+        
+        [Tooltip("The NavMesh area type for traversing these links. 0 = Walkable (default).")]
+        [SerializeField] private int areaType = 0;
+        
+        [Tooltip("Additional cost multiplier for traversing these links. Values > 1 make links less preferred.")]
+        [SerializeField] private float costModifier = 1f;
+        
+        [Header("Link Behavior")]
+        [Tooltip("Whether links can be traversed in both directions.")]
+        [SerializeField] private bool bidirectional = true;
+        
+        [Tooltip("Whether links automatically update their endpoints when the linked objects move.")]
+        [SerializeField] private bool autoUpdatePositions = false;
         
         [Header("Link Dimensions")]
         [Tooltip("Width per connected socket (meters). Default 1m matches grid cell size.")]
@@ -545,11 +563,14 @@ namespace Navigation
             go.transform.SetParent(_linksContainer, false);
             
             var link = go.AddComponent<NavMeshLink>();
+            link.agentTypeID = agentType; // Uses implicit int conversion
             link.startPoint = startPoint;
             link.endPoint = endPoint;
             link.width = linkWidth;
-            link.bidirectional = true;
-            link.area = 0; // Walkable
+            link.bidirectional = bidirectional;
+            link.area = areaType;
+            link.costModifier = costModifier;
+            link.autoUpdate = autoUpdatePositions;
             
             // Track link by platform
             var key = (thisId, thisId);
@@ -559,7 +580,9 @@ namespace Navigation
             
             if (debugLogs)
             {
+                string agentName = NavMesh.GetSettingsNameFromID(agentType);
                 Debug.Log($"[NavMeshManager] Created link: {linkName}\n" +
+                          $"  Agent: {agentName}, Area: {areaType}, Cost: {costModifier}\n" +
                           $"  Start: {startPoint}, End: {endPoint}, Width: {linkWidth}m");
             }
             
