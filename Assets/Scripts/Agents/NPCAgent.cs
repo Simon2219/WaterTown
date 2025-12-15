@@ -168,7 +168,12 @@ public class NPCAgent : MonoBehaviour
     
     #region Serialized Fields - Link Traversal
     
-    [Header("Link Traversal - Movement")]
+    [Header("Link Traversal - Mode")]
+    [Tooltip("If TRUE: Unity handles link traversal automatically (recommended for flush/same-height platforms).\n" +
+             "If FALSE: Manual traversal with custom easing/height/rotation control (for special effects or height differences).")]
+    [SerializeField] private bool useAutoLinkTraversal = true;
+    
+    [Header("Link Traversal - Manual Settings (only used when Auto is OFF)")]
     [Tooltip("Easing function for link traversal movement.")]
     [SerializeField] private EasingType linkMovementEasing = EasingType.SmoothStep;
     
@@ -185,7 +190,7 @@ public class NPCAgent : MonoBehaviour
     [Tooltip("Speed multiplier during link traversal (1 = normal speed).")]
     [SerializeField] private float linkSpeedMultiplier = 1f;
     
-    [Header("Link Traversal - Rotation")]
+    [Header("Link Traversal - Rotation (Manual only)")]
     [Tooltip("How to handle rotation during link traversal.")]
     [SerializeField] private LinkRotationMode linkRotationMode = LinkRotationMode.SmoothLookAhead;
     
@@ -283,6 +288,9 @@ public class NPCAgent : MonoBehaviour
             return;
         }
         
+        // Configure link traversal mode based on setting
+        _navAgent.autoTraverseOffMeshLink = useAutoLinkTraversal;
+        
         AgentRenderer = GetComponent<Renderer>();
         if (AgentRenderer)
         {
@@ -300,7 +308,7 @@ public class NPCAgent : MonoBehaviour
         
         if (logStatusChanges)
         {
-            Debug.Log($"[NPCAgent] Agent {agentId} initialized at {transform.position}");
+            Debug.Log($"[NPCAgent] Agent {agentId} initialized at {transform.position}, autoLinkTraversal={useAutoLinkTraversal}");
         }
     }
     
@@ -349,9 +357,17 @@ public class NPCAgent : MonoBehaviour
     
     /// <summary>
     /// Handles manual off-mesh link traversal with full configuration options.
+    /// Only active when useAutoLinkTraversal is FALSE.
     /// </summary>
     private void HandleOffMeshLinkTraversal()
     {
+        // Skip if using Unity's automatic traversal
+        if (useAutoLinkTraversal)
+        {
+            _isTraversingLink = false;
+            return;
+        }
+        
         // Check if we're no longer on a link (completed or cancelled)
         if (!_navAgent.isOnOffMeshLink)
         {
@@ -1114,7 +1130,26 @@ public class NPCAgent : MonoBehaviour
     #region Public API - Configuration
     
     /// <summary>
-    /// Sets the link traversal easing function.
+    /// Sets whether to use Unity's automatic link traversal or manual traversal.
+    /// TRUE = Unity handles it (recommended for flush platforms).
+    /// FALSE = Manual traversal with custom easing/height control.
+    /// </summary>
+    public void SetAutoLinkTraversal(bool useAuto)
+    {
+        useAutoLinkTraversal = useAuto;
+        if (_navAgent)
+        {
+            _navAgent.autoTraverseOffMeshLink = useAuto;
+        }
+    }
+    
+    /// <summary>
+    /// Gets whether automatic link traversal is enabled.
+    /// </summary>
+    public bool UseAutoLinkTraversal => useAutoLinkTraversal;
+    
+    /// <summary>
+    /// Sets the link traversal easing function (only used when manual traversal is enabled).
     /// </summary>
     public void SetLinkEasing(EasingType movementEasing, EasingType rotationEasing)
     {
@@ -1123,7 +1158,7 @@ public class NPCAgent : MonoBehaviour
     }
     
     /// <summary>
-    /// Sets the link height mode.
+    /// Sets the link height mode (only used when manual traversal is enabled).
     /// </summary>
     public void SetLinkHeightMode(LinkHeightMode mode)
     {

@@ -544,7 +544,7 @@ namespace Agents
             navAgent.baseOffset = agentHeight / 2f;
             
             navAgent.areaMask = NavMesh.AllAreas;
-            navAgent.autoTraverseOffMeshLink = false; // Manual traversal in NPCAgent for normal speed
+            // Note: autoTraverseOffMeshLink is configured by NPCAgent based on its useAutoLinkTraversal setting
             navAgent.autoBraking = true;
         }
         
