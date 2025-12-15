@@ -1,4 +1,3 @@
-using System.Collections;
 using System.Collections.Generic;
 using Platforms;
 using Unity.AI.Navigation;
@@ -7,20 +6,18 @@ using UnityEngine;
 namespace Navigation
 {
     /// <summary>
-    /// Unified NavMesh management for the entire town.
+    /// Manages NavMeshLinks between platforms.
     /// 
-    /// Primary: Global NavMeshSurface baking
-    /// - All platform floor colliders on NavMeshGeometry layer are baked together
-    /// - Adjacent platforms automatically connect (no links needed for same-level)
-    /// - Call RebuildNavMesh() when platforms are placed/removed
+    /// Each platform has its own NavMeshSurface that bakes its local NavMesh.
+    /// This manager creates NavMeshLinks to connect adjacent platforms,
+    /// allowing agents to traverse between them.
     /// 
-    /// Secondary: NavMeshLink management (for special cases)
-    /// - Multi-level platforms with height differences
-    /// - Special jump/climb points
-    /// - One-way traversals
+    /// Link creation uses a consolidated per-edge approach:
+    /// - ONE link per contiguous connected segment on each edge
+    /// - Prevents the "step back before crossing" issue when adjacent sockets connect to different platforms
+    /// - Only one platform creates the link (lower instance ID wins) to avoid duplicates
     /// </summary>
     [DisallowMultipleComponent]
-    [RequireComponent(typeof(NavMeshSurface))]
     public class NavMeshManager : MonoBehaviour
     {
         #region Singleton
@@ -31,25 +28,9 @@ namespace Navigation
         #endregion
         
         
-        #region Configuration - Surface
+        #region Configuration
         
-        [Header("Layer Configuration")]
-        [Tooltip("The layer used for NavMesh floor geometry colliders.")]
-        [SerializeField] private string navMeshGeometryLayerName = "NavMeshGeometry";
-        
-        [Header("Rebuild Settings")]
-        [Tooltip("Delay before rebuilding NavMesh after a change (allows multiple changes to batch).")]
-        [SerializeField] private float rebuildDelay = 0.1f;
-        
-        [Tooltip("Use async NavMesh building (non-blocking but slight delay).")]
-        [SerializeField] private bool useAsyncBuild = true;
-        
-        #endregion
-        
-        
-        #region Configuration - Links (for multi-level)
-        
-        [Header("Link Dimensions (Multi-Level Only)")]
+        [Header("Link Dimensions")]
         [Tooltip("Width per connected socket (meters). Default 1m matches grid cell size.")]
         [SerializeField] private float widthPerSocket = 1f;
         
@@ -69,25 +50,9 @@ namespace Navigation
         
         #region Private Fields
         
-        private NavMeshSurface _surface;
-        private Coroutine _pendingRebuild;
-        private AsyncOperation _asyncOperation;
-        private bool _isRebuilding;
-        
         // Links container and tracking
         private Transform _linksContainer;
         private readonly Dictionary<(int, int), List<GameObject>> _linksByPlatformPair = new();
-        
-        #endregion
-        
-        
-        #region Properties
-        
-        /// <summary>True if a NavMesh rebuild is currently in progress.</summary>
-        public bool IsRebuilding => _isRebuilding;
-        
-        /// <summary>The NavMeshSurface component used for global baking.</summary>
-        public NavMeshSurface Surface => _surface;
         
         #endregion
         
@@ -103,146 +68,12 @@ namespace Navigation
                 return;
             }
             _instance = this;
-            
-            _surface = GetComponent<NavMeshSurface>();
-            if (!_surface)
-            {
-                Debug.LogError("[NavMeshManager] NavMeshSurface component not found!");
-                return;
-            }
-            
-            ConfigureSurface();
         }
         
         private void OnDestroy()
         {
             if (_instance == this)
                 _instance = null;
-        }
-        
-        #endregion
-        
-        
-        #region Surface Configuration
-        
-        /// <summary>
-        /// Configures the NavMeshSurface to use the NavMeshGeometry layer.
-        /// </summary>
-        private void ConfigureSurface()
-        {
-            if (!_surface) return;
-            
-            int layer = LayerMask.NameToLayer(navMeshGeometryLayerName);
-            if (layer == -1)
-            {
-                Debug.LogError($"[NavMeshManager] Layer '{navMeshGeometryLayerName}' not found! " +
-                               "Please create this layer in Edit > Project Settings > Tags and Layers.");
-                return;
-            }
-            
-            // Configure surface to collect from scene, using only NavMeshGeometry layer
-            _surface.collectObjects = CollectObjects.All;
-            _surface.useGeometry = NavMeshCollectGeometry.PhysicsColliders;
-            _surface.layerMask = 1 << layer;
-            
-            if (debugLogs)
-                Debug.Log($"[NavMeshManager] Configured to use layer '{navMeshGeometryLayerName}' (index {layer})");
-        }
-        
-        #endregion
-        
-        
-        #region Public API - NavMesh Rebuilding
-        
-        /// <summary>
-        /// Queues a NavMesh rebuild. Multiple calls within rebuildDelay are batched together.
-        /// </summary>
-        public void RebuildNavMesh()
-        {
-            if (!_surface)
-            {
-                Debug.LogWarning("[NavMeshManager] Cannot rebuild - no NavMeshSurface.");
-                return;
-            }
-            
-            if (!gameObject.activeInHierarchy)
-            {
-                Debug.LogWarning("[NavMeshManager] Cannot rebuild - manager is inactive.");
-                return;
-            }
-            
-            // Cancel pending rebuild to batch changes
-            if (_pendingRebuild != null)
-                StopCoroutine(_pendingRebuild);
-            
-            _pendingRebuild = StartCoroutine(RebuildAfterDelay());
-        }
-        
-        /// <summary>
-        /// Immediately rebuilds the NavMesh (blocking).
-        /// Use RebuildNavMesh() for normal use to allow batching.
-        /// </summary>
-        public void RebuildNavMeshImmediate()
-        {
-            if (!_surface)
-            {
-                Debug.LogWarning("[NavMeshManager] Cannot rebuild - no NavMeshSurface.");
-                return;
-            }
-            
-            if (_pendingRebuild != null)
-            {
-                StopCoroutine(_pendingRebuild);
-                _pendingRebuild = null;
-            }
-            
-            PerformRebuild();
-        }
-        
-        private IEnumerator RebuildAfterDelay()
-        {
-            yield return new WaitForSeconds(rebuildDelay);
-            _pendingRebuild = null;
-            PerformRebuild();
-        }
-        
-        private void PerformRebuild()
-        {
-            if (_isRebuilding)
-            {
-                if (debugLogs)
-                    Debug.Log("[NavMeshManager] Rebuild already in progress, queuing another.");
-                RebuildNavMesh();
-                return;
-            }
-            
-            _isRebuilding = true;
-            
-            if (useAsyncBuild)
-            {
-                StartCoroutine(RebuildAsync());
-            }
-            else
-            {
-                _surface.BuildNavMesh();
-                _isRebuilding = false;
-                if (debugLogs)
-                    Debug.Log("[NavMeshManager] NavMesh rebuilt (sync).");
-            }
-        }
-        
-        private IEnumerator RebuildAsync()
-        {
-            _asyncOperation = _surface.UpdateNavMesh(_surface.navMeshData);
-            
-            while (!_asyncOperation.isDone)
-                yield return null;
-            
-            _isRebuilding = false;
-            _asyncOperation = null;
-            
-            if (debugLogs)
-                Debug.Log("[NavMeshManager] NavMesh rebuilt (async).");
         }
         
         #endregion
@@ -283,6 +114,46 @@ namespace Navigation
                 }
             }
         }
+        
+        /// <summary>
+        /// Clears all links involving a specific platform.
+        /// </summary>
+        public void ClearAllLinksForPlatform(GamePlatform platform)
+        {
+            if (!platform) return;
+            
+            int platformId = platform.GetInstanceID();
+            var keysToRemove = new List<(int, int)>();
+            
+            foreach (var kvp in _linksByPlatformPair)
+            {
+                if (kvp.Key.Item1 == platformId || kvp.Key.Item2 == platformId)
+                {
+                    foreach (var go in kvp.Value)
+                    {
+                        if (go)
+                        {
+                            if (Application.isPlaying)
+                                Destroy(go);
+                            else
+                                DestroyImmediate(go);
+                        }
+                    }
+                    keysToRemove.Add(kvp.Key);
+                }
+            }
+            
+            foreach (var key in keysToRemove)
+                _linksByPlatformPair.Remove(key);
+            
+            if (debugLogs && keysToRemove.Count > 0)
+                Debug.Log($"[NavMeshManager] Cleared all links for {platform.name}");
+        }
+        
+        #endregion
+        
+        
+        #region Link Creation - Edge Segments
         
         /// <summary>
         /// Gets all connected sockets grouped by edge, with contiguous sockets grouped into segments.
@@ -482,45 +353,10 @@ namespace Navigation
             }
         }
         
-        /// <summary>
-        /// Clears all links involving a specific platform.
-        /// </summary>
-        public void ClearAllLinksForPlatform(GamePlatform platform)
-        {
-            if (!platform) return;
-            
-            int platformId = platform.GetInstanceID();
-            var keysToRemove = new List<(int, int)>();
-            
-            foreach (var kvp in _linksByPlatformPair)
-            {
-                if (kvp.Key.Item1 == platformId || kvp.Key.Item2 == platformId)
-                {
-                    foreach (var go in kvp.Value)
-                    {
-                        if (go)
-                        {
-                            if (Application.isPlaying)
-                                Destroy(go);
-                            else
-                                DestroyImmediate(go);
-                        }
-                    }
-                    keysToRemove.Add(kvp.Key);
-                }
-            }
-            
-            foreach (var key in keysToRemove)
-                _linksByPlatformPair.Remove(key);
-            
-            if (debugLogs && keysToRemove.Count > 0)
-                Debug.Log($"[NavMeshManager] Cleared all links for {platform.name}");
-        }
-        
         #endregion
         
         
-        #region Link Helpers
+        #region Helpers
         
         private int GetEdgeIndex(int socketIndex, int[] edgeBounds)
         {
@@ -556,27 +392,6 @@ namespace Navigation
             _linksContainer = go.transform;
             _linksContainer.position = Vector3.zero;
         }
-        
-        #endregion
-        
-        
-        #region Editor Helpers
-        
-#if UNITY_EDITOR
-        [ContextMenu("Rebuild NavMesh Now")]
-        private void EditorRebuildNavMesh()
-        {
-            ConfigureSurface();
-            _surface.BuildNavMesh();
-            Debug.Log("[NavMeshManager] NavMesh rebuilt from editor.");
-        }
-        
-        private void OnValidate()
-        {
-            if (_surface)
-                ConfigureSurface();
-        }
-#endif
         
         #endregion
     }
