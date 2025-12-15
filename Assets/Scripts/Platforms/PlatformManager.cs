@@ -246,7 +246,8 @@ public class PlatformManager : MonoBehaviour
 
 
     /// Event handler called when ANY platform is placed
-    /// Registers platform in grid, triggers adjacency update, rebuilds NavMesh, and creates links
+    /// Registers platform in grid, triggers adjacency update, and rebuilds NavMesh
+    /// Note: NavMeshLinks are handled by NavMeshManager via event subscription
     ///
     private void OnPlatformPlaced(GamePlatform platform)
     {
@@ -259,7 +260,6 @@ public class PlatformManager : MonoBehaviour
         MarkAdjacencyDirtyForPlatform(platform);
 
         // Force immediate adjacency computation so connections are known
-        // This also recreates NavMesh links for all affected platforms
         RecomputeAdjacencyForAffectedPlatforms();
 
         // Rebuild NavMesh for this platform and all affected neighbors
@@ -269,14 +269,12 @@ public class PlatformManager : MonoBehaviour
 
 
     /// Event handler called when ANY platform is picked up
-    /// Clears Occupied flags, cell ownership, NavMesh links, and marks adjacency dirty
+    /// Clears Occupied flags, cell ownership, and marks adjacency dirty
+    /// Note: NavMeshLinks are handled by NavMeshManager via event subscription
     ///
     private void OnPlatformPickedUp(GamePlatform platform)
     {
         if (!platform) return;
-
-        // Clear all NavMesh links for this platform
-        Navigation.NavMeshManager.Instance?.ClearAllLinksForPlatform(platform);
 
         // Store current cells as previous BEFORE clearing (needed for GetAffectedPlatforms)
         platform.previousOccupiedCells.Clear();
@@ -511,8 +509,7 @@ public class PlatformManager : MonoBehaviour
         if (platform.gameObject.activeInHierarchy)
             platform.ResetConnections();
 
-        // Clear all NavMesh links involving this platform
-        Navigation.NavMeshManager.Instance?.ClearAllLinksForPlatform(platform);
+        // Note: NavMeshLinks are handled by NavMeshManager via event subscription
 
         // Invoke UnityEvent for platform removed
         PlatformRemoved?.Invoke(platform);
@@ -633,6 +630,7 @@ public class PlatformManager : MonoBehaviour
     /// Recomputes adjacency only for platforms marked as needing update
     /// Much more efficient than updating all platforms every frame
     /// This is batched to run once per frame maximum via LateUpdate
+    /// Note: NavMeshLinks are handled by NavMeshManager via event subscription (not during preview movement)
     ///
     private void RecomputeAdjacencyForAffectedPlatforms()
     {
@@ -640,24 +638,11 @@ public class PlatformManager : MonoBehaviour
         if (_isRecomputingAdjacency) return;
         _isRecomputingAdjacency = true;
 
-        // Update socket statuses for all affected platforms
+        // Update socket statuses for all affected platforms (for railing visibility, etc.)
         foreach (var platform in _platformsNeedingAdjacencyUpdate)
         {
             if (!platform || !platform.isActiveAndEnabled) continue;
             platform.RefreshSocketStatuses();
-        }
-        
-        // Recreate NavMesh links for affected platforms (only placed platforms, not picked-up ones)
-        var navMeshManager = Navigation.NavMeshManager.Instance;
-        if (navMeshManager)
-        {
-            foreach (var platform in _platformsNeedingAdjacencyUpdate)
-            {
-                if (!platform || !platform.isActiveAndEnabled) continue;
-                if (platform.IsPickedUp) continue;
-                
-                navMeshManager.CreateLinksForPlatform(platform, this);
-            }
         }
 
         // Clear the set after processing

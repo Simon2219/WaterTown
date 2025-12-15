@@ -12,6 +12,11 @@ namespace Navigation
     /// This manager creates NavMeshLinks to connect adjacent platforms,
     /// allowing agents to traverse between them.
     /// 
+    /// This manager is EVENT-DRIVEN:
+    /// - Subscribes to GamePlatform.Placed to create links when platforms are placed
+    /// - Subscribes to GamePlatform.PickedUp to clear links when platforms are picked up
+    /// - Does NOT update during preview/movement - only on actual placement
+    /// 
     /// Link creation uses a consolidated per-edge approach:
     /// - ONE link per contiguous connected segment on each edge
     /// - Prevents the "step back before crossing" issue when adjacent sockets connect to different platforms
@@ -52,7 +57,10 @@ namespace Navigation
         
         // Links container and tracking
         private Transform _linksContainer;
-        private readonly Dictionary<(int, int), List<GameObject>> _linksByPlatformPair = new();
+        private readonly Dictionary<(int, int), List<GameObject>> _linksByPlatform = new();
+        
+        // Dependency - found at runtime
+        private PlatformManager _platformManager;
         
         #endregion
         
@@ -70,6 +78,30 @@ namespace Navigation
             _instance = this;
         }
         
+        private void OnEnable()
+        {
+            // Subscribe to static GamePlatform events
+            GamePlatform.Created += OnPlatformCreated;
+            GamePlatform.Destroyed += OnPlatformDestroyed;
+        }
+        
+        private void Start()
+        {
+            // Find PlatformManager dependency
+            _platformManager = FindFirstObjectByType<PlatformManager>();
+            if (!_platformManager)
+            {
+                Debug.LogError("[NavMeshManager] PlatformManager not found! NavMeshLinks will not be created.");
+            }
+        }
+        
+        private void OnDisable()
+        {
+            // Unsubscribe from static events
+            GamePlatform.Created -= OnPlatformCreated;
+            GamePlatform.Destroyed -= OnPlatformDestroyed;
+        }
+        
         private void OnDestroy()
         {
             if (_instance == this)
@@ -79,20 +111,97 @@ namespace Navigation
         #endregion
         
         
-        #region Public API - Link Management
+        #region Event Handlers
+        
+        /// <summary>
+        /// Called when a platform is created - subscribe to its instance events
+        /// </summary>
+        private void OnPlatformCreated(GamePlatform platform)
+        {
+            if (!platform) return;
+            
+            platform.Placed += OnPlatformPlaced;
+            platform.PickedUp += OnPlatformPickedUp;
+        }
+        
+        /// <summary>
+        /// Called when a platform is destroyed - unsubscribe from its instance events
+        /// </summary>
+        private void OnPlatformDestroyed(GamePlatform platform)
+        {
+            if (!platform) return;
+            
+            platform.Placed -= OnPlatformPlaced;
+            platform.PickedUp -= OnPlatformPickedUp;
+            
+            // Clear any links for this platform
+            ClearLinksForPlatform(platform);
+        }
+        
+        /// <summary>
+        /// Called when a platform is placed - create links for it and update neighbors
+        /// </summary>
+        private void OnPlatformPlaced(GamePlatform platform)
+        {
+            if (!platform || !_platformManager) return;
+            
+            if (debugLogs)
+                Debug.Log($"[NavMeshManager] Platform placed: {platform.name}");
+            
+            // Get all affected platforms (this platform + neighbors)
+            var affectedPlatforms = GetAffectedPlatforms(platform);
+            
+            // Recreate links for all affected platforms
+            foreach (var p in affectedPlatforms)
+            {
+                if (p && !p.IsPickedUp)
+                {
+                    CreateLinksForPlatform(p);
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Called when a platform is picked up - clear its links and update neighbors
+        /// </summary>
+        private void OnPlatformPickedUp(GamePlatform platform)
+        {
+            if (!platform || !_platformManager) return;
+            
+            if (debugLogs)
+                Debug.Log($"[NavMeshManager] Platform picked up: {platform.name}");
+            
+            // Get neighbors from PREVIOUS position (cells have already been cleared by PlatformManager)
+            // Use previousOccupiedCells which was set before cell clearing
+            var neighbors = GetNeighborsFromPreviousCells(platform);
+            
+            // Clear links for the picked up platform
+            ClearLinksForPlatform(platform);
+            
+            // Recreate links for neighbors (their connections to this platform are now gone)
+            foreach (var neighbor in neighbors)
+            {
+                if (neighbor && !neighbor.IsPickedUp)
+                {
+                    CreateLinksForPlatform(neighbor);
+                }
+            }
+        }
+        
+        #endregion
+        
+        
+        #region Link Management
         
         /// <summary>
         /// Creates NavMesh links for a platform using the consolidated per-edge approach.
-        /// Creates ONE link per contiguous connected segment on each edge, regardless of which
-        /// neighbor(s) those sockets connect to. This prevents the "step back before crossing"
-        /// issue when adjacent sockets connect to different platforms.
         /// </summary>
-        public void CreateLinksForPlatform(GamePlatform platform, PlatformManager platformManager)
+        private void CreateLinksForPlatform(GamePlatform platform)
         {
-            if (!platform || !platformManager) return;
+            if (!platform || !_platformManager) return;
             
             // Clear existing links for this platform first
-            ClearAllLinksForPlatform(platform);
+            ClearLinksForPlatform(platform);
             
             // Get all connected sockets grouped by edge
             var edgeSegments = GetConnectedSegmentsByEdge(platform);
@@ -110,44 +219,147 @@ namespace Navigation
             {
                 foreach (var segment in edgeKvp.Value)
                 {
-                    CreateLinkForEdgeSegment(platform, segment, platformManager);
+                    CreateLinkForEdgeSegment(platform, segment);
                 }
             }
         }
         
         /// <summary>
-        /// Clears all links involving a specific platform.
+        /// Clears all links for a specific platform.
         /// </summary>
-        public void ClearAllLinksForPlatform(GamePlatform platform)
+        private void ClearLinksForPlatform(GamePlatform platform)
         {
             if (!platform) return;
             
             int platformId = platform.GetInstanceID();
-            var keysToRemove = new List<(int, int)>();
+            var key = (platformId, platformId);
             
-            foreach (var kvp in _linksByPlatformPair)
+            if (_linksByPlatform.TryGetValue(key, out var links))
             {
-                if (kvp.Key.Item1 == platformId || kvp.Key.Item2 == platformId)
+                foreach (var go in links)
                 {
-                    foreach (var go in kvp.Value)
+                    if (go)
                     {
-                        if (go)
-                        {
-                            if (Application.isPlaying)
-                                Destroy(go);
-                            else
-                                DestroyImmediate(go);
-                        }
+                        if (Application.isPlaying)
+                            Destroy(go);
+                        else
+                            DestroyImmediate(go);
                     }
-                    keysToRemove.Add(kvp.Key);
+                }
+                _linksByPlatform.Remove(key);
+                
+                if (debugLogs)
+                    Debug.Log($"[NavMeshManager] Cleared links for {platform.name}");
+            }
+        }
+        
+        #endregion
+        
+        
+        #region Neighbor Discovery
+        
+        /// <summary>
+        /// Gets all platforms affected by a platform placement (the platform + its neighbors).
+        /// </summary>
+        private HashSet<GamePlatform> GetAffectedPlatforms(GamePlatform platform)
+        {
+            var affected = new HashSet<GamePlatform> { platform };
+            
+            var neighbors = GetPlacedNeighborPlatforms(platform);
+            foreach (var neighbor in neighbors)
+            {
+                affected.Add(neighbor);
+            }
+            
+            return affected;
+        }
+        
+        /// <summary>
+        /// Gets all PLACED neighbor platforms (excludes preview/picked-up platforms).
+        /// Only considers cells that are actually Occupied (not OccupyPreview).
+        /// </summary>
+        private HashSet<GamePlatform> GetPlacedNeighborPlatforms(GamePlatform platform)
+        {
+            var neighbors = new HashSet<GamePlatform>();
+            if (!platform || !_platformManager) return neighbors;
+            
+            var sockets = platform.Sockets;
+            if (sockets == null) return neighbors;
+            
+            for (int i = 0; i < sockets.Count; i++)
+            {
+                // Check if the socket is connected to a PLACED platform (not preview)
+                if (!IsSocketConnectedToPlacedPlatform(platform, i)) continue;
+                
+                Vector2Int adjacentCell = platform.GetAdjacentCellForSocket(i);
+                if (_platformManager.GetPlatformAtCell(adjacentCell, out var neighbor))
+                {
+                    if (neighbor && neighbor != platform && !neighbor.IsPickedUp)
+                        neighbors.Add(neighbor);
                 }
             }
             
-            foreach (var key in keysToRemove)
-                _linksByPlatformPair.Remove(key);
+            return neighbors;
+        }
+        
+        /// <summary>
+        /// Checks if a socket is connected to an actually PLACED platform (not preview).
+        /// This differs from GamePlatform.IsSocketConnected which includes preview connections for railing purposes.
+        /// </summary>
+        private bool IsSocketConnectedToPlacedPlatform(GamePlatform platform, int socketIndex)
+        {
+            Vector2Int adjacentCell = platform.GetAdjacentCellForSocket(socketIndex);
             
-            if (debugLogs && keysToRemove.Count > 0)
-                Debug.Log($"[NavMeshManager] Cleared all links for {platform.name}");
+            // Check cell is actually Occupied (not OccupyPreview) using includeAllOccupation=false
+            if (!_platformManager.IsCellOccupied(adjacentCell, includeAllOccupation: false))
+                return false;
+            
+            // Verify it's a different, non-picked-up platform
+            if (!_platformManager.GetPlatformAtCell(adjacentCell, out var neighbor))
+                return false;
+            
+            return neighbor && neighbor != platform && !neighbor.IsPickedUp;
+        }
+        
+        /// <summary>
+        /// Gets neighbor platforms from a platform's previous occupied cells.
+        /// Used when a platform is picked up (its current cells are already cleared).
+        /// </summary>
+        private HashSet<GamePlatform> GetNeighborsFromPreviousCells(GamePlatform platform)
+        {
+            var neighbors = new HashSet<GamePlatform>();
+            if (!platform || !_platformManager) return neighbors;
+            
+            // Use previousOccupiedCells which contains cells before pickup
+            if (platform.previousOccupiedCells == null || platform.previousOccupiedCells.Count == 0)
+                return neighbors;
+            
+            // For each previous cell, check all 4 adjacent cells for placed neighbors
+            foreach (var cell in platform.previousOccupiedCells)
+            {
+                Vector2Int[] adjacents = 
+                {
+                    cell + Vector2Int.up,
+                    cell + Vector2Int.down,
+                    cell + Vector2Int.left,
+                    cell + Vector2Int.right
+                };
+                
+                foreach (var adjacent in adjacents)
+                {
+                    // Only consider cells that are actually Occupied (not preview)
+                    if (!_platformManager.IsCellOccupied(adjacent, includeAllOccupation: false))
+                        continue;
+                    
+                    if (_platformManager.GetPlatformAtCell(adjacent, out var neighbor))
+                    {
+                        if (neighbor && neighbor != platform && !neighbor.IsPickedUp)
+                            neighbors.Add(neighbor);
+                    }
+                }
+            }
+            
+            return neighbors;
         }
         
         #endregion
@@ -156,7 +368,8 @@ namespace Navigation
         #region Link Creation - Edge Segments
         
         /// <summary>
-        /// Gets all connected sockets grouped by edge, with contiguous sockets grouped into segments.
+        /// Gets all sockets connected to PLACED platforms, grouped by edge, with contiguous sockets grouped into segments.
+        /// Only includes connections to actually placed platforms (not preview/picked-up).
         /// </summary>
         private Dictionary<int, List<EdgeSegment>> GetConnectedSegmentsByEdge(GamePlatform platform)
         {
@@ -169,11 +382,12 @@ namespace Navigation
             int length = Mathf.Max(1, footprint.y);
             int[] edgeBounds = { 0, width, width * 2, width * 2 + length, width * 2 + length * 2 };
             
-            // Collect all connected socket indices per edge
+            // Collect all socket indices connected to PLACED platforms, per edge
             var connectedByEdge = new Dictionary<int, List<int>>();
             for (int i = 0; i < sockets.Count; i++)
             {
-                if (!platform.IsSocketConnected(i)) continue;
+                // Only include sockets connected to actually placed platforms (not preview)
+                if (!IsSocketConnectedToPlacedPlatform(platform, i)) continue;
                 
                 int edge = GetEdgeIndex(i, edgeBounds);
                 if (!connectedByEdge.ContainsKey(edge))
@@ -250,22 +464,27 @@ namespace Navigation
         
         /// <summary>
         /// Creates a single NavMesh link for an edge segment.
-        /// The link spans the entire segment width, regardless of how many different neighbors connect.
-        /// To avoid duplicate links at boundaries, only the platform with the HIGHER instance ID creates the link
-        /// (when connecting to exactly one neighbor). If connecting to multiple neighbors, always create the link.
+        /// To avoid duplicate links, only the platform with the HIGHER instance ID creates the link
+        /// (when connecting to exactly one neighbor). If connecting to multiple neighbors, always create.
         /// </summary>
-        private void CreateLinkForEdgeSegment(GamePlatform platform, EdgeSegment segment, PlatformManager platformManager)
+        private void CreateLinkForEdgeSegment(GamePlatform platform, EdgeSegment segment)
         {
             int thisId = platform.GetInstanceID();
             
-            // Find all unique neighbors this segment connects to
+            // Find all unique PLACED neighbors this segment connects to (excludes preview platforms)
             GamePlatform singleNeighbor = null;
             bool hasMultipleNeighbors = false;
             
             foreach (int socketIdx in segment.SocketIndices)
             {
                 Vector2Int adjacentCell = platform.GetAdjacentCellForSocket(socketIdx);
-                if (platformManager.GetPlatformAtCell(adjacentCell, out var neighbor) && neighbor && neighbor != platform)
+                
+                // Only consider placed platforms (not preview)
+                if (!_platformManager.IsCellOccupied(adjacentCell, includeAllOccupation: false))
+                    continue;
+                    
+                if (_platformManager.GetPlatformAtCell(adjacentCell, out var neighbor) && 
+                    neighbor && neighbor != platform && !neighbor.IsPickedUp)
                 {
                     if (singleNeighbor == null)
                     {
@@ -274,20 +493,19 @@ namespace Navigation
                     else if (singleNeighbor != neighbor)
                     {
                         hasMultipleNeighbors = true;
-                        break; // No need to check further
+                        break;
                     }
                 }
             }
             
-            // If connecting to exactly one neighbor, apply the "lower ID creates link" rule to avoid duplicates
-            // If connecting to multiple neighbors, always create the link (can't use simple ID comparison)
+            // If connecting to exactly one neighbor, apply the "lower ID creates link" rule
             if (!hasMultipleNeighbors && singleNeighbor != null)
             {
                 if (singleNeighbor.GetInstanceID() < thisId)
                 {
                     if (debugLogs)
-                        Debug.Log($"[NavMeshManager] Skipping link for {platform.name} segment - neighbor {singleNeighbor.name} has lower ID and will create it");
-                    return; // Let the neighbor with lower ID create this link
+                        Debug.Log($"[NavMeshManager] Skipping link for {platform.name} segment - neighbor {singleNeighbor.name} has lower ID");
+                    return;
                 }
             }
             
@@ -335,14 +553,14 @@ namespace Navigation
             
             // Track link by platform
             var key = (thisId, thisId);
-            if (!_linksByPlatformPair.ContainsKey(key))
-                _linksByPlatformPair[key] = new List<GameObject>();
-            _linksByPlatformPair[key].Add(go);
+            if (!_linksByPlatform.ContainsKey(key))
+                _linksByPlatform[key] = new List<GameObject>();
+            _linksByPlatform[key].Add(go);
             
             if (debugLogs)
             {
                 Debug.Log($"[NavMeshManager] Created link: {linkName}\n" +
-                          $"  Start: {startPoint}, End: {endPoint}, Width: {linkWidth}m, Sockets: {segment.SocketIndices.Count}");
+                          $"  Start: {startPoint}, End: {endPoint}, Width: {linkWidth}m");
             }
             
             if (drawDebugGizmos)
