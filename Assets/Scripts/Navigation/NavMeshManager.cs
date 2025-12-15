@@ -50,18 +50,18 @@ namespace Navigation
         [Tooltip("Whether links can be traversed in both directions.")]
         [SerializeField] private bool bidirectional = true;
         
-        [Tooltip("Whether links automatically update their endpoints when the linked objects move.")]
-        [SerializeField] private bool autoUpdatePositions = false;
-        
         [Header("Link Dimensions")]
         [Tooltip("Width per connected socket (meters). Default 1m matches grid cell size.")]
         [SerializeField] private float widthPerSocket = 1f;
         
-        [Tooltip("How far the link extends INTO each platform from the boundary (meters).")]
-        [SerializeField] private float linkDepth = 0.5f;
+        [Tooltip("How far the link extends INTO each platform from the boundary (meters). Should be > agent radius.")]
+        [SerializeField] private float linkDepth = 0.4f;
         
         [Tooltip("Height offset above platform surface for link endpoints (meters).")]
-        [SerializeField] private float heightOffset = 0.05f;
+        [SerializeField] private float heightOffset = 0f;
+        
+        [Tooltip("Search radius when sampling NavMesh for link endpoints. Helps ensure endpoints land on walkable surfaces.")]
+        [SerializeField] private float navMeshSampleRadius = 0.5f;
         
         [Header("Debug")]
         [SerializeField] private bool debugLogs;
@@ -533,44 +533,75 @@ namespace Navigation
             Vector3 linkDirection = SnapToCardinal(segment.OutwardDirection);
             float platformY = platform.transform.position.y;
             
-            // Link start is inside the platform, end is outside (at the boundary)
-            Vector3 startPoint = segment.CenterPosition - linkDirection * linkDepth;
-            Vector3 endPoint = segment.CenterPosition + linkDirection * linkDepth;
+            // Link start is inside THIS platform, end is inside NEIGHBOR platform
+            // The boundary/socket position is at the edge, so we offset inward/outward
+            Vector3 rawStartPoint = segment.CenterPosition - linkDirection * linkDepth;
+            Vector3 rawEndPoint = segment.CenterPosition + linkDirection * linkDepth;
             
-            startPoint.y = platformY + heightOffset;
-            endPoint.y = platformY + heightOffset;
+            rawStartPoint.y = platformY + heightOffset;
+            rawEndPoint.y = platformY + heightOffset;
             
-            // Align perpendicular coordinate
+            // Align perpendicular coordinate to ensure straight links
             if (Mathf.Abs(linkDirection.x) > Mathf.Abs(linkDirection.z))
             {
-                startPoint.z = segment.CenterPosition.z;
-                endPoint.z = segment.CenterPosition.z;
+                rawStartPoint.z = segment.CenterPosition.z;
+                rawEndPoint.z = segment.CenterPosition.z;
             }
             else
             {
-                startPoint.x = segment.CenterPosition.x;
-                endPoint.x = segment.CenterPosition.x;
+                rawStartPoint.x = segment.CenterPosition.x;
+                rawEndPoint.x = segment.CenterPosition.x;
+            }
+            
+            // Sample NavMesh positions to ensure endpoints are on walkable surfaces
+            // This prevents "floating" links that don't connect to actual NavMesh
+            Vector3 startPoint = rawStartPoint;
+            Vector3 endPoint = rawEndPoint;
+            
+            NavMeshQueryFilter filter = new NavMeshQueryFilter();
+            filter.agentTypeID = agentType;
+            filter.areaMask = NavMesh.AllAreas;
+            
+            if (NavMesh.SamplePosition(rawStartPoint, out NavMeshHit startHit, navMeshSampleRadius, filter.areaMask))
+            {
+                startPoint = startHit.position;
+            }
+            else if (debugLogs)
+            {
+                Debug.LogWarning($"[NavMeshManager] Could not sample NavMesh for link start at {rawStartPoint}");
+            }
+            
+            if (NavMesh.SamplePosition(rawEndPoint, out NavMeshHit endHit, navMeshSampleRadius, filter.areaMask))
+            {
+                endPoint = endHit.position;
+            }
+            else if (debugLogs)
+            {
+                Debug.LogWarning($"[NavMeshManager] Could not sample NavMesh for link end at {rawEndPoint}");
             }
             
             // Calculate link width based on number of sockets
             float linkWidth = segment.SocketIndices.Count * widthPerSocket;
             
-            // Create the link GameObject
+            // Create the link GameObject at the midpoint for cleaner transforms
             string edgeName = segment.EdgeIndex switch { 0 => "N", 1 => "S", 2 => "E", _ => "W" };
             string linkName = $"Link_{platform.name}_{edgeName}_{segment.SocketIndices[0]}-{segment.SocketIndices[^1]}";
             
+            Vector3 linkCenter = (startPoint + endPoint) * 0.5f;
             var go = new GameObject(linkName);
-            go.transform.SetParent(_linksContainer, false);
+            go.transform.SetParent(_linksContainer, true);
+            go.transform.position = linkCenter;
             
+            // NavMeshLink uses local coordinates relative to its transform
             var link = go.AddComponent<NavMeshLink>();
-            link.agentTypeID = agentType; // Uses implicit int conversion
-            link.startPoint = startPoint;
-            link.endPoint = endPoint;
+            link.agentTypeID = agentType;
+            link.startPoint = startPoint - linkCenter; // Convert to local space
+            link.endPoint = endPoint - linkCenter;     // Convert to local space
             link.width = linkWidth;
             link.bidirectional = bidirectional;
             link.area = areaType;
             link.costModifier = costModifier;
-            link.autoUpdate = autoUpdatePositions;
+            link.autoUpdate = false; // Links are fully recalculated on placement, not just moved
             
             // Track link by platform
             var key = (thisId, thisId);
@@ -581,16 +612,25 @@ namespace Navigation
             if (debugLogs)
             {
                 string agentName = NavMesh.GetSettingsNameFromID(agentType);
+                float linkLength = Vector3.Distance(startPoint, endPoint);
                 Debug.Log($"[NavMeshManager] Created link: {linkName}\n" +
                           $"  Agent: {agentName}, Area: {areaType}, Cost: {costModifier}\n" +
-                          $"  Start: {startPoint}, End: {endPoint}, Width: {linkWidth}m");
+                          $"  Start: {startPoint}, End: {endPoint}\n" +
+                          $"  Length: {linkLength:F2}m, Width: {linkWidth}m");
             }
             
             if (drawDebugGizmos)
             {
+                // Draw link line (world positions)
                 Debug.DrawLine(startPoint, endPoint, Color.green, debugDrawDuration);
+                // Draw start point marker
                 Debug.DrawRay(startPoint, Vector3.up * 0.3f, Color.cyan, debugDrawDuration);
+                Debug.DrawRay(startPoint + Vector3.up * 0.3f, Vector3.right * 0.1f, Color.cyan, debugDrawDuration);
+                Debug.DrawRay(startPoint + Vector3.up * 0.3f, Vector3.left * 0.1f, Color.cyan, debugDrawDuration);
+                // Draw end point marker
                 Debug.DrawRay(endPoint, Vector3.up * 0.3f, Color.magenta, debugDrawDuration);
+                Debug.DrawRay(endPoint + Vector3.up * 0.3f, Vector3.right * 0.1f, Color.magenta, debugDrawDuration);
+                Debug.DrawRay(endPoint + Vector3.up * 0.3f, Vector3.left * 0.1f, Color.magenta, debugDrawDuration);
             }
         }
         

@@ -123,9 +123,10 @@ public class NPCAgent : MonoBehaviour
     
     // Off-mesh link traversal
     private bool _isTraversingLink;
+    private Vector3 _linkStartPos;
     private Vector3 _linkEndPos;
-    private float _linkTotalDistance;
-    private float _linkTraveledDistance;
+    private float _linkProgress;
+    private float _linkDuration;
     
     #endregion
     
@@ -211,72 +212,109 @@ public class NPCAgent : MonoBehaviour
     /// <summary>
     /// Handles manual off-mesh link traversal at normal movement speed.
     /// Called when NavMeshAgent.autoTraverseOffMeshLink is false.
-    /// Uses velocity-based movement (not lerp) for consistent speed.
+    /// 
+    /// Key requirements for smooth traversal:
+    /// 1. Disable NavMeshAgent.updatePosition during traversal (prevents fighting)
+    /// 2. Sync NavMeshAgent.nextPosition after manual moves
+    /// 3. Use smooth linear interpolation at agent's normal speed
+    /// 4. Handle rotation toward movement direction
     /// </summary>
     private void HandleOffMeshLinkTraversal()
     {
+        // Check if we're no longer on a link (completed or cancelled)
         if (!_navAgent.isOnOffMeshLink)
         {
-            _isTraversingLink = false;
+            if (_isTraversingLink)
+            {
+                // Restore NavMeshAgent control
+                _navAgent.updatePosition = true;
+                _isTraversingLink = false;
+            }
             return;
         }
         
         float baseOffset = _navAgent.baseOffset;
         
-        // Start traversal - use agent's CURRENT position (no snap)
+        // Start traversal
         if (!_isTraversingLink)
         {
             _isTraversingLink = true;
-            _linkTraveledDistance = 0f;
+            _linkProgress = 0f;
+            
+            // Disable NavMeshAgent position updates - we control position now
+            _navAgent.updatePosition = false;
             
             var linkData = _navAgent.currentOffMeshLinkData;
+            
+            // Get link endpoints (these are ground-level positions)
+            _linkStartPos = linkData.startPos;
             _linkEndPos = linkData.endPos;
             
-            // Calculate total distance from current position to end
-            // Use ground-level positions (without baseOffset) for distance calculation
-            Vector3 groundPos = transform.position;
-            groundPos.y -= baseOffset;
-            _linkTotalDistance = Vector3.Distance(groundPos, _linkEndPos);
+            // Calculate duration based on distance and agent speed
+            float distance = Vector3.Distance(_linkStartPos, _linkEndPos);
+            float speed = Mathf.Max(_navAgent.speed, 0.1f); // Prevent division by zero
+            _linkDuration = distance / speed;
+            
+            // Ensure minimum duration for very short links
+            _linkDuration = Mathf.Max(_linkDuration, 0.05f);
+            
+            if (logStatusChanges)
+            {
+                Debug.Log($"[NPCAgent] Agent {AgentId} starting link traversal: " +
+                          $"distance={distance:F2}m, duration={_linkDuration:F2}s");
+            }
         }
         
-        if (_linkTotalDistance < 0.01f)
-        {
-            // Already at destination
-            _navAgent.CompleteOffMeshLink();
-            _isTraversingLink = false;
-            return;
-        }
+        // Progress the traversal
+        _linkProgress += Time.deltaTime / _linkDuration;
+        _linkProgress = Mathf.Clamp01(_linkProgress);
         
-        // Move at constant speed (same as normal NavMesh movement)
-        float speed = _navAgent.speed;
-        float moveDistance = speed * Time.deltaTime;
-        _linkTraveledDistance += moveDistance;
-        
-        // Calculate progress (0 to 1)
-        float progress = Mathf.Clamp01(_linkTraveledDistance / _linkTotalDistance);
-        
-        // Get current ground position (where we started this frame)
-        Vector3 currentGroundPos = transform.position;
-        currentGroundPos.y -= baseOffset;
-        
-        // Move towards end position at constant speed
-        Vector3 newGroundPos = Vector3.MoveTowards(currentGroundPos, _linkEndPos, moveDistance);
+        // Smoothly interpolate position (ground level)
+        Vector3 groundPos = Vector3.Lerp(_linkStartPos, _linkEndPos, _linkProgress);
         
         // Apply baseOffset for visual height
-        Vector3 newPos = newGroundPos;
+        Vector3 newPos = groundPos;
         newPos.y += baseOffset;
         transform.position = newPos;
         
-        // Check if we've reached the end
-        if (progress >= 1f || Vector3.Distance(newGroundPos, _linkEndPos) < 0.01f)
+        // Sync NavMeshAgent's internal position (critical for path continuity)
+        _navAgent.nextPosition = transform.position;
+        
+        // Smoothly rotate toward movement direction
+        Vector3 moveDir = (_linkEndPos - _linkStartPos).normalized;
+        if (moveDir.sqrMagnitude > 0.001f)
+        {
+            moveDir.y = 0; // Keep rotation horizontal
+            if (moveDir.sqrMagnitude > 0.001f)
+            {
+                Quaternion targetRot = Quaternion.LookRotation(moveDir);
+                transform.rotation = Quaternion.Slerp(transform.rotation, targetRot, 
+                    Time.deltaTime * _navAgent.angularSpeed * 0.01f);
+            }
+        }
+        
+        // Check if traversal is complete
+        if (_linkProgress >= 1f)
         {
             // Snap to exact end position
             Vector3 finalPos = _linkEndPos;
             finalPos.y += baseOffset;
             transform.position = finalPos;
             
+            // Sync final position
+            _navAgent.nextPosition = transform.position;
+            
+            // Complete the link traversal
             _navAgent.CompleteOffMeshLink();
+            
+            // Restore NavMeshAgent control
+            _navAgent.updatePosition = true;
             _isTraversingLink = false;
+            
+            if (logStatusChanges)
+            {
+                Debug.Log($"[NPCAgent] Agent {AgentId} completed link traversal");
+            }
         }
     }
     
@@ -522,6 +560,13 @@ public class NPCAgent : MonoBehaviour
     public void Stop()
     {
         if (!_navAgent) return;
+        
+        // Clean up any in-progress link traversal
+        if (_isTraversingLink)
+        {
+            _navAgent.updatePosition = true;
+            _isTraversingLink = false;
+        }
         
         _navAgent.ResetPath();
         _hasDestination = false;
