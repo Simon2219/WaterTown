@@ -325,7 +325,7 @@ namespace Platforms
             _socketSystem?.BuildSockets();
             _socketSystem?.EnsureChildrenModulesRegistered();
             _railingSystem?.EnsureChildrenRailingsRegistered();
-            _socketSystem?.RefreshSocketStatuses();
+            _socketSystem?.RefreshAllSocketStatuses();
         }
         
         
@@ -333,14 +333,12 @@ namespace Platforms
         private void SubscribeToSubComponentEvents()
         {
             _socketSystem.SocketsChanged += OnSocketsChanged;
-            _socketSystem.NewNeighborDetected += OnNewNeighborDetected;
         }
         
         
         private void UnsubscribeFromSubComponentEvents()
         {
             _socketSystem.SocketsChanged -= OnSocketsChanged;
-            _socketSystem.NewNeighborDetected -= OnNewNeighborDetected;
         }
 
 
@@ -388,13 +386,6 @@ namespace Platforms
             
             ConnectionsChanged?.Invoke(this);
         }
-
-
-        private void OnNewNeighborDetected(GamePlatform neighbor)
-        {
-            // Request NavMesh link creation from PlatformManager
-            _platformManager?.RequestNavMeshLink(this, neighbor);
-        }
         
         
         #endregion
@@ -410,11 +401,9 @@ namespace Platforms
         public enum SocketLocation { Edge = 0, Corner = 1 }
         
         /// Access to socket system (read-only list)
-        public IReadOnlyList<PlatformSocketSystem.SocketData> Sockets => _socketSystem?.Sockets;
+        public IReadOnlyList<PlatformSocketSystem.SocketData> Sockets => _socketSystem?.PlatformSockets;
         
         public int SocketCount => _socketSystem?.SocketCount ?? 0;
-        
-        public IReadOnlyCollection<int> ConnectedSockets => _socketSystem?.ConnectedSockets;
 
 
         public PlatformSocketSystem.SocketData GetSocket(int index) 
@@ -473,16 +462,8 @@ namespace Platforms
             => _socketSystem?.GetAdjacentCellForSocket(socketIndex) ?? Vector2Int.zero;
 
 
-        public void UpdateSocketStatusesFromGrid() 
-            => _socketSystem?.UpdateSocketStatusesFromGrid();
-
-
         public List<int> GetSocketsConnectedToNeighbor(GamePlatform neighbor) 
             => _socketSystem?.GetSocketsConnectedToNeighbor(neighbor) ?? new List<int>();
-
-
-        public void UpdateConnections(HashSet<int> newConnectedSockets) 
-            => _socketSystem?.UpdateConnections(newConnectedSockets);
 
 
         public void ResetConnections() 
@@ -490,7 +471,7 @@ namespace Platforms
 
 
         public void RefreshSocketStatuses() 
-            => _socketSystem?.RefreshSocketStatuses();
+            => _socketSystem?.RefreshAllSocketStatuses();
 
 
         public void BuildSockets() 
@@ -504,16 +485,16 @@ namespace Platforms
         #region Module Interface Methods
         
         
-        public void RegisterModuleOnSockets(GameObject moduleGo, bool occupiesSockets, IEnumerable<int> socketIndices) 
-            => _socketSystem?.RegisterModuleOnSockets(moduleGo, occupiesSockets, socketIndices);
+        public void RegisterModuleOnSockets(PlatformModule module, bool occupiesSockets, IEnumerable<int> socketIndices) 
+            => _socketSystem?.RegisterModuleOnSockets(module, occupiesSockets, socketIndices);
 
 
-        public void UnregisterModule(GameObject moduleGo) 
-            => _socketSystem?.UnregisterModule(moduleGo);
+        public void UnregisterModule(PlatformModule module) 
+            => _socketSystem?.UnregisterModule(module);
 
 
-        public void SetModuleHidden(GameObject moduleGo, bool hidden) 
-            => _socketSystem?.SetModuleHidden(moduleGo, hidden);
+        public void SetModuleHidden(PlatformModule module, bool hidden) 
+            => _socketSystem?.SetModuleHidden(module, hidden);
 
 
         public void EnsureChildrenModulesRegistered() 

@@ -5,6 +5,10 @@ using Platforms;
 
 namespace Editor
 {
+    /// <summary>
+    /// Editor-only utility that maintains platform connections and railing visibility in Scene View.
+    /// Runs outside of play mode to provide visual feedback during level design.
+    /// </summary>
     [InitializeOnLoad]
     public static class PlatformSceneLinkTester
     {
@@ -27,18 +31,18 @@ namespace Editor
                 FindObjectsInactive.Exclude, FindObjectsSortMode.None);
             if (all == null || all.Length == 0) return;
 
-            // Ensure registration is always valid in Scene View
+            // Ensure registration is always valid in Scene View (use editor tools for proper editor-mode access)
             foreach (var p in all)
             {
-                p.EnsureChildrenModulesRegistered();
-                p.EnsureChildrenRailingsRegistered();
+                EditorPlatformTools.EnsureChildrenModulesRegistered(p);
+                EditorPlatformTools.EnsureChildrenRailingsRegistered(p);
             }
 
             // Reset everything first so rails reappear when platforms separate
             foreach (var p in all)
                 p.EditorResetAllConnections();
 
-            // Try to use TownManager's grid-based adjacency checking if available
+            // Try to use PlatformManager's grid-based adjacency checking if available
             var platformManager = Object.FindFirstObjectByType<PlatformManager>();
             
             if (platformManager != null)

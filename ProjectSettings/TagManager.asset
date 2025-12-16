@@ -15,8 +15,8 @@ TagManager:
   - Platform Walkable
   - Building
   - Props
-  - 
-  - 
+  - NPCAgent
+  - NavMeshGeometry
   - 
   - 
   - 

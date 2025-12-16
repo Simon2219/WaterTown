@@ -1,12 +1,12 @@
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using Grid;
-using Unity.AI.Navigation;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.Serialization;
-using Platforms;
+
+namespace Platforms
+{
 
 
 ///
@@ -17,55 +17,48 @@ using Platforms;
 public class PlatformManager : MonoBehaviour
 {
     #region Inspector Fields
-    
-    
-    [Header("NavMesh Link Settings")]
-    
-    [Tooltip("Width of NavMesh links created between connected platforms (meters).")]
-    [SerializeField] private float navLinkWidth = 0.6f;
 
-    
-    [Header("Events")]
-    
-    [Tooltip("Invoked when a platform is successfully placed and registered.")]
+
+    [Header("Events")] [Tooltip("Invoked when a platform is successfully placed and registered.")]
     public UnityEvent<GamePlatform> PlatformPlaced;
-    
+
     [FormerlySerializedAs("OnPlatformRemoved")] [Tooltip("Invoked when a platform is removed/unregistered.")]
     public UnityEvent<GamePlatform> PlatformRemoved;
-    
-    
+
+
     #endregion
-    
-    
-    
-    
+
+
+
+
     #region Configuration & Constants
-    
-    
+
+
     private WorldGrid _worldGrid;
-    
+
     private const int ROTATION_STEP_DEGREES = 90;
     private const int ROTATION_MODULO_MASK = 3; // 0-3 for 4 cardinal directions (0°, 90°, 180°, 270°)
-    
-    
+
+
     /// All currently registered platforms (uses platform's own occupiedCells field for data)
     private readonly HashSet<GamePlatform> _registeredPlatforms = new();
-    
+
     /// Read-only access to all registered platforms
     public IReadOnlyCollection<GamePlatform> AllPlatforms => _registeredPlatforms;
-    
+
     /// Reverse lookup: which platform occupies a given cell
     private readonly Dictionary<Vector2Int, GamePlatform> _cellToPlatform = new();
 
     // Adjacency recomputation batching (performance optimization)
     // Instead of a boolean, track specific platforms that need updates
     private readonly HashSet<GamePlatform> _platformsNeedingAdjacencyUpdate = new();
+
     private bool _isRecomputingAdjacency = false;
-    
+
     #endregion
 
     #region Unity Lifecycle
-    
+
     private void Awake()
     {
         try
@@ -77,9 +70,9 @@ public class PlatformManager : MonoBehaviour
             ErrorHandler.LogAndDisable(ex, this);
         }
     }
-    
 
-    
+
+
 
     /// Finds and validates all required dependencies
     /// Throws InvalidOperationException if any critical dependency is missing
@@ -98,9 +91,9 @@ public class PlatformManager : MonoBehaviour
             }
         }
     }
-    
-    
-    
+
+
+
     /// Dependency injection method for WorldGrid (avoids FindFirstObjectByType)
     public void SetWorldGrid(WorldGrid worldGrid)
     {
@@ -108,7 +101,7 @@ public class PlatformManager : MonoBehaviour
     }
 
 
-    
+
     private void OnEnable()
     {
         // Subscribe to static platform creation/destruction events (for discovery and cleanup)
@@ -116,14 +109,14 @@ public class PlatformManager : MonoBehaviour
         GamePlatform.Destroyed += OnPlatformDestroyed;
     }
 
-    
+
 
     private void Start()
     {
         SpawnStartupPlatforms();
     }
 
-    
+
 
     private void LateUpdate()
     {
@@ -135,13 +128,13 @@ public class PlatformManager : MonoBehaviour
     }
 
 
-    
+
     private void OnDisable()
     {
         // Unsubscribe from static platform creation/destruction events
         GamePlatform.Created -= OnPlatformCreated;
         GamePlatform.Destroyed -= OnPlatformDestroyed;
-        
+
         // Best-effort cleanup of instance event subscriptions
         foreach (GamePlatform platform in _registeredPlatforms)
         {
@@ -155,7 +148,7 @@ public class PlatformManager : MonoBehaviour
             }
         }
     }
-    
+
     #endregion
 
     #region Platform Lifecycle Event Handlers
@@ -163,7 +156,7 @@ public class PlatformManager : MonoBehaviour
     private void SpawnStartupPlatforms()
     {
         // Later implementation for an Asset defining Starting Setups for the Town
-        
+
         // Ensure all existing platforms in the scene are registered into the grid
         foreach (GamePlatform platform in _registeredPlatforms)
         {
@@ -172,8 +165,8 @@ public class PlatformManager : MonoBehaviour
 
             List<Vector2Int> tmpCells = GetCellsForPlatform(platform);
             platform.occupiedCells = tmpCells;
-            
-            
+
+
             if (tmpCells.Count > 0)
             {
                 // Registers occupancy AND triggers adjacency for all platforms
@@ -181,56 +174,56 @@ public class PlatformManager : MonoBehaviour
             }
         }
     }
-    
-    
-    
-    
+
+
+
+
     /// Event handler for static Created event
     /// Subscribes to all instance events for this platform and injects dependencies
     ///
     private void OnPlatformCreated(GamePlatform platform)
     {
         if (!platform) return;
-        
+
         // Inject dependencies
         platform.SetPlatformManager(this);
         platform.SetWorldGrid(_worldGrid);
-        
+
         // Initialize sub-components AFTER dependencies are set
         platform.InitializePlatform();
-        
+
         // Subscribe to all instance events for this platform
         platform.HasMoved += OnPlatformHasMoved;
         platform.Enabled += OnPlatformEnabled;
         platform.Disabled += OnPlatformDisabled;
         platform.Placed += OnPlatformPlaced;
         platform.PickedUp += OnPlatformPickedUp;
-        
+
         // Add to registry immediately
         _registeredPlatforms.Add(platform);
     }
 
 
-    
+
     /// Event handler for static Destroyed event
     /// Unsubscribes from all instance events and cleans up
     ///
     private void OnPlatformDestroyed(GamePlatform platform)
     {
         if (!platform) return;
-        
+
         // Unsubscribe from instance events
         platform.HasMoved -= OnPlatformHasMoved;
         platform.Enabled -= OnPlatformEnabled;
         platform.Disabled -= OnPlatformDisabled;
         platform.Placed -= OnPlatformPlaced;
         platform.PickedUp -= OnPlatformPickedUp;
-        
+
         UnregisterPlatform(platform);
     }
 
-    
-    
+
+
     /// Instance event handler when a platform becomes enabled
     /// No additional action needed (platform already in registry from Created event)
     ///
@@ -241,7 +234,7 @@ public class PlatformManager : MonoBehaviour
     }
 
 
-    
+
     /// Instance event handler when a platform becomes disabled
     /// Removes the platform from the grid
     ///
@@ -254,31 +247,39 @@ public class PlatformManager : MonoBehaviour
 
     /// Event handler called when ANY platform is placed
     /// Registers platform in grid, triggers adjacency update, and rebuilds NavMesh
-    /// NavMesh links are created automatically when platforms detect connections
+    /// Note: NavMeshLinks are handled by NavMeshManager via event subscription
     ///
     private void OnPlatformPlaced(GamePlatform platform)
     {
         if (!platform) return;
-        
+
         // Register platform in grid
         RegisterPlatform(platform);
-        
+
         // Mark this platform and its neighbors for adjacency update
         MarkAdjacencyDirtyForPlatform(platform);
-        
+
+        // Force immediate adjacency computation so connections are known
+        RecomputeAdjacencyForAffectedPlatforms();
+
         // Rebuild NavMesh for this platform and all affected neighbors
         RebuildNavMeshForPlatformAndNeighbors(platform);
     }
 
 
- 
+
     /// Event handler called when ANY platform is picked up
-    /// Clears Occupied flags and cell ownership, marks adjacency dirty
+    /// Clears Occupied flags, cell ownership, and marks adjacency dirty
+    /// Note: NavMeshLinks are handled by NavMeshManager via event subscription
     ///
     private void OnPlatformPickedUp(GamePlatform platform)
     {
         if (!platform) return;
-        
+
+        // Store current cells as previous BEFORE clearing (needed for GetAffectedPlatforms)
+        platform.previousOccupiedCells.Clear();
+        platform.previousOccupiedCells.AddRange(platform.occupiedCells);
+
         // Clear Occupied flags and cell ownership for cells this platform was occupying
         if (platform.occupiedCells != null)
         {
@@ -290,17 +291,16 @@ public class PlatformManager : MonoBehaviour
                     _cellToPlatform.Remove(cell);
                 }
             }
-            
-            // Clear occupiedCells since platform no longer occupies any cells until it moves
+
             platform.occupiedCells.Clear();
         }
-        
+
         // Mark affected platforms (neighbors at old position) for adjacency update
         MarkAdjacencyDirtyForPlatform(platform);
     }
 
 
-    
+
 
     /// Called when a platform reports its transform changed
     /// Lightweight update for runtime platform movement
@@ -308,9 +308,14 @@ public class PlatformManager : MonoBehaviour
     private void OnPlatformHasMoved(GamePlatform platform)
     {
         // Store current cells as previous for the next update
-        platform.previousOccupiedCells.Clear();
-        platform.previousOccupiedCells.AddRange(platform.occupiedCells);
-        
+        // On first move after pickup, occupiedCells is empty but previousOccupiedCells has the pre-pickup position
+        // Don't overwrite previousOccupiedCells if occupiedCells is empty (preserve pre-pickup position)
+        if (platform.occupiedCells.Count > 0)
+        {
+            platform.previousOccupiedCells.Clear();
+            platform.previousOccupiedCells.AddRange(platform.occupiedCells);
+        }
+
         // Clear old preview/occupied flags for this platform's old cells
         foreach (Vector2Int cell in platform.occupiedCells)
         {
@@ -329,7 +334,7 @@ public class PlatformManager : MonoBehaviour
 
         // Different Flag based on if Preview or Placed
         WorldGrid.CellFlag flagToUse = platform.IsPickedUp ? WorldGrid.CellFlag.OccupyPreview : WorldGrid.CellFlag.Occupied;
-        
+
         // Update grid occupancy with proper flags
         foreach (Vector2Int cell in platform.occupiedCells)
         {
@@ -339,13 +344,13 @@ public class PlatformManager : MonoBehaviour
                 _cellToPlatform[cell] = platform;
             }
         }
-        
+
         // Mark this platform and affected neighbors for adjacency update
         MarkAdjacencyDirtyForPlatform(platform);
     }
 
-    
-    
+
+
     #endregion
 
     #region Public API (Platform Registration & Queries)
@@ -365,28 +370,27 @@ public class PlatformManager : MonoBehaviour
         platform = null;
         return false;
     }
-    
-    
+
+
     // Vector3Int Override
     public bool GetPlatformAtCell(Vector3Int cell, out GamePlatform platform)
     {
         return GetPlatformAtCell(new Vector2Int(cell.x, cell.y), out platform);
     }
 
-    
-    
+
+
     /// Check if cell is occupied by any platform
     /// OPTIONAL BOOL: Include similar Flags other than Occupied (Preview)
     ///
     public bool IsCellOccupied(Vector2Int cell, bool includeAllOccupation = true)
     {
         return
-            includeAllOccupation ?
-                _worldGrid.CellHasAnyFlag(cell, WorldGrid.CellFlag.Occupied | WorldGrid.CellFlag.OccupyPreview)
-                :
-                _worldGrid.CellHasAnyFlag(cell, WorldGrid.CellFlag.Occupied);
+            includeAllOccupation
+                ? _worldGrid.CellHasAnyFlag(cell, WorldGrid.CellFlag.Occupied | WorldGrid.CellFlag.OccupyPreview)
+                : _worldGrid.CellHasAnyFlag(cell, WorldGrid.CellFlag.Occupied);
     }
-    
+
 
     /// TRUE IF: All cells inside Area are FLAG Empty
     /// OccupyPreview -> considered free (allows placement over preview)
@@ -395,18 +399,18 @@ public class PlatformManager : MonoBehaviour
     {
         if (cells == null || cells.Count == 0)
             return false;
-        
+
         // Verify all cells are in bounds
         foreach (Vector2Int cell in cells)
         {
             if (!_worldGrid.CellInBounds(cell))
                 return false;
         }
-        
+
         // Cells are sorted: first = min (bottom-left), last = max (top-right)
         Vector2Int min = cells.First();
         Vector2Int max = cells.Last();
-        
+
         // Use WorldGrid's optimized area check
         return _worldGrid.AreaIsEmpty(min, max);
     }
@@ -417,10 +421,10 @@ public class PlatformManager : MonoBehaviour
     private void MarkAdjacencyDirtyForPlatform(GamePlatform platform)
     {
         if (!platform) return;
-        
+
         // Get all affected platforms (the platform + its neighbors at old and new positions)
         var affected = GetAffectedPlatforms(platform);
-        
+
         foreach (var p in affected)
         {
             if (p && p.isActiveAndEnabled)
@@ -466,13 +470,13 @@ public class PlatformManager : MonoBehaviour
             _worldGrid.TrySetCellFlag(cell, WorldGrid.CellFlag.Occupied);
             _cellToPlatform[cell] = platform;
         }
-        
+
         // Invoke UnityEvent for platform placed
         PlatformPlaced?.Invoke(platform);
     }
 
-    
-    
+
+
     /// Removes platform occupancy from the grid and clears its connections
     /// Does NOT unsubscribe from events (handled by OnPlatformDestroyed)
     ///
@@ -488,7 +492,7 @@ public class PlatformManager : MonoBehaviour
             Vector2Int min = platform.occupiedCells.First();
             Vector2Int max = platform.occupiedCells.Last();
             _worldGrid.SetFlagsInAreaExact(min, max, WorldGrid.CellFlag.Empty);
-            
+
             // Remove from reverse lookup using GetPlatformAtCell for ownership check
             foreach (Vector2Int cell in platform.occupiedCells)
             {
@@ -502,9 +506,10 @@ public class PlatformManager : MonoBehaviour
         _registeredPlatforms.Remove(platform);
 
         // Clear connections on this platform (only if active)
-        // Use runtime method - NavMesh links are cleaned up separately if needed
         if (platform.gameObject.activeInHierarchy)
             platform.ResetConnections();
+
+        // Note: NavMeshLinks are handled by NavMeshManager via event subscription
 
         // Invoke UnityEvent for platform removed
         PlatformRemoved?.Invoke(platform);
@@ -512,7 +517,7 @@ public class PlatformManager : MonoBehaviour
         // Mark affected platforms (neighbors) for adjacency update
         MarkAdjacencyDirtyForPlatform(platform);
     }
-    
+
     #endregion
 
     #region Adjacency System (Grid-Based)
@@ -526,16 +531,16 @@ public class PlatformManager : MonoBehaviour
     {
         var affected = new HashSet<GamePlatform>();
         if (!platform) return affected;
-        
+
         affected.Add(platform);
-        
+
         // Get all cells to check (current + previous)
         var allCellsToCheck = new List<Vector2Int>();
-        
+
         if (platform.occupiedCells != null)
             allCellsToCheck.AddRange(platform.occupiedCells);
-        
-        if (platform.previousOccupiedCells is {Count: > 0})
+
+        if (platform.previousOccupiedCells is { Count: > 0 })
         {
             foreach (var cell in platform.previousOccupiedCells)
             {
@@ -543,10 +548,10 @@ public class PlatformManager : MonoBehaviour
                     allCellsToCheck.Add(cell);
             }
         }
-        
+
         // Get all neighboring cells (8-directional)
         HashSet<Vector2Int> neighborCells = _worldGrid.GetNeighborCells(allCellsToCheck, include8Directional: true);
-        
+
         // Find platforms occupying neighboring cells
         foreach (var neighborCell in neighborCells)
         {
@@ -556,39 +561,8 @@ public class PlatformManager : MonoBehaviour
                     affected.Add(neighborPlatform);
             }
         }
-        
+
         return affected;
-    }
-
-
-    ///
-    /// Public method for GamePlatform to request NavMesh link creation
-    /// Called by GamePlatform when it detects a new neighbor connection
-    ///
-    [SuppressMessage("ReSharper", "Unity.PerformanceCriticalCodeInvocation")]
-    public void RequestNavMeshLink(GamePlatform platformA, GamePlatform platformB)
-    {
-        if (!platformA || !platformB) return;
-        
-        // Get sockets from A that connect to B
-        var aSocketsToB = platformA.GetSocketsConnectedToNeighbor(platformB);
-        // Get sockets from B that connect to A
-        var bSocketsToA = platformB.GetSocketsConnectedToNeighbor(platformA);
-        
-        if (aSocketsToB.Count == 0 || bSocketsToA.Count == 0) return;
-        
-        // Calculate average positions of connected sockets
-        Vector3 avgPosA = Vector3.zero;
-        foreach (int idx in aSocketsToB)
-            avgPosA += platformA.GetSocketWorldPosition(idx);
-        avgPosA /= aSocketsToB.Count;
-
-        Vector3 avgPosB = Vector3.zero;
-        foreach (int idx in bSocketsToA)
-            avgPosB += platformB.GetSocketWorldPosition(idx);
-        avgPosB /= bSocketsToA.Count;
-
-        CreateNavLinkBetween(platformA, avgPosA, platformB, avgPosB);
     }
 
 
@@ -599,9 +573,9 @@ public class PlatformManager : MonoBehaviour
     private void RebuildNavMeshForPlatformAndNeighbors(GamePlatform platform)
     {
         if (!platform) return;
-        
+
         var affectedPlatforms = GetAffectedPlatforms(platform);
-        
+
         foreach (var p in affectedPlatforms)
         {
             if (p && !p.IsPickedUp)
@@ -618,7 +592,7 @@ public class PlatformManager : MonoBehaviour
     public void ConnectPlatformsIfAdjacent(GamePlatform platformA, GamePlatform platformB)
     {
         if (!platformA || !platformB) return;
-        
+
         // Ensure platforms are registered with their grid cells
         if (!_registeredPlatforms.Contains(platformA))
         {
@@ -630,7 +604,7 @@ public class PlatformManager : MonoBehaviour
             }
             else return;
         }
-        
+
         if (!_registeredPlatforms.Contains(platformB))
         {
             List<Vector2Int> cells = GetCellsForPlatform(platformB);
@@ -641,77 +615,22 @@ public class PlatformManager : MonoBehaviour
             }
             else return;
         }
-        
+
         // Each platform updates its own sockets - NavMesh links are requested automatically
-        platformA.UpdateSocketStatusesFromGrid();
-        platformB.UpdateSocketStatusesFromGrid();
+        platformA.RefreshSocketStatuses();
+        platformB.RefreshSocketStatuses();
     }
 
 
 
 
-    ///
-    /// Creates a NavMesh link between two platforms at specified world positions
-    /// Link is attached to platform A
-    ///
-    private void CreateNavLinkBetween(GamePlatform platformA, Vector3 posA, GamePlatform platformB, Vector3 posB)
-    {
-        if (!platformA || !platformB) return;
-        
-        // Get Links parent (created during platform initialization)
-        Transform parent;
-        try
-        {
-            parent = GetLinksParent(platformA);
-        }
-        catch (MissingReferenceException e)
-        {
-            ErrorHandler.MissingDependency("[Platform Manager] " + e.Message, platformA);
-            return;
-        }
-        
-        var go = new GameObject($"Link_{platformA.name}_to_{platformB.name}");
-        go.transform.SetParent(parent, false);
 
-        Vector3 center = 0.5f * (posA + posB);
-        go.transform.position = center;
-
-        var link = go.AddComponent<NavMeshLink>();
-        link.startPoint = go.transform.InverseTransformPoint(posA);
-        link.endPoint   = go.transform.InverseTransformPoint(posB);
-        link.bidirectional = true;
-        link.width = navLinkWidth;
-        link.area = 0;
-        
-        // Cache NavSurface reference to avoid property access (NavSurface is a property getter)
-        NavMeshSurface navSurface = platformA.NavSurface;
-        link.agentTypeID = navSurface ? navSurface.agentTypeID : 0;
-    }
-
-
-    ///
-    /// Gets the Links parent transform from the platform
-    /// Links parent is created during platform initialization, so it should always exist
-    /// Throws MissingReferenceException if Links parent is not found
-    ///
-    private Transform GetLinksParent(GamePlatform platform)
-    {
-        if (!platform)
-            throw ErrorHandler.MissingDependency("GamePlatform", this);
-        
-        var linksParent = platform.LinksParentTransform;
-        
-        if (!linksParent)
-            throw ErrorHandler.MissingDependency($"Links parent on platform '{platform.name}'", platform);
-        
-        return linksParent;
-    }
-    
 
     ///
     /// Recomputes adjacency only for platforms marked as needing update
     /// Much more efficient than updating all platforms every frame
     /// This is batched to run once per frame maximum via LateUpdate
+    /// Note: NavMeshLinks are handled by NavMeshManager via event subscription (not during preview movement)
     ///
     private void RecomputeAdjacencyForAffectedPlatforms()
     {
@@ -719,20 +638,20 @@ public class PlatformManager : MonoBehaviour
         if (_isRecomputingAdjacency) return;
         _isRecomputingAdjacency = true;
 
-        // Update only the affected platforms
+        // Update socket statuses for all affected platforms (for railing visibility, etc.)
         foreach (var platform in _platformsNeedingAdjacencyUpdate)
         {
             if (!platform || !platform.isActiveAndEnabled) continue;
-            platform.UpdateSocketStatusesFromGrid();
+            platform.RefreshSocketStatuses();
         }
-        
+
         // Clear the set after processing
         _platformsNeedingAdjacencyUpdate.Clear();
         _isRecomputingAdjacency = false;
     }
-    
-    
-    
+
+
+
     #endregion
 
     #region Helper Methods
@@ -784,11 +703,10 @@ public class PlatformManager : MonoBehaviour
                 outputCells.Add(new Vector2Int(gridX, gridY));
             }
         }
+
         return outputCells;
     }
-    
+
     #endregion
 }
-
-
-
+}
