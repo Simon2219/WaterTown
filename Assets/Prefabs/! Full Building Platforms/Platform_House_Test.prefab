@@ -269,7 +269,6 @@ GameObject:
   m_Component:
   - component: {fileID: 4657452901266840748}
   - component: {fileID: 208191190689494816}
-  - component: {fileID: 7001184192041338096}
   - component: {fileID: 8593012586670190776}
   - component: {fileID: 1468731496366170708}
   - component: {fileID: 6442183240786026796}
@@ -323,38 +322,6 @@ BoxCollider:
   serializedVersion: 3
   m_Size: {x: 10.112108, y: 6.400562, z: 10.060442}
   m_Center: {x: 0.00477314, y: 2.7002814, z: 0.0019655228}
---- !u!114 &7001184192041338096
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7036358462029885031}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 7a5ac11cc976e418e8d13136b07e1f52, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Unity.AI.Navigation::Unity.AI.Navigation.NavMeshSurface
-  m_SerializedVersion: 0
-  m_AgentTypeID: -1372625422
-  m_CollectObjects: 2
-  m_Size: {x: 10, y: 10, z: 10}
-  m_Center: {x: 0, y: 2, z: 0}
-  m_LayerMask:
-    serializedVersion: 2
-    m_Bits: 2048
-  m_UseGeometry: 1
-  m_DefaultArea: 0
-  m_GenerateLinks: 1
-  m_IgnoreNavMeshAgent: 1
-  m_IgnoreNavMeshObstacle: 1
-  m_OverrideTileSize: 1
-  m_TileSize: 128
-  m_OverrideVoxelSize: 1
-  m_VoxelSize: 0.08
-  m_MinRegionArea: 2
-  m_NavMeshData: {fileID: 23800000, guid: 5cd8990d136d89842937b8221c418d5e, type: 2}
-  m_BuildHeightMesh: 0
 --- !u!114 &8593012586670190776
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -370,7 +337,6 @@ MonoBehaviour:
   occupiedCells: []
   previousOccupiedCells: []
   footprintSize: {x: 10, y: 10}
-  rebuildDebounceSeconds: 0.1
 --- !u!114 &1468731496366170708
 MonoBehaviour:
   m_ObjectHideFlags: 0
