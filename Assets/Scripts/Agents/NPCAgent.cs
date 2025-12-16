@@ -168,6 +168,8 @@ namespace Agents
         // Path failure tracking
         private int _consecutivePathFailures;
         private Vector3 _currentTargetDestination;
+        private bool _wasPathPending;
+        private Path _lastCheckedPath;
         
         // Frame skip tracking for staggered updates
         private int _frameOffset;
@@ -204,9 +206,6 @@ namespace Agents
             _aiPath.simulateMovement = true;
             _aiPath.canSearch = true;
             _aiPath.enableRotation = true;
-            
-            // Subscribe to path completion callback to detect unreachable destinations
-            _seeker.pathCallback += OnPathComplete;
             
             AgentRenderer = GetComponent<Renderer>();
             if (!AgentRenderer)
@@ -245,12 +244,6 @@ namespace Agents
         
         private void OnDestroy()
         {
-            // Unsubscribe from path callback
-            if (_seeker)
-            {
-                _seeker.pathCallback -= OnPathComplete;
-            }
-            
             if (Manager)
             {
                 Manager.UnregisterAgent(this);
@@ -368,7 +361,12 @@ namespace Agents
         
         private void CheckDestinationReached()
         {
-            if (!_hasDestination || !_aiPath) return;
+            if (!_aiPath) return;
+            
+            // Check for path completion (replaces deprecated Seeker.pathCallback)
+            CheckPathCompletion();
+            
+            if (!_hasDestination) return;
             
             // Check if destination reached
             if (_aiPath.reachedDestination && !_wasAtDestination)
@@ -401,6 +399,30 @@ namespace Agents
                     AllDestinationsCompleted?.Invoke(this);
                 }
             }
+        }
+        
+        /// <summary>
+        /// Check if path calculation just completed and validate the result.
+        /// Replaces deprecated Seeker.pathCallback approach.
+        /// </summary>
+        private void CheckPathCompletion()
+        {
+            bool currentlyPending = _aiPath.pathPending;
+            
+            // Detect when path calculation finishes (was pending, now not)
+            if (_wasPathPending && !currentlyPending && _hasDestination)
+            {
+                var path = _seeker.GetCurrentPath();
+                
+                // Only process if this is a new path we haven't checked
+                if (path != null && path != _lastCheckedPath)
+                {
+                    _lastCheckedPath = path;
+                    OnPathComplete(path);
+                }
+            }
+            
+            _wasPathPending = currentlyPending;
         }
         
         #endregion
