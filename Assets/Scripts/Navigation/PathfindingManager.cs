@@ -122,13 +122,7 @@ namespace Navigation
         [Tooltip("Minimum region area (in square world units). Removes small isolated walkable areas.")]
         [SerializeField] private float minRegionArea = 1f;
         
-        [Header("Performance Settings")]
-        [Tooltip("Use multi-threading for graph scanning (highly recommended).")]
-        [SerializeField] private bool useMultithreading = true;
-        
-        [Tooltip("Maximum tiles to update per frame when doing async updates.")]
-        [Range(1, 50)]
-        [SerializeField] private int maxTilesPerFrame = 10;
+        // Note: Multi-threading and tile update settings are configured on AstarPath component directly
         
         #endregion
         
@@ -381,12 +375,9 @@ namespace Navigation
             // === Region Settings ===
             graph.minRegionSize = minRegionArea;
             
-            // === Layers ===
-            graph.mask = walkableLayers;
+            // === Layers (A* Pro 5.4+ API) ===
+            graph.collectionSettings.layerMask = walkableLayers;
             // Note: unwalkableLayers should be excluded from walkableLayers by user
-            
-            // === Performance ===
-            // Multi-threading is handled by AstarPath settings
         }
         
         /// <summary>
@@ -916,7 +907,7 @@ namespace Navigation
             
             if (_recastGraph != null)
             {
-                _recastGraph.mask = walkableLayers;
+                _recastGraph.collectionSettings.layerMask = walkableLayers;
             }
         }
         
