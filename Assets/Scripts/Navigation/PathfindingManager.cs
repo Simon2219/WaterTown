@@ -9,7 +9,7 @@ namespace Navigation
 {
     /// <summary>
     /// Central manager for A* Pathfinding integration.
-    /// Uses LayerGridGraph for multi-level support (ramps, stairs, overhangs, tunnels).
+    /// Uses GridGraph for pathfinding (FREE version).
     /// 
     /// Architecture:
     /// - Subscribes to GamePlatform static events for platform lifecycle
@@ -17,11 +17,13 @@ namespace Navigation
     /// - Provides position validation methods for other systems
     /// - Only this manager should call A* Pathfinding systems directly
     /// 
-    /// LayerGridGraph Features:
-    /// - Multiple walkable surfaces at the same XZ position
-    /// - Automatic layer detection via raycasting
-    /// - Stair/ramp support via maxClimb setting
-    /// - Overhang/tunnel support via characterHeight
+    /// GridGraph Features:
+    /// - Single walkable surface per XZ position
+    /// - Ramps/slopes work within maxSlope angle
+    /// - 8-directional movement with path smoothing
+    /// - Dynamic updates via UpdateGraphs(bounds)
+    /// 
+    /// Note: For multi-level support (overhangs, tunnels), upgrade to A* PRO for LayerGridGraph.
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(AstarPath))]
@@ -82,16 +84,6 @@ namespace Navigation
         [Tooltip("Agent height for collision testing and clearance under overhangs.")]
         [SerializeField] private float agentHeight = 1.5f;
         
-        [Header("Multi-Level Settings (LayerGridGraph)")]
-        [Tooltip("Maximum height an agent can step up (for stairs/curbs). Set to ~0.4 for standard stairs.")]
-        [SerializeField] private float maxClimb = 0.4f;
-        
-        [Tooltip("Minimum vertical clearance required for walking (tunnels/overhangs). Should match agentHeight.")]
-        [SerializeField] private float characterHeight = 1.5f;
-        
-        [Tooltip("Maximum number of layers the graph can have. More layers = more memory but handles more vertical complexity.")]
-        [SerializeField] private int maxLayers = 4;
-        
         [Header("Collision Settings")]
         [Tooltip("Layer mask for walkable surfaces (platforms, floors).")]
         [SerializeField] private LayerMask walkableMask = ~0;
@@ -126,18 +118,17 @@ namespace Navigation
         
         public bool IsReady => _isReady;
         public AstarPath AstarPath => _astarPath;
-        public LayerGridGraph LayerGridGraph => _layerGridGraph;
+        public GridGraph GridGraph => _gridGraph;
         public float NodeSize => nodeSize;
         public float AgentRadius => agentRadius;
         public float AgentHeight => agentHeight;
-        public float MaxClimb => maxClimb;
         
         #endregion
         
         #region Private State
         
         private AstarPath _astarPath;
-        private LayerGridGraph _layerGridGraph;
+        private GridGraph _gridGraph;
         private bool _isReady;
         
         // Update batching
@@ -229,35 +220,32 @@ namespace Navigation
         
         private void InitializeGraph()
         {
-            if (debugLogs) Debug.Log("[PathfindingManager] Initializing LayerGridGraph...");
+            if (debugLogs) Debug.Log("[PathfindingManager] Initializing GridGraph...");
             
-            // Check if LayerGridGraph already exists
+            // Check if GridGraph already exists
             if (_astarPath.data.graphs != null && _astarPath.data.graphs.Length > 0)
             {
-                foreach (var graph in _astarPath.data.graphs)
+                _gridGraph = _astarPath.data.gridGraph;
+                if (_gridGraph != null)
                 {
-                    if (graph is LayerGridGraph existingLayerGraph)
-                    {
-                        _layerGridGraph = existingLayerGraph;
-                        if (debugLogs) Debug.Log("[PathfindingManager] Using existing LayerGridGraph from scene.");
-                        ConfigureExistingGraph();
-                        return;
-                    }
+                    if (debugLogs) Debug.Log("[PathfindingManager] Using existing GridGraph from scene.");
+                    ConfigureExistingGraph();
+                    return;
                 }
             }
             
-            // Create new LayerGridGraph
+            // Create new GridGraph
             CreateNewGraph();
         }
         
         private void CreateNewGraph()
         {
-            if (debugLogs) Debug.Log("[PathfindingManager] Creating new LayerGridGraph...");
+            if (debugLogs) Debug.Log("[PathfindingManager] Creating new GridGraph...");
             
-            _layerGridGraph = _astarPath.data.AddGraph(typeof(LayerGridGraph)) as LayerGridGraph;
-            if (_layerGridGraph == null)
+            _gridGraph = _astarPath.data.AddGraph(typeof(GridGraph)) as GridGraph;
+            if (_gridGraph == null)
             {
-                Debug.LogError("[PathfindingManager] Failed to create LayerGridGraph!");
+                Debug.LogError("[PathfindingManager] Failed to create GridGraph!");
                 return;
             }
             
@@ -270,18 +258,16 @@ namespace Navigation
         private void ConfigureExistingGraph()
         {
             // Apply runtime settings to existing graph
-            _layerGridGraph.collision.mask = obstacleMask;
-            _layerGridGraph.collision.heightMask = walkableMask;
-            _layerGridGraph.collision.diameter = agentRadius * 2f;
-            _layerGridGraph.collision.height = agentHeight;
-            _layerGridGraph.maxSlope = maxSlopeAngle;
-            _layerGridGraph.maxClimb = maxClimb;
-            _layerGridGraph.characterHeight = characterHeight;
+            _gridGraph.collision.mask = obstacleMask;
+            _gridGraph.collision.heightMask = walkableMask;
+            _gridGraph.collision.diameter = agentRadius * 2f;
+            _gridGraph.collision.height = agentHeight;
+            _gridGraph.maxSlope = maxSlopeAngle;
             
             _isReady = true;
             GraphReady?.Invoke();
             
-            if (debugLogs) Debug.Log("[PathfindingManager] LayerGridGraph ready (existing).");
+            if (debugLogs) Debug.Log("[PathfindingManager] GridGraph ready (existing).");
         }
         
         private void ConfigureGraph()
@@ -291,51 +277,33 @@ namespace Navigation
             int depth = Mathf.CeilToInt(graphDepth / nodeSize);
             
             // Configure graph dimensions
-            _layerGridGraph.SetDimensions(width, depth, nodeSize);
-            _layerGridGraph.center = graphCenter;
-            
-            // === Multi-Level Settings (Key for LayerGridGraph) ===
-            // Maximum step height - agents can walk up stairs/ramps within this height
-            _layerGridGraph.maxClimb = maxClimb;
-            
-            // Minimum clearance - agents need this much vertical space to walk
-            // This enables walking under overhangs and through tunnels
-            _layerGridGraph.characterHeight = characterHeight;
-            
-            // Maximum layers at any XZ position (memory vs complexity tradeoff)
-            // More layers = can handle more vertical surfaces stacked
-            // _layerGridGraph.layerCount is read-only, determined during scan
+            _gridGraph.SetDimensions(width, depth, nodeSize);
+            _gridGraph.center = graphCenter;
             
             // === Collision Detection ===
-            _layerGridGraph.collision.type = ColliderType.Capsule;
-            _layerGridGraph.collision.diameter = agentRadius * 2f;
-            _layerGridGraph.collision.height = agentHeight;
-            _layerGridGraph.collision.mask = obstacleMask;
+            _gridGraph.collision.type = ColliderType.Capsule;
+            _gridGraph.collision.diameter = agentRadius * 2f;
+            _gridGraph.collision.height = agentHeight;
+            _gridGraph.collision.mask = obstacleMask;
             
             // === Height Testing (finds walkable surfaces) ===
-            _layerGridGraph.collision.heightCheck = true;
-            _layerGridGraph.collision.heightMask = walkableMask;
-            _layerGridGraph.collision.fromHeight = raycastHeight;
+            _gridGraph.collision.heightCheck = true;
+            _gridGraph.collision.heightMask = walkableMask;
+            _gridGraph.collision.fromHeight = raycastHeight;
             
             // === Walkability ===
-            _layerGridGraph.maxSlope = maxSlopeAngle;
-            _layerGridGraph.collision.collisionCheck = true;
+            _gridGraph.maxSlope = maxSlopeAngle;
+            _gridGraph.collision.collisionCheck = true;
             
             // === Connections ===
             // 8-directional for smoother paths
-            _layerGridGraph.neighbours = NumNeighbours.Eight;
-            _layerGridGraph.cutCorners = true;
-            
-            // Erosion can help keep agents away from edges
-            // _layerGridGraph.erosionUseTags = false;
-            // _layerGridGraph.erodeIterations = 0;
+            _gridGraph.neighbours = NumNeighbours.Eight;
+            _gridGraph.cutCorners = true;
             
             if (debugLogs)
             {
-                Debug.Log($"[PathfindingManager] LayerGridGraph configured:\n" +
+                Debug.Log($"[PathfindingManager] GridGraph configured:\n" +
                           $"  Dimensions: {width}x{depth} nodes ({nodeSize}m each)\n" +
-                          $"  Max Climb: {maxClimb}m (stairs/ramps)\n" +
-                          $"  Character Height: {characterHeight}m (overhangs/tunnels)\n" +
                           $"  Agent: radius={agentRadius}m, height={agentHeight}m\n" +
                           $"  Max Slope: {maxSlopeAngle}°");
             }
@@ -346,11 +314,11 @@ namespace Navigation
         /// </summary>
         public void ScanGraph()
         {
-            if (debugLogs) Debug.Log("[PathfindingManager] Scanning LayerGridGraph...");
+            if (debugLogs) Debug.Log("[PathfindingManager] Scanning GridGraph...");
             
             ScanStarted?.Invoke();
             
-            _astarPath.Scan(_layerGridGraph);
+            _astarPath.Scan(_gridGraph);
             
             _isReady = true;
             ScanCompleted?.Invoke();
@@ -358,7 +326,7 @@ namespace Navigation
             
             if (debugLogs) 
             {
-                Debug.Log($"[PathfindingManager] LayerGridGraph scan complete.");
+                Debug.Log($"[PathfindingManager] GridGraph scan complete.");
             }
         }
         
@@ -545,9 +513,9 @@ namespace Navigation
         /// </summary>
         public bool IsPositionWalkable(Vector3 worldPosition)
         {
-            if (!_isReady || _layerGridGraph == null) return false;
+            if (!_isReady || _gridGraph == null) return false;
             
-            var node = _layerGridGraph.GetNearest(worldPosition).node;
+            var node = _gridGraph.GetNearest(worldPosition).node;
             return node != null && node.Walkable;
         }
         
@@ -558,7 +526,7 @@ namespace Navigation
         {
             walkablePosition = worldPosition;
             
-            if (!_isReady || _layerGridGraph == null) return false;
+            if (!_isReady || _gridGraph == null) return false;
             
             var constraint = NNConstraint.Default;
             constraint.constrainWalkability = true;
@@ -591,32 +559,6 @@ namespace Navigation
             path.BlockUntilCalculated();
             
             return !path.error && path.vectorPath.Count > 0;
-        }
-        
-        /// <summary>
-        /// Get all walkable positions at a given XZ coordinate (for multi-level queries).
-        /// </summary>
-        public List<Vector3> GetWalkablePositionsAtXZ(Vector3 worldPosition)
-        {
-            var result = new List<Vector3>();
-            
-            if (!_isReady || _layerGridGraph == null) return result;
-            
-            // Get the graph coordinates
-            int x = Mathf.RoundToInt((worldPosition.x - _layerGridGraph.center.x) / nodeSize + _layerGridGraph.width / 2f);
-            int z = Mathf.RoundToInt((worldPosition.z - _layerGridGraph.center.z) / nodeSize + _layerGridGraph.depth / 2f);
-            
-            // Check all layers at this position
-            for (int layer = 0; layer < _layerGridGraph.layerCount; layer++)
-            {
-                var node = _layerGridGraph.GetNode(x, z, layer);
-                if (node != null && node.Walkable)
-                {
-                    result.Add((Vector3)node.position);
-                }
-            }
-            
-            return result;
         }
         
         #endregion
@@ -661,9 +603,9 @@ namespace Navigation
         public void SetGraphCenter(Vector3 center)
         {
             graphCenter = center;
-            if (_layerGridGraph != null)
+            if (_gridGraph != null)
             {
-                _layerGridGraph.center = center;
+                _gridGraph.center = center;
             }
         }
         
@@ -672,15 +614,13 @@ namespace Navigation
         /// </summary>
         public string GetGraphInfo()
         {
-            if (_layerGridGraph == null) return "No graph initialized";
+            if (_gridGraph == null) return "No graph initialized";
             
-            return $"LayerGridGraph:\n" +
-                   $"  Size: {_layerGridGraph.width}x{_layerGridGraph.depth} nodes\n" +
-                   $"  Node Size: {_layerGridGraph.nodeSize}m\n" +
-                   $"  Layers: {_layerGridGraph.layerCount}\n" +
-                   $"  Center: {_layerGridGraph.center}\n" +
-                   $"  Max Climb: {_layerGridGraph.maxClimb}m\n" +
-                   $"  Character Height: {_layerGridGraph.characterHeight}m";
+            return $"GridGraph:\n" +
+                   $"  Size: {_gridGraph.width}x{_gridGraph.depth} nodes\n" +
+                   $"  Node Size: {_gridGraph.nodeSize}m\n" +
+                   $"  Center: {_gridGraph.center}\n" +
+                   $"  Max Slope: {_gridGraph.maxSlope}°";
         }
         
         private void DebugDrawBounds(Bounds bounds, Color color, float duration)
