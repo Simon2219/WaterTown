@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
-// TODO: A* Pathfinding - Replace with A* pathfinding includes
-// using UnityEngine.AI;
+using Pathfinding;
+using Navigation;
 
 namespace Agents
 {
@@ -11,7 +11,7 @@ namespace Agents
     /// Handles spawning, registration, and performance optimization via LOD and culling.
     /// Designed for 500+ agents with batched updates.
     /// 
-    /// TODO: A* Pathfinding - Update spawning to use A* graph validation instead of NavMesh.
+    /// Uses A* Pathfinding Project for navigation.
     /// </summary>
     [DisallowMultipleComponent]
     public class NPCManager : MonoBehaviour
@@ -40,28 +40,22 @@ namespace Agents
         #region Configuration - Agent Settings
         
         [Header("Agent Prefab Settings")]
-        [Tooltip("Optional prefab with pre-configured pathfinding components.\n" +
+        [Tooltip("Optional prefab with pre-configured AIPath and Seeker components.\n" +
                  "RECOMMENDED: Create a prefab with A* pathfinding components already set up.\n" +
                  "If null, agents are created procedurally as capsules.")]
         [SerializeField] private GameObject agentPrefab;
         
-        [Header("Default Agent Settings")]
-        // TODO: A* Pathfinding - Replace with A* agent type selection
-        // [Tooltip("NavMesh Agent Type. Must match the agent type used when baking NavMeshSurfaces.")]
-        // [SerializeField] private NavMeshAgentType agentType;
-        
+        [Header("Default Agent Movement Settings")]
         [SerializeField] private float defaultSpeed = 3.5f;
-        [SerializeField] private float defaultAngularSpeed = 120f;
+        [SerializeField] private float defaultRotationSpeed = 360f;
         [SerializeField] private float defaultAcceleration = 8f;
-        [SerializeField] private float defaultStoppingDistance = 0.1f;
+        [SerializeField] private float defaultEndReachedDistance = 0.2f;
+        
+        [Header("Default Agent Dimensions")]
         [SerializeField] private float agentRadius = 0.3f;
-        [SerializeField] private float agentHeight = 1.8f;
+        [SerializeField] private float agentHeight = 1.5f;
         
         [Header("Spawn Settings")]
-        // TODO: A* Pathfinding - Use when implementing spawn position validation
-        // [Tooltip("Maximum distance to search for valid pathfinding position when spawning.")]
-        // [SerializeField] private float pathfindingSearchRadius = 2f;
-        
         [Tooltip("Layer to assign spawned agents to. Important for selection raycasts!")]
         [SerializeField] private string agentLayerName = "NPCAgent";
         
@@ -114,9 +108,9 @@ namespace Agents
         #region Public Properties
         
         public float DefaultSpeed => defaultSpeed;
-        public float DefaultAngularSpeed => defaultAngularSpeed;
+        public float DefaultRotationSpeed => defaultRotationSpeed;
         public float DefaultAcceleration => defaultAcceleration;
-        public float DefaultStoppingDistance => defaultStoppingDistance;
+        public float DefaultEndReachedDistance => defaultEndReachedDistance;
         public float AgentRadius => agentRadius;
         public float AgentHeight => agentHeight;
         public float SelectedScaleMultiplier => selectedScaleMultiplier;
@@ -184,6 +178,9 @@ namespace Agents
         // ID generation
         private static int _nextAgentId;
         
+        // PathfindingManager reference
+        private PathfindingManager _pathfindingManager;
+        
         #endregion
         
         #region Unity Lifecycle
@@ -204,6 +201,15 @@ namespace Agents
             };
             
             _lodCamera = Camera.main;
+        }
+        
+        private void Start()
+        {
+            _pathfindingManager = PathfindingManager.Instance;
+            if (!_pathfindingManager)
+            {
+                Debug.LogWarning("[NPCManager] PathfindingManager not found. Agent spawning may fail.");
+            }
         }
         
         private void Update()
@@ -402,38 +408,24 @@ namespace Agents
         
         /// <summary>
         /// Spawn an agent at the specified world position.
-        /// TODO: A* Pathfinding - Update to validate position using A* graph.
         /// </summary>
         /// <param name="worldPosition">World position to spawn at</param>
-        /// <param name="overrideAgentTypeID">Optional: override the default agent type ID (not used with A*).</param>
-        public NPCAgent SpawnAgent(Vector3 worldPosition, int overrideAgentTypeID = -1)
+        public NPCAgent SpawnAgent(Vector3 worldPosition)
         {
-            // TODO: A* Pathfinding - Use A* graph to validate and snap spawn position
-            /*
-            // Determine which agent type we're spawning
-            int finalAgentType = overrideAgentTypeID >= 0 ? overrideAgentTypeID : agentType.AgentTypeID;
-            
-            // Create a query filter for the specific agent type
-            var filter = new NavMeshQueryFilter
-            {
-                agentTypeID = finalAgentType,
-                areaMask = NavMesh.AllAreas
-            };
-            
-            // Find nearest NavMesh position for THIS agent type
-            if (!NavMesh.SamplePosition(worldPosition, out NavMeshHit navHit, pathfindingSearchRadius, filter))
-            {
-                Debug.LogWarning($"[NPCManager] No NavMesh for agent type {finalAgentType} within {pathfindingSearchRadius}m of {worldPosition}. " +
-                                 "Make sure you're clicking on a NavMesh area baked for this agent type!");
-                return null;
-            }
-            
-            // Use the NavMesh position
-            Vector3 navMeshPosition = navHit.position;
-            */
-            
-            // For now, use the world position directly (A* will handle validation)
+            // Validate spawn position using PathfindingManager
             Vector3 spawnPosition = worldPosition;
+            
+            if (_pathfindingManager && _pathfindingManager.IsReady)
+            {
+                if (_pathfindingManager.GetNearestWalkablePosition(worldPosition, out Vector3 walkablePos, 5f))
+                {
+                    spawnPosition = walkablePos;
+                }
+                else
+                {
+                    Debug.LogWarning($"[NPCManager] No walkable position near {worldPosition}. Spawning at exact position.");
+                }
+            }
             
             if (debugSpawnLogs)
             {
@@ -442,7 +434,7 @@ namespace Agents
                           $"  Position: {spawnPosition}");
             }
             
-            // Create GameObject AT SPAWN POSITION
+            // Create GameObject
             GameObject agentGo = agentPrefab 
                 ? Instantiate(agentPrefab, spawnPosition, Quaternion.identity)
                 : CreateProceduralAgent(spawnPosition);
@@ -458,26 +450,17 @@ namespace Agents
                 Debug.LogWarning($"[NPCManager] Layer '{agentLayerName}' not found!");
             }
             
-            // TODO: A* Pathfinding - Add/configure A* pathfinding components (Seeker, AIPath, etc.)
-            /*
-            // Get/Add NavMeshAgent
-            // Note: Unity may log a warning here if default agent type differs from our type.
-            // This is harmless - we configure the correct type immediately after.
-            var navAgent = agentGo.GetComponent<NavMeshAgent>();
-            if (!navAgent)
+            // Ensure A* components exist
+            EnsurePathfindingComponents(agentGo);
+            
+            // Configure AIPath
+            var aiPath = agentGo.GetComponent<AIPath>();
+            if (aiPath)
             {
-                navAgent = agentGo.AddComponent<NavMeshAgent>();
+                ConfigureAIPath(aiPath);
             }
             
-            // Configure agent with correct type FIRST
-            navAgent.agentTypeID = finalAgentType;
-            ConfigureNavMeshAgent(navAgent);
-            
-            // Warp to ensure proper placement on the correct NavMesh
-            navAgent.Warp(spawnPosition);
-            */
-            
-            // Now add NPCAgent
+            // Get or add NPCAgent
             var npcAgent = agentGo.GetComponent<NPCAgent>();
             if (!npcAgent)
             {
@@ -510,6 +493,41 @@ namespace Agents
             return SpawnAgent(spawnPoint.position);
         }
         
+        private void EnsurePathfindingComponents(GameObject agentGo)
+        {
+            // Ensure Seeker exists
+            if (!agentGo.GetComponent<Seeker>())
+            {
+                agentGo.AddComponent<Seeker>();
+            }
+            
+            // Ensure AIPath exists
+            if (!agentGo.GetComponent<AIPath>())
+            {
+                agentGo.AddComponent<AIPath>();
+            }
+        }
+        
+        private void ConfigureAIPath(AIPath aiPath)
+        {
+            aiPath.maxSpeed = defaultSpeed;
+            aiPath.rotationSpeed = defaultRotationSpeed;
+            aiPath.maxAcceleration = defaultAcceleration;
+            aiPath.endReachedDistance = defaultEndReachedDistance;
+            aiPath.slowdownDistance = 0.6f;
+            aiPath.pickNextWaypointDist = 2f;
+            
+            // Configure for ground movement
+            aiPath.gravity = new Vector3(0, -9.81f, 0);
+            aiPath.groundMask = ~0; // All layers
+            aiPath.enableRotation = true;
+            aiPath.orientation = OrientationMode.YAxisForward;
+            
+            // Movement type
+            aiPath.canMove = true;
+            aiPath.canSearch = true;
+        }
+        
         private GameObject CreateProceduralAgent(Vector3 position)
         {
             var go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
@@ -529,37 +547,22 @@ namespace Agents
                 renderer.material = new Material(_sharedAgentMaterial);
             }
             
-            // Remove the default CapsuleCollider and add one sized for selection
+            // Configure collider
             var collider = go.GetComponent<CapsuleCollider>();
             if (collider)
             {
-                // Adjust collider to account for scale
-                collider.height = 2f; // Default capsule height before scale
-                collider.radius = 0.5f; // Default capsule radius before scale
+                collider.height = 2f;
+                collider.radius = 0.5f;
             }
+            
+            // Add CharacterController for AIPath ground detection
+            var cc = go.AddComponent<CharacterController>();
+            cc.height = 2f;
+            cc.radius = 0.5f;
+            cc.center = Vector3.zero;
             
             return go;
         }
-        
-        /* TODO: A* Pathfinding - Replace with A* agent configuration
-        private void ConfigureNavMeshAgent(NavMeshAgent navAgent)
-        {
-            // Note: agentTypeID is set AFTER Warp() in SpawnAgent - must be on NavMesh first
-            navAgent.speed = defaultSpeed;
-            navAgent.angularSpeed = defaultAngularSpeed;
-            navAgent.acceleration = defaultAcceleration;
-            navAgent.stoppingDistance = defaultStoppingDistance;
-            navAgent.radius = agentRadius;
-            navAgent.height = agentHeight;
-            
-            // BaseOffset: capsule pivot is at center, so height/2 places bottom on ground
-            navAgent.baseOffset = agentHeight / 2f;
-            
-            navAgent.areaMask = NavMesh.AllAreas;
-            // Note: autoTraverseOffMeshLink is configured by NPCAgent based on its useAutoLinkTraversal setting
-            navAgent.autoBraking = true;
-        }
-        */
         
         #endregion
         
@@ -593,9 +596,6 @@ namespace Agents
         
         #region Utility
         
-        /// <summary>
-        /// Set layer on GameObject and all its children.
-        /// </summary>
         private void SetLayerRecursively(GameObject obj, int layer)
         {
             obj.layer = layer;
