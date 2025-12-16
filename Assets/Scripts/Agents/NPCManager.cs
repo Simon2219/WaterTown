@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 using Pathfinding;
+using Pathfinding.RVO;
 using Navigation;
 
 namespace Agents
@@ -77,11 +78,30 @@ namespace Agents
         [SerializeField] private Color errorColor = new Color(0.9f, 0.1f, 0.1f, 1f);
         
         [Header("Selection Visual")]
-        [Tooltip("Color tint when agent is selected (multiplied with status color)")]
-        [SerializeField] private Color selectedTint = new Color(1f, 1f, 0.5f, 1f);
+        [Tooltip("Color when agent is selected (replaces status color)")]
+        [SerializeField] private Color selectedColor = new Color(1f, 0.9f, 0.2f, 1f);
         
         [Header("Selection Settings")]
         [SerializeField] private float selectedScaleMultiplier = 1.1f;
+        
+        [Header("Local Avoidance (RVO)")]
+        [Tooltip("Enable local avoidance so agents avoid each other")]
+        [SerializeField] private bool enableLocalAvoidance = true;
+        
+        [Tooltip("How much agents avoid each other. Higher = stronger avoidance")]
+        [SerializeField] [Range(0f, 1f)] private float avoidancePriority = 0.5f;
+        
+        [Tooltip("How far ahead agents look to avoid collisions (seconds)")]
+        [SerializeField] private float agentTimeHorizon = 2f;
+        
+        [Tooltip("How far ahead agents look for obstacles (seconds)")]
+        [SerializeField] private float obstacleTimeHorizon = 2f;
+        
+        [Tooltip("Max number of neighbors to consider for avoidance")]
+        [SerializeField] private int maxNeighbors = 10;
+        
+        [Tooltip("Locked agents stay in place during avoidance")]
+        [SerializeField] private bool lockWhenNotMoving = true;
         
         #endregion
         
@@ -133,7 +153,10 @@ namespace Agents
         public Color MovingColor => movingColor;
         public Color CalculatingColor => calculatingColor;
         public Color ErrorColor => errorColor;
-        public Color SelectedTint => selectedTint;
+        public Color SelectedColor => selectedColor;
+        
+        /// <summary>Whether local avoidance (RVO) is enabled.</summary>
+        public bool LocalAvoidanceEnabled => enableLocalAvoidance;
         
         /// <summary>All registered agents.</summary>
         public IReadOnlyList<NPCAgent> AllAgents => _agentsList;
@@ -183,6 +206,9 @@ namespace Agents
         private float _lastLODUpdateTime;
         private int _lodUpdateIndex;
         
+        // Local Avoidance
+        private RVOSimulator _rvoSimulator;
+        
         // Shared material
         private Material _sharedAgentMaterial;
         
@@ -223,6 +249,56 @@ namespace Agents
             if (!_pathfindingManager)
             {
                 Debug.LogWarning("[NPCManager] PathfindingManager not found. Agent spawning may fail.");
+            }
+            
+            // Initialize RVO local avoidance if enabled
+            if (enableLocalAvoidance)
+            {
+                InitializeLocalAvoidance();
+            }
+        }
+        
+        private void InitializeLocalAvoidance()
+        {
+            // Find existing RVOSimulator first
+            _rvoSimulator = FindFirstObjectByType<RVOSimulator>();
+            
+            if (_rvoSimulator)
+            {
+                if (debugSpawnLogs)
+                {
+                    Debug.Log($"[NPCManager] Found existing RVOSimulator on '{_rvoSimulator.gameObject.name}'");
+                }
+                return;
+            }
+            
+            // Create RVOSimulator on PathfindingManager if it exists
+            if (_pathfindingManager)
+            {
+                _rvoSimulator = _pathfindingManager.gameObject.GetComponent<RVOSimulator>();
+                if (!_rvoSimulator)
+                {
+                    _rvoSimulator = _pathfindingManager.gameObject.AddComponent<RVOSimulator>();
+                    
+                    if (debugSpawnLogs)
+                    {
+                        Debug.Log("[NPCManager] Added RVOSimulator to PathfindingManager");
+                    }
+                }
+            }
+            else
+            {
+                // Fallback: create on this manager if PathfindingManager doesn't exist
+                _rvoSimulator = gameObject.GetComponent<RVOSimulator>();
+                if (!_rvoSimulator)
+                {
+                    _rvoSimulator = gameObject.AddComponent<RVOSimulator>();
+                    
+                    if (debugSpawnLogs)
+                    {
+                        Debug.Log("[NPCManager] Added RVOSimulator to NPCManager (PathfindingManager not found)");
+                    }
+                }
             }
         }
         
@@ -502,10 +578,41 @@ namespace Agents
             }
             
             // Ensure AIPath exists
-            if (!agentGo.GetComponent<AIPath>())
+            var aiPath = agentGo.GetComponent<AIPath>();
+            if (!aiPath)
             {
-                agentGo.AddComponent<AIPath>();
+                aiPath = agentGo.AddComponent<AIPath>();
             }
+            
+            // Add RVOController for local avoidance if enabled
+            if (enableLocalAvoidance)
+            {
+                var rvoController = agentGo.GetComponent<RVOController>();
+                if (!rvoController)
+                {
+                    rvoController = agentGo.AddComponent<RVOController>();
+                }
+                ConfigureRVOController(rvoController);
+            }
+        }
+        
+        private void ConfigureRVOController(RVOController rvo)
+        {
+            // Agent dimensions
+            rvo.radius = agentRadius;
+            rvo.height = agentHeight;
+            rvo.center = new Vector3(0, agentHeight / 2f, 0);
+            
+            // Avoidance behavior
+            rvo.agentTimeHorizon = agentTimeHorizon;
+            rvo.obstacleTimeHorizon = obstacleTimeHorizon;
+            rvo.maxNeighbours = maxNeighbors;
+            rvo.priority = avoidancePriority;
+            rvo.lockWhenNotMoving = lockWhenNotMoving;
+            
+            // Layer - default to same as agent layer
+            rvo.layer = RVOLayer.DefaultAgent;
+            rvo.collidesWith = RVOLayer.DefaultAgent | RVOLayer.DefaultObstacle;
         }
         
         private void ConfigureAIPath(AIPath aiPath)
@@ -638,18 +745,17 @@ namespace Agents
         
         /// <summary>
         /// Get color for an agent, taking selection into account.
+        /// Selected agents show a distinct yellow color.
         /// </summary>
         public Color GetColorForAgent(NPCAgent agent)
         {
-            Color baseColor = GetColorForStatus(agent.Status);
-            
-            // Apply selection tint if selected
+            // Selected agents get a distinct color (yellow)
             if (agent.IsSelected)
             {
-                return baseColor * selectedTint;
+                return selectedColor;
             }
             
-            return baseColor;
+            return GetColorForStatus(agent.Status);
         }
         
         public void SetLODCamera(Camera camera)
