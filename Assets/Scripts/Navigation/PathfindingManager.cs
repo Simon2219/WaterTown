@@ -8,20 +8,15 @@ using Platforms;
 namespace Navigation
 {
     /// <summary>
-    /// Central manager for A* Pathfinding integration using RecastGraph.
-    /// Generates a NavMesh from scene geometry for true free movement.
+    /// Central manager for A* Pathfinding integration.
     /// 
-    /// Architecture:
-    /// - Subscribes to GamePlatform static events for platform lifecycle
-    /// - Triggers local tile-based graph updates when platforms change
-    /// - Provides position validation methods for other systems
-    /// - Only this manager should call A* Pathfinding systems directly
+    /// IMPORTANT: Configure RecastGraph settings in the AstarPath component Inspector!
+    /// This manager only handles:
+    /// - Platform event subscriptions for dynamic graph updates
+    /// - Batched graph updates when platforms are picked up or placed
+    /// - Position validation methods for other systems
     /// 
-    /// RecastGraph Features:
-    /// - True NavMesh with free movement (not grid-based)
-    /// - Multi-level support (overhangs, ramps, tunnels)
-    /// - Tile-based for efficient local updates
-    /// - Automatic mesh generation from scene geometry
+    /// The manager does NOT duplicate settings already in AstarPath/RecastGraph.
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(AstarPath))]
@@ -60,73 +55,7 @@ namespace Navigation
         
         #endregion
         
-        #region Configuration - Graph Bounds
-        
-        [Header("Graph Bounds")]
-        [Tooltip("Center position of the navmesh in world space.")]
-        [SerializeField] private Vector3 graphCenter = new Vector3(500, 0, 500);
-        
-        [Tooltip("Size of the navmesh area in world units (X, Y, Z).")]
-        [SerializeField] private Vector3 graphSize = new Vector3(1000, 50, 1000);
-        
-        [Tooltip("Rotation of the navmesh bounds.")]
-        [SerializeField] private Vector3 graphRotation = Vector3.zero;
-        
-        #endregion
-        
-        #region Configuration - Agent Settings
-        
-        [Header("Agent Settings")]
-        [Tooltip("Agent radius for navigation. Agents cannot get closer to walls than this.")]
-        [SerializeField] private float agentRadius = 0.3f;
-        
-        [Tooltip("Agent height. Areas with lower ceilings will be excluded.")]
-        [SerializeField] private float agentHeight = 1.5f;
-        
-        [Tooltip("Maximum height an agent can step up (stairs, curbs). Standard stairs ~0.3-0.4m.")]
-        [SerializeField] private float maxClimb = 0.4f;
-        
-        [Tooltip("Maximum slope angle for walkable surfaces (degrees).")]
-        [SerializeField] private float maxSlope = 45f;
-        
-        #endregion
-        
-        #region Configuration - Layers
-        
-        [Header("Layer Configuration")]
-        [Tooltip("Layers to include when scanning for walkable geometry (platforms, floors, terrain).")]
-        [SerializeField] private LayerMask walkableLayers = ~0;
-        
-        [Tooltip("Layers that should NEVER be walkable, even if in walkableLayers.")]
-        [SerializeField] private LayerMask unwalkableLayers = 0;
-        
-        #endregion
-        
-        #region Configuration - Quality & Performance
-        
-        [Header("Quality Settings")]
-        [Tooltip("Cell size for navmesh generation. Smaller = more precise but slower/more memory.\n" +
-                 "Recommended: 0.1-0.3 for detailed scenes, 0.3-0.5 for large open areas.")]
-        [Range(0.05f, 1f)]
-        [SerializeField] private float cellSize = 0.3f;
-        
-        // Note: Cell height is configured directly on the RecastGraph in the Inspector
-        // It's typically set to 0.5-1x the cellSize value
-        
-        [Tooltip("Tile size in voxels. Larger tiles = faster initial scan, slower updates.\n" +
-                 "Smaller tiles = slower initial scan, faster local updates.\n" +
-                 "Recommended: 64-256 for frequently updated scenes.")]
-        [Range(16, 512)]
-        [SerializeField] private int tileSize = 128;
-        
-        [Tooltip("Minimum region area (in square world units). Removes small isolated walkable areas.")]
-        [SerializeField] private float minRegionArea = 1f;
-        
-        // Note: Multi-threading and tile update settings are configured on AstarPath component directly
-        
-        #endregion
-        
-        #region Configuration - Updates
+        #region Configuration
         
         [Header("Dynamic Update Settings")]
         [Tooltip("Extra padding around platform bounds when updating graph (world units).")]
@@ -138,28 +67,13 @@ namespace Navigation
         [Tooltip("Minimum time between graph updates (seconds). Prevents update spam.")]
         [SerializeField] private float updateCooldown = 0.2f;
         
-        [Tooltip("If true, updates during platform movement are throttled for performance.")]
-        [SerializeField] private bool throttleMovementUpdates = true;
-        
-        [Tooltip("Interval for updates during platform movement (seconds).")]
-        [SerializeField] private float movementUpdateInterval = 0.5f;
-        
-        #endregion
-        
-        #region Configuration - References
-        
         [Header("References")]
-        [Tooltip("Reference to WorldGrid for coordinate transforms.")]
+        [Tooltip("Reference to WorldGrid for coordinate transforms (optional).")]
         [SerializeField] private WorldGrid worldGrid;
-        
-        #endregion
-        
-        #region Configuration - Debug
         
         [Header("Debug")]
         [SerializeField] private bool debugLogs = true;
         [SerializeField] private bool debugDrawUpdates = false;
-        [SerializeField] private bool debugDrawBounds = false;
         
         #endregion
         
@@ -168,16 +82,7 @@ namespace Navigation
         public bool IsReady => _isReady;
         public AstarPath AstarPath => _astarPath;
         public RecastGraph RecastGraph => _recastGraph;
-        
-        // Agent settings (read-only)
-        public float AgentRadius => agentRadius;
-        public float AgentHeight => agentHeight;
-        public float MaxClimb => maxClimb;
-        public float MaxSlope => maxSlope;
-        
-        // Quality settings (read-only)
-        public float CellSize => cellSize;
-        public int TileSize => tileSize;
+        public float UpdatePadding => updatePadding;
         
         #endregion
         
@@ -194,13 +99,10 @@ namespace Navigation
         private float _lastUpdateProcessed;
         private bool _updateScheduled;
         
-        // Movement update throttling
-        private float _lastMovementUpdate;
-        
         // Platform tracking
         private readonly HashSet<GamePlatform> _registeredPlatforms = new();
         
-        // Previous bounds tracking (for move operations)
+        // Previous bounds tracking (for pickup/place operations)
         private readonly Dictionary<GamePlatform, Bounds> _previousBounds = new();
         
         #endregion
@@ -234,24 +136,18 @@ namespace Navigation
         
         private void OnEnable()
         {
-            // Subscribe to platform events
             GamePlatform.Created += OnPlatformCreated;
             GamePlatform.Destroyed += OnPlatformDestroyed;
         }
         
         private void OnDisable()
         {
-            // Unsubscribe from platform events
             GamePlatform.Created -= OnPlatformCreated;
             GamePlatform.Destroyed -= OnPlatformDestroyed;
             
-            // Unsubscribe from individual platform events
             foreach (var platform in _registeredPlatforms)
             {
-                if (platform)
-                {
-                    UnsubscribeFromPlatform(platform);
-                }
+                if (platform) UnsubscribeFromPlatform(platform);
             }
             _registeredPlatforms.Clear();
             _previousBounds.Clear();
@@ -264,10 +160,8 @@ namespace Navigation
         
         private void Update()
         {
-            // Process batched updates
             if (_updateScheduled && Time.time - _lastUpdateRequest >= updateDelay)
             {
-                // Check cooldown
                 if (Time.time - _lastUpdateProcessed >= updateCooldown)
                 {
                     ProcessPendingUpdates();
@@ -277,10 +171,7 @@ namespace Navigation
         
         private void OnDestroy()
         {
-            if (_instance == this)
-            {
-                _instance = null;
-            }
+            if (_instance == this) _instance = null;
         }
         
         #endregion
@@ -289,127 +180,62 @@ namespace Navigation
         
         private void InitializeGraph()
         {
-            if (debugLogs) Debug.Log("[PathfindingManager] Initializing RecastGraph...");
+            if (debugLogs) Debug.Log("[PathfindingManager] Initializing...");
             
-            // Check if RecastGraph already exists
+            // Find existing RecastGraph configured in AstarPath Inspector
             if (_astarPath.data.graphs != null && _astarPath.data.graphs.Length > 0)
             {
                 foreach (var graph in _astarPath.data.graphs)
                 {
-                    if (graph is RecastGraph existingGraph)
+                    if (graph is RecastGraph rg)
                     {
-                        _recastGraph = existingGraph;
-                        if (debugLogs) Debug.Log("[PathfindingManager] Using existing RecastGraph from scene.");
-                        ConfigureExistingGraph();
-                        return;
+                        _recastGraph = rg;
+                        if (debugLogs) Debug.Log("[PathfindingManager] Found RecastGraph.");
+                        break;
                     }
                 }
             }
             
-            // Create new RecastGraph
-            CreateNewGraph();
-        }
-        
-        private void CreateNewGraph()
-        {
-            if (debugLogs) Debug.Log("[PathfindingManager] Creating new RecastGraph...");
-            
-            _recastGraph = _astarPath.data.AddGraph(typeof(RecastGraph)) as RecastGraph;
             if (_recastGraph == null)
             {
-                Debug.LogError("[PathfindingManager] Failed to create RecastGraph!");
+                Debug.LogError("[PathfindingManager] No RecastGraph found! Configure one in AstarPath component.");
                 return;
             }
             
-            ConfigureGraph();
-            
-            // Initial scan
+            // Perform initial scan
             ScanGraph();
         }
         
-        private void ConfigureExistingGraph()
-        {
-            // Apply runtime settings to existing graph
-            ApplyGraphSettings(_recastGraph);
-            
-            _isReady = true;
-            GraphReady?.Invoke();
-            
-            if (debugLogs) Debug.Log("[PathfindingManager] RecastGraph ready (existing).");
-        }
-        
-        private void ConfigureGraph()
-        {
-            ApplyGraphSettings(_recastGraph);
-            
-            if (debugLogs)
-            {
-                Debug.Log($"[PathfindingManager] RecastGraph configured:\n" +
-                          $"  Bounds: {graphSize} at {graphCenter}\n" +
-                          $"  Agent: radius={agentRadius}m, height={agentHeight}m, climb={maxClimb}m\n" +
-                          $"  Quality: cellSize={cellSize}m, tileSize={tileSize}\n" +
-                          $"  Max Slope: {maxSlope}°");
-            }
-        }
-        
-        private void ApplyGraphSettings(RecastGraph graph)
-        {
-            // === Bounds ===
-            graph.forcedBoundsCenter = graphCenter;
-            graph.forcedBoundsSize = graphSize;
-            graph.rotation = graphRotation;
-            
-            // === Agent ===
-            graph.characterRadius = agentRadius;
-            graph.walkableHeight = agentHeight;
-            graph.walkableClimb = maxClimb;
-            graph.maxSlope = maxSlope;
-            
-            // === Voxelization Quality ===
-            graph.cellSize = cellSize;
-            // Note: cellHeight is typically derived from cellSize in A* Pro 5.4
-            // It can be configured in the Inspector on the RecastGraph component
-            graph.useTiles = true;
-            graph.editorTileSize = tileSize;
-            
-            // === Region Settings ===
-            graph.minRegionSize = minRegionArea;
-            
-            // === Layers (A* Pro 5.4+ API) ===
-            graph.collectionSettings.layerMask = walkableLayers;
-            // Note: unwalkableLayers should be excluded from walkableLayers by user
-        }
-        
         /// <summary>
-        /// Perform initial graph scan.
+        /// Perform graph scan using settings configured in AstarPath Inspector.
         /// </summary>
         public void ScanGraph()
         {
-            if (debugLogs) Debug.Log("[PathfindingManager] Scanning RecastGraph...");
+            if (_recastGraph == null)
+            {
+                Debug.LogError("[PathfindingManager] Cannot scan - no RecastGraph found!");
+                return;
+            }
+            
+            if (debugLogs) Debug.Log("[PathfindingManager] Scanning graph...");
             
             ScanStarted?.Invoke();
-            
             _astarPath.Scan(_recastGraph);
-            
             _isReady = true;
             ScanCompleted?.Invoke();
             GraphReady?.Invoke();
             
-            if (debugLogs) 
+            if (debugLogs)
             {
-                int tileCount = _recastGraph.tileXCount * _recastGraph.tileZCount;
-                Debug.Log($"[PathfindingManager] RecastGraph scan complete. Tiles: {tileCount}");
+                int tiles = _recastGraph.tileXCount * _recastGraph.tileZCount;
+                Debug.Log($"[PathfindingManager] Scan complete. Tiles: {tiles}");
             }
         }
         
         /// <summary>
-        /// Rescan the entire graph. Use sparingly - prefer local updates.
+        /// Rescan the entire graph. Prefer local updates when possible.
         /// </summary>
-        public void RescanGraph()
-        {
-            if (debugLogs) Debug.Log("[PathfindingManager] Full rescan requested...");
-            ScanGraph();
-        }
+        public void RescanGraph() => ScanGraph();
         
         #endregion
         
@@ -421,11 +247,7 @@ namespace Navigation
             
             SubscribeToPlatform(platform);
             _registeredPlatforms.Add(platform);
-            
-            // Store initial bounds
             _previousBounds[platform] = GetPlatformBounds(platform);
-            
-            // Queue update for the new platform area
             QueuePlatformUpdate(platform);
             
             if (debugLogs) Debug.Log($"[PathfindingManager] Platform registered: {platform.name}");
@@ -435,7 +257,6 @@ namespace Navigation
         {
             if (!platform) return;
             
-            // Queue update for the area this platform occupied
             if (_previousBounds.TryGetValue(platform, out Bounds bounds))
             {
                 QueueBoundsUpdate(bounds);
@@ -470,7 +291,7 @@ namespace Navigation
         {
             if (debugLogs) Debug.Log($"[PathfindingManager] Platform placed: {platform.name}");
             
-            // Update both old and new positions
+            // Update old position (from pickup) and new position
             if (_previousBounds.TryGetValue(platform, out Bounds oldBounds))
             {
                 QueueBoundsUpdate(oldBounds);
@@ -485,47 +306,24 @@ namespace Navigation
         {
             if (debugLogs) Debug.Log($"[PathfindingManager] Platform picked up: {platform.name}");
             
-            // Store current bounds before it moves
-            _previousBounds[platform] = GetPlatformBounds(platform);
-            
-            // Queue update for where it was
-            QueueBoundsUpdate(_previousBounds[platform]);
+            // Store bounds and update to mark as unwalkable
+            var bounds = GetPlatformBounds(platform);
+            _previousBounds[platform] = bounds;
+            QueueBoundsUpdate(bounds);
         }
         
         private void OnPlatformMoved(GamePlatform platform)
         {
-            // Throttle updates during movement for performance
-            if (throttleMovementUpdates)
-            {
-                if (Time.time - _lastMovementUpdate < movementUpdateInterval)
-                {
-                    return;
-                }
-                _lastMovementUpdate = Time.time;
-            }
-            
-            // Update both old position (now empty) and new position
-            if (_previousBounds.TryGetValue(platform, out Bounds oldBounds))
-            {
-                QueueBoundsUpdate(oldBounds);
-            }
-            
-            var newBounds = GetPlatformBounds(platform);
-            QueueBoundsUpdate(newBounds);
-            _previousBounds[platform] = newBounds;
+            // NO updates during dragging - only on PickedUp and Placed
         }
         
         #endregion
         
         #region Graph Updates
         
-        /// <summary>
-        /// Queue a platform for graph update (batched).
-        /// </summary>
         private void QueuePlatformUpdate(GamePlatform platform)
         {
             if (!platform) return;
-            
             _pendingUpdates.Add(platform);
             _lastUpdateRequest = Time.time;
             _updateScheduled = true;
@@ -538,30 +336,19 @@ namespace Navigation
         {
             if (!_isReady) return;
             
-            // Expand bounds for safety
             bounds.Expand(updatePadding * 2f);
-            
             _pendingBoundsUpdates.Add(bounds);
             _lastUpdateRequest = Time.time;
             _updateScheduled = true;
             
-            if (debugDrawUpdates)
-            {
-                DebugDrawBounds(bounds, Color.yellow, 2f);
-            }
+            if (debugDrawUpdates) DebugDrawBounds(bounds, Color.yellow, 2f);
         }
         
         /// <summary>
-        /// Queue a bounds area for graph update (public API).
+        /// Queue a bounds area for graph update (alias).
         /// </summary>
-        public void QueueGraphUpdate(Bounds bounds)
-        {
-            QueueBoundsUpdate(bounds);
-        }
+        public void QueueGraphUpdate(Bounds bounds) => QueueBoundsUpdate(bounds);
         
-        /// <summary>
-        /// Process all pending platform and bounds updates.
-        /// </summary>
         private void ProcessPendingUpdates()
         {
             if (_pendingUpdates.Count == 0 && _pendingBoundsUpdates.Count == 0)
@@ -570,41 +357,23 @@ namespace Navigation
                 return;
             }
             
-            // Collect all bounds
             Bounds combinedBounds = new Bounds();
             bool first = true;
             
-            // From pending platforms
             foreach (var platform in _pendingUpdates)
             {
                 if (!platform) continue;
-                
                 var platformBounds = GetPlatformBounds(platform);
                 platformBounds.Expand(updatePadding * 2f);
                 
-                if (first)
-                {
-                    combinedBounds = platformBounds;
-                    first = false;
-                }
-                else
-                {
-                    combinedBounds.Encapsulate(platformBounds);
-                }
+                if (first) { combinedBounds = platformBounds; first = false; }
+                else combinedBounds.Encapsulate(platformBounds);
             }
             
-            // From pending bounds
             foreach (var bounds in _pendingBoundsUpdates)
             {
-                if (first)
-                {
-                    combinedBounds = bounds;
-                    first = false;
-                }
-                else
-                {
-                    combinedBounds.Encapsulate(bounds);
-                }
+                if (first) { combinedBounds = bounds; first = false; }
+                else combinedBounds.Encapsulate(bounds);
             }
             
             _pendingUpdates.Clear();
@@ -612,60 +381,39 @@ namespace Navigation
             _updateScheduled = false;
             _lastUpdateProcessed = Time.time;
             
-            if (!first) // Had at least one valid update
-            {
-                UpdateGraphInBounds(combinedBounds);
-            }
+            if (!first) UpdateGraphInBounds(combinedBounds);
         }
         
-        /// <summary>
-        /// Update the RecastGraph within the specified bounds (tile-based local update).
-        /// </summary>
         private void UpdateGraphInBounds(Bounds bounds)
         {
             if (!_isReady || _recastGraph == null) return;
             
-            if (debugLogs) 
-            {
-                Debug.Log($"[PathfindingManager] Updating graph in bounds: center={bounds.center}, size={bounds.size}");
-            }
+            if (debugLogs) Debug.Log($"[PathfindingManager] Updating: {bounds.center}, size={bounds.size}");
             
-            // Use GraphUpdateObject for tile-based updates
-            // RecastGraph automatically determines which tiles need rebuilding based on bounds
             var guo = new GraphUpdateObject(bounds)
             {
-                updatePhysics = true,  // Re-scan physics for the area
-                modifyWalkability = false,  // Let RecastGraph determine walkability from geometry
+                updatePhysics = true,
+                modifyWalkability = false,
                 modifyTag = false
             };
             
-            // Queue the update - A* will process affected tiles only
             _astarPath.UpdateGraphs(guo);
             
-            if (debugDrawUpdates)
-            {
-                DebugDrawBounds(bounds, Color.green, 1f);
-            }
-            
+            if (debugDrawUpdates) DebugDrawBounds(bounds, Color.green, 1f);
             GraphUpdated?.Invoke(bounds);
         }
         
         /// <summary>
-        /// Force immediate graph update for an area (synchronous).
-        /// Use sparingly - prefer queued updates.
+        /// Force immediate synchronous graph update.
         /// </summary>
         public void UpdateGraphImmediate(Bounds bounds)
         {
             if (!_isReady || _recastGraph == null) return;
             
             bounds.Expand(updatePadding * 2f);
+            if (debugLogs) Debug.Log($"[PathfindingManager] Immediate update: {bounds.center}");
             
-            if (debugLogs) Debug.Log($"[PathfindingManager] Immediate graph update: {bounds.center}");
-            
-            // Synchronous update
-            var guo = new GraphUpdateObject(bounds);
-            guo.updatePhysics = true;
-            
+            var guo = new GraphUpdateObject(bounds) { updatePhysics = true };
             _astarPath.UpdateGraphs(guo);
             _astarPath.FlushGraphUpdates();
             
@@ -678,7 +426,6 @@ namespace Navigation
         public void UpdateGraphForPlatform(GamePlatform platform)
         {
             if (!platform || !_isReady) return;
-            
             var bounds = GetPlatformBounds(platform);
             bounds.Expand(updatePadding * 2f);
             UpdateGraphInBounds(bounds);
@@ -694,7 +441,6 @@ namespace Navigation
         public bool IsPositionWalkable(Vector3 worldPosition)
         {
             if (!_isReady || _recastGraph == null) return false;
-            
             var nearest = _recastGraph.GetNearest(worldPosition);
             return nearest.node != null && nearest.node.Walkable;
         }
@@ -705,12 +451,9 @@ namespace Navigation
         public bool GetNearestWalkablePosition(Vector3 worldPosition, out Vector3 walkablePosition, float maxDistance = 5f)
         {
             walkablePosition = worldPosition;
-            
             if (!_isReady || _recastGraph == null) return false;
             
-            // Use new 5.4 API with NearestNodeConstraint
             var constraint = NearestNodeConstraint.Walkable;
-            
             var nearest = _astarPath.GetNearest(worldPosition, constraint);
             
             if (nearest.node != null && nearest.node.Walkable)
@@ -722,7 +465,6 @@ namespace Navigation
                     return true;
                 }
             }
-            
             return false;
         }
         
@@ -732,17 +474,14 @@ namespace Navigation
         public bool CanReach(Vector3 from, Vector3 to)
         {
             if (!_isReady) return false;
-            
             var path = ABPath.Construct(from, to);
             AstarPath.StartPath(path);
             path.BlockUntilCalculated();
-            
             return !path.error && path.vectorPath.Count > 0;
         }
         
         /// <summary>
         /// Sample the navmesh at a position with a max distance.
-        /// Returns true if a point on the navmesh was found.
         /// </summary>
         public bool SamplePosition(Vector3 worldPosition, out Vector3 navmeshPosition, float maxDistance = 5f)
         {
@@ -753,14 +492,11 @@ namespace Navigation
         
         #region Utility Methods
         
-        /// <summary>
-        /// Get world bounds for a platform.
-        /// </summary>
         private Bounds GetPlatformBounds(GamePlatform platform)
         {
             if (!platform) return new Bounds();
             
-            // Try to get bounds from colliders first
+            // Get bounds from colliders (includes NavMesh floor geometry if present)
             var colliders = platform.GetComponentsInChildren<Collider>();
             if (colliders.Length > 0)
             {
@@ -772,67 +508,28 @@ namespace Navigation
                 return bounds;
             }
             
-            // Fallback: Calculate bounds from footprint
+            // Fallback
             var footprint = platform.Footprint;
-            Vector3 center = platform.transform.position;
-            Vector3 size = new Vector3(footprint.x, agentHeight * 2f, footprint.y);
-            
-            return new Bounds(center, size);
+            return new Bounds(platform.transform.position, new Vector3(footprint.x, 5f, footprint.y));
         }
         
         /// <summary>
-        /// Convert WorldGrid cell to graph node position.
+        /// Convert WorldGrid cell to world position.
         /// </summary>
         public Vector3 CellToWorldPosition(Vector2Int cell)
         {
-            if (worldGrid)
-            {
-                return worldGrid.GetCellCenter(cell);
-            }
-            
-            // Fallback: assume 1m cells at origin
+            if (worldGrid) return worldGrid.GetCellCenter(cell);
             return new Vector3(cell.x + 0.5f, 0f, cell.y + 0.5f);
         }
         
         /// <summary>
-        /// Set the graph bounds center.
-        /// </summary>
-        public void SetGraphCenter(Vector3 center)
-        {
-            graphCenter = center;
-            if (_recastGraph != null)
-            {
-                _recastGraph.forcedBoundsCenter = center;
-            }
-        }
-        
-        /// <summary>
-        /// Set the graph bounds size.
-        /// </summary>
-        public void SetGraphSize(Vector3 size)
-        {
-            graphSize = size;
-            if (_recastGraph != null)
-            {
-                _recastGraph.forcedBoundsSize = size;
-            }
-        }
-        
-        /// <summary>
-        /// Get info about the current graph for debugging.
+        /// Get debug info about the current graph.
         /// </summary>
         public string GetGraphInfo()
         {
-            if (_recastGraph == null) return "No graph initialized";
-            
-            int tileCount = _recastGraph.tileXCount * _recastGraph.tileZCount;
-            
-            return $"RecastGraph:\n" +
-                   $"  Bounds: {_recastGraph.forcedBoundsSize} at {_recastGraph.forcedBoundsCenter}\n" +
-                   $"  Tiles: {_recastGraph.tileXCount}x{_recastGraph.tileZCount} = {tileCount}\n" +
-                   $"  Cell Size: {_recastGraph.cellSize}m\n" +
-                   $"  Agent: radius={_recastGraph.characterRadius}m, height={_recastGraph.walkableHeight}m\n" +
-                   $"  Max Climb: {_recastGraph.walkableClimb}m, Max Slope: {_recastGraph.maxSlope}°";
+            if (_recastGraph == null) return "No graph";
+            int tiles = _recastGraph.tileXCount * _recastGraph.tileZCount;
+            return $"RecastGraph: {tiles} tiles, Cell: {_recastGraph.cellSize}m";
         }
         
         private void DebugDrawBounds(Bounds bounds, Color color, float duration)
@@ -840,108 +537,21 @@ namespace Navigation
             var min = bounds.min;
             var max = bounds.max;
             
-            // Bottom face
             Debug.DrawLine(new Vector3(min.x, min.y, min.z), new Vector3(max.x, min.y, min.z), color, duration);
             Debug.DrawLine(new Vector3(max.x, min.y, min.z), new Vector3(max.x, min.y, max.z), color, duration);
             Debug.DrawLine(new Vector3(max.x, min.y, max.z), new Vector3(min.x, min.y, max.z), color, duration);
             Debug.DrawLine(new Vector3(min.x, min.y, max.z), new Vector3(min.x, min.y, min.z), color, duration);
             
-            // Top face
             Debug.DrawLine(new Vector3(min.x, max.y, min.z), new Vector3(max.x, max.y, min.z), color, duration);
             Debug.DrawLine(new Vector3(max.x, max.y, min.z), new Vector3(max.x, max.y, max.z), color, duration);
             Debug.DrawLine(new Vector3(max.x, max.y, max.z), new Vector3(min.x, max.y, max.z), color, duration);
             Debug.DrawLine(new Vector3(min.x, max.y, max.z), new Vector3(min.x, max.y, min.z), color, duration);
             
-            // Vertical edges
             Debug.DrawLine(new Vector3(min.x, min.y, min.z), new Vector3(min.x, max.y, min.z), color, duration);
             Debug.DrawLine(new Vector3(max.x, min.y, min.z), new Vector3(max.x, max.y, min.z), color, duration);
             Debug.DrawLine(new Vector3(max.x, min.y, max.z), new Vector3(max.x, max.y, max.z), color, duration);
             Debug.DrawLine(new Vector3(min.x, min.y, max.z), new Vector3(min.x, max.y, max.z), color, duration);
         }
-        
-        #endregion
-        
-        #region Runtime Configuration API
-        
-        /// <summary>
-        /// Update agent settings at runtime. Requires rescan to take effect.
-        /// </summary>
-        public void SetAgentSettings(float radius, float height, float climb, float slope)
-        {
-            agentRadius = radius;
-            agentHeight = height;
-            maxClimb = climb;
-            maxSlope = slope;
-            
-            if (_recastGraph != null)
-            {
-                _recastGraph.characterRadius = radius;
-                _recastGraph.walkableHeight = height;
-                _recastGraph.walkableClimb = climb;
-                _recastGraph.maxSlope = slope;
-            }
-        }
-        
-        /// <summary>
-        /// Update quality settings at runtime. Requires rescan to take effect.
-        /// </summary>
-        public void SetQualitySettings(float newCellSize, int newTileSize)
-        {
-            cellSize = Mathf.Clamp(newCellSize, 0.05f, 1f);
-            tileSize = Mathf.Clamp(newTileSize, 16, 512);
-            
-            if (_recastGraph != null)
-            {
-                _recastGraph.cellSize = cellSize;
-                _recastGraph.editorTileSize = tileSize;
-            }
-        }
-        
-        /// <summary>
-        /// Update layer masks at runtime. Requires rescan to take effect.
-        /// </summary>
-        public void SetLayerMasks(LayerMask walkable, LayerMask unwalkable)
-        {
-            walkableLayers = walkable;
-            unwalkableLayers = unwalkable;
-            
-            if (_recastGraph != null)
-            {
-                _recastGraph.collectionSettings.layerMask = walkableLayers;
-            }
-        }
-        
-        #endregion
-        
-        #region Editor
-        
-#if UNITY_EDITOR
-        private void OnDrawGizmosSelected()
-        {
-            if (!debugDrawBounds) return;
-            
-            // Draw graph bounds
-            Gizmos.color = new Color(0.2f, 0.8f, 0.2f, 0.3f);
-            Gizmos.DrawWireCube(graphCenter, graphSize);
-            
-            // Draw agent size
-            Gizmos.color = Color.cyan;
-            Gizmos.DrawWireSphere(transform.position, agentRadius);
-            Gizmos.DrawLine(transform.position, transform.position + Vector3.up * agentHeight);
-        }
-        
-        private void OnValidate()
-        {
-            // Clamp values
-            agentRadius = Mathf.Max(0.1f, agentRadius);
-            agentHeight = Mathf.Max(0.5f, agentHeight);
-            maxClimb = Mathf.Clamp(maxClimb, 0f, agentHeight);
-            maxSlope = Mathf.Clamp(maxSlope, 0f, 85f);
-            cellSize = Mathf.Clamp(cellSize, 0.05f, 1f);
-            tileSize = Mathf.Clamp(tileSize, 16, 512);
-            minRegionArea = Mathf.Max(0f, minRegionArea);
-        }
-#endif
         
         #endregion
     }

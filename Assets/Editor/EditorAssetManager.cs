@@ -29,8 +29,15 @@ namespace Editor
         private GameObject _postPrefab;
         private GameObject _railPrefab;
 
-        // NOTE: NavMesh Floor Geometry settings removed - will be replaced by A* Pathfinding setup
-        // A* Pathfinding Project uses its own graph generation system
+        // ---- A* Pathfinding Floor Geometry Settings ----
+        // Creates an invisible box collider larger than the platform
+        // so A* RecastGraph generates navmesh up to platform edges
+        private const string NavMeshGeometryLayerName = "Platform";
+        private const string NavMeshGeometryChildName = "_NavMeshFloor";
+        private bool _generateNavMeshFloor = true;
+        private float _navMeshFloorThickness = 0.1f;
+        private float _navMeshFloorYOffset = -0.05f;
+        private float _navMeshFloorExtraExtension = 0.5f; // Extends past platform edge
 
         private enum RailForwardAxis
         {
@@ -116,13 +123,25 @@ namespace Editor
                         EditorGUILayout.Space(4);
                         _railForwardAxis = (RailForwardAxis)EditorGUILayout.EnumPopup("Rail Local Length Axis", _railForwardAxis);
 
-                        // NOTE: NavMesh Floor Geometry section removed
-                        // A* Pathfinding Project will handle pathfinding graph generation separately
+                        // ---- A* NavMesh Floor Geometry ----
                         EditorGUILayout.Space(8);
+                        EditorGUILayout.LabelField("A* NavMesh Floor Geometry", EditorStyles.boldLabel);
+                        
+                        _generateNavMeshFloor = EditorGUILayout.Toggle("Generate NavMesh Floor", _generateNavMeshFloor);
+                        
+                        using (new EditorGUI.DisabledScope(!_generateNavMeshFloor))
+                        {
+                            _navMeshFloorThickness = Mathf.Max(0.01f, 
+                                EditorGUILayout.FloatField("Floor Thickness", _navMeshFloorThickness));
+                            _navMeshFloorYOffset = EditorGUILayout.FloatField("Floor Y Offset", _navMeshFloorYOffset);
+                            _navMeshFloorExtraExtension = Mathf.Max(0f,
+                                EditorGUILayout.FloatField("Edge Extension (m)", _navMeshFloorExtraExtension));
+                        }
+                        
                         EditorGUILayout.HelpBox(
-                            "NOTE: Unity NavMesh has been removed.\n" +
-                            "A* Pathfinding Project will be used for pathfinding.\n" +
-                            "Graph generation will be configured separately.",
+                            "Creates an invisible Box Collider larger than the platform.\n" +
+                            "This ensures A* RecastGraph generates navmesh up to the platform edges.\n" +
+                            $"Layer: '{NavMeshGeometryLayerName}' (must be in A* walkable layers)",
                             MessageType.Info);
 
                         bool canRun = inPrefabMode
@@ -151,6 +170,13 @@ namespace Editor
 
                                 SpawnRailingsAndRegister(root, gp, _wCells, _lCells, _railY, _inset,
                                     _postPrefab, _railPrefab, _railForwardAxis);
+
+                                // Generate A* NavMesh floor geometry
+                                if (_generateNavMeshFloor)
+                                {
+                                    GenerateNavMeshFloorGeometry(root, _wCells, _lCells,
+                                        _navMeshFloorThickness, _navMeshFloorYOffset, _navMeshFloorExtraExtension);
+                                }
 
                                 EditorSceneManager.MarkSceneDirty(root.gameObject.scene);
                                 EditorGUIUtility.PingObject(root);
@@ -451,9 +477,64 @@ namespace Editor
             Debug.Log($"[EditorAssetManager] Platform setup finished on '{platformRoot.name}' ({wCells}×{lCells}), inset={inset:F2} m.");
         }
 
-        // NOTE: All NavMesh helper methods removed
-        // GenerateNavMeshFloorGeometry, EnsureNavMeshSurface, BuildAndSaveNavMeshForPrefab, RebuildAllPlatformsInOpenScenes
-        // A* Pathfinding Project will handle graph generation separately
+        // -------- A* NavMesh Floor Geometry --------
+        
+        /// <summary>
+        /// Creates an invisible box collider child that extends past the platform edges.
+        /// This ensures A* RecastGraph generates navmesh up to the platform edges.
+        /// </summary>
+        private static void GenerateNavMeshFloorGeometry(
+            Transform platformRoot,
+            int widthCells,
+            int lengthCells,
+            float thickness,
+            float yOffset,
+            float extraExtension)
+        {
+            // Remove existing floor geometry
+            var existing = platformRoot.Find(NavMeshGeometryChildName);
+            if (existing != null)
+            {
+                Undo.DestroyObjectImmediate(existing.gameObject);
+            }
+            
+            // Create new floor geometry child
+            var floorGo = new GameObject(NavMeshGeometryChildName);
+            Undo.RegisterCreatedObjectUndo(floorGo, "Create NavMesh Floor");
+            
+            floorGo.transform.SetParent(platformRoot, false);
+            floorGo.transform.localPosition = new Vector3(0f, yOffset, 0f);
+            floorGo.transform.localRotation = Quaternion.identity;
+            floorGo.transform.localScale = Vector3.one;
+            
+            // Set layer
+            int layer = LayerMask.NameToLayer(NavMeshGeometryLayerName);
+            if (layer >= 0)
+            {
+                floorGo.layer = layer;
+            }
+            else
+            {
+                Debug.LogWarning($"[EditorAssetManager] Layer '{NavMeshGeometryLayerName}' not found. " +
+                                 "NavMesh floor will use Default layer. Create the layer and assign manually.");
+            }
+            
+            // Calculate size with extension
+            float width = widthCells + (extraExtension * 2f);
+            float length = lengthCells + (extraExtension * 2f);
+            
+            // Add box collider
+            var boxCollider = Undo.AddComponent<BoxCollider>(floorGo);
+            boxCollider.size = new Vector3(width, thickness, length);
+            boxCollider.center = Vector3.zero;
+            boxCollider.isTrigger = false; // Must be solid for A* to detect
+            
+            // Make it invisible (no renderer needed - A* only needs the collider)
+            // The collider is what A* RecastGraph scans
+            
+            Debug.Log($"[EditorAssetManager] Created NavMesh floor geometry: {width}x{length}m " +
+                      $"(platform: {widthCells}x{lengthCells}m, extension: {extraExtension}m)");
+        }
 
         // -------- Utilities --------
         private static (bool inPrefabMode, Transform root) GetActivePrefabRoot()

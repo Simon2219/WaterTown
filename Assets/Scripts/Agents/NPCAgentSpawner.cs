@@ -333,22 +333,22 @@ namespace Agents
             if (snapToWalkable && _pathfindingManager && _pathfindingManager.IsReady)
             {
                 if (_pathfindingManager.GetNearestWalkablePosition(hitPoint, out Vector3 walkablePos, walkableSearchRadius))
-                {
+            {
                     position = walkablePos;
-                    
-                    if (drawDebugVisuals)
-                    {
-                        Debug.DrawRay(position, Vector3.up * 3f, Color.green, 2f);
-                    }
-                    
-                    return true;
-                }
                 
-                if (debugLogs)
+                if (drawDebugVisuals)
                 {
-                    Debug.LogWarning($"[Spawner] No walkable position within {walkableSearchRadius}m of {hitPoint}");
+                    Debug.DrawRay(position, Vector3.up * 3f, Color.green, 2f);
                 }
                 
+                return true;
+            }
+            
+            if (debugLogs)
+            {
+                    Debug.LogWarning($"[Spawner] No walkable position within {walkableSearchRadius}m of {hitPoint}");
+            }
+            
                 // Fall back to raw position
                 position = hitPoint;
                 return true;
