@@ -451,21 +451,47 @@ namespace Navigation
         public bool GetNearestWalkablePosition(Vector3 worldPosition, out Vector3 walkablePosition, float maxDistance = 5f)
         {
             walkablePosition = worldPosition;
-            if (!_isReady || _recastGraph == null) return false;
             
-            var constraint = NearestNodeConstraint.Walkable;
-            var nearest = _astarPath.GetNearest(worldPosition, constraint);
-            
-            if (nearest.node != null && nearest.node.Walkable)
+            if (!_isReady)
             {
-                float distance = Vector3.Distance(worldPosition, (Vector3)nearest.node.position);
-                if (distance <= maxDistance)
-                {
-                    walkablePosition = (Vector3)nearest.node.position;
-                    return true;
-                }
+                if (debugLogs) Debug.LogWarning($"[PathfindingManager] GetNearestWalkable failed: Graph not ready");
+                return false;
             }
-            return false;
+            
+            if (_recastGraph == null)
+            {
+                if (debugLogs) Debug.LogWarning($"[PathfindingManager] GetNearestWalkable failed: No RecastGraph");
+                return false;
+            }
+            
+            // Use the graph directly to get nearest node without constraint first
+            var nearest = _recastGraph.GetNearest(worldPosition);
+            
+            if (nearest.node == null)
+            {
+                if (debugLogs) Debug.LogWarning($"[PathfindingManager] GetNearestWalkable: No node found near {worldPosition}");
+                return false;
+            }
+            
+            if (!nearest.node.Walkable)
+            {
+                if (debugLogs) Debug.LogWarning($"[PathfindingManager] GetNearestWalkable: Nearest node is not walkable");
+                return false;
+            }
+            
+            Vector3 nodePosition = (Vector3)nearest.node.position;
+            float distance = Vector3.Distance(worldPosition, nodePosition);
+            
+            if (distance > maxDistance)
+            {
+                if (debugLogs) Debug.LogWarning($"[PathfindingManager] GetNearestWalkable: Node too far ({distance:F2}m > {maxDistance}m)");
+                return false;
+            }
+            
+            walkablePosition = nodePosition;
+            
+            if (debugLogs) Debug.Log($"[PathfindingManager] GetNearestWalkable: Found walkable at {nodePosition} (dist: {distance:F2}m)");
+            return true;
         }
         
         /// <summary>

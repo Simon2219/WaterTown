@@ -46,7 +46,7 @@ namespace Agents
         [SerializeField] private bool requireWalkableForMove = true;
         
         [Tooltip("Maximum distance to search for walkable position from raycast hit.")]
-        [SerializeField] private float walkableSearchRadius = 2f;
+        [SerializeField] private float walkableSearchRadius = 5f;
         
         [Header("Raycasting")]
         [Tooltip("Maximum raycast distance.")]
@@ -361,9 +361,19 @@ namespace Agents
             }
             
             // Check/snap to walkable navmesh position
-            if (requireWalkable && _pathfindingManager && _pathfindingManager.IsReady)
+            if (requireWalkable)
             {
-                if (_pathfindingManager.GetNearestWalkablePosition(hitPoint, out Vector3 walkablePos, walkableSearchRadius))
+                if (!_pathfindingManager)
+                {
+                    if (debugLogs) Debug.LogWarning("[Spawner] PathfindingManager not found - skipping walkable check");
+                    // Fall through to use raw position
+                }
+                else if (!_pathfindingManager.IsReady)
+                {
+                    if (debugLogs) Debug.LogWarning("[Spawner] PathfindingManager not ready - skipping walkable check");
+                    // Fall through to use raw position
+                }
+                else if (_pathfindingManager.GetNearestWalkablePosition(hitPoint, out Vector3 walkablePos, walkableSearchRadius))
                 {
                     // Use the walkable position but keep original Y if very close (to avoid floating)
                     float yDiff = Mathf.Abs(walkablePos.y - hitPoint.y);
@@ -384,18 +394,19 @@ namespace Agents
                     
                     if (debugLogs)
                     {
-                        Debug.Log($"[Spawner] Walkable position found: {position}");
+                        Debug.Log($"[Spawner] ✓ Walkable position found: {position}");
                     }
                     
                     return true;
                 }
-                
-                if (debugLogs)
+                else
                 {
-                    Debug.LogWarning($"[Spawner] No walkable navmesh within {walkableSearchRadius}m of {hitPoint}");
+                    if (debugLogs)
+                    {
+                        Debug.LogWarning($"[Spawner] ✗ No walkable navmesh within {walkableSearchRadius}m of {hitPoint}");
+                    }
+                    return false; // Require walkable but none found
                 }
-                
-                return false; // Require walkable but none found
             }
             
             // Not requiring walkable, or pathfinding not ready - use raw hit point
