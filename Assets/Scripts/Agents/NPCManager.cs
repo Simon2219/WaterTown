@@ -55,6 +55,10 @@ namespace Agents
         [SerializeField] private float agentRadius = 0.3f;
         [SerializeField] private float agentHeight = 1.5f;
         
+        [Header("Ground Detection")]
+        [Tooltip("Layer mask for AIPath ground detection. Should include your platform/ground layers.")]
+        [SerializeField] private LayerMask groundMask = ~0;
+        
         [Header("Spawn Settings")]
         [Tooltip("Layer to assign spawned agents to. Important for selection raycasts!")]
         [SerializeField] private string agentLayerName = "NPCAgent";
@@ -507,7 +511,7 @@ namespace Agents
             // Ground/gravity settings
             // Note: With CharacterController, AIPath uses SimpleMove which handles gravity internally
             aiPath.gravity = new Vector3(0, -9.81f, 0);
-            aiPath.groundMask = ~0; // All layers for ground detection
+            aiPath.groundMask = groundMask; // Use configured ground layers
             
             // Rotation settings
             aiPath.enableRotation = true;
@@ -525,38 +529,41 @@ namespace Agents
         
         private GameObject CreateProceduralAgent(Vector3 position)
         {
-            var go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-            go.name = $"NPC_Agent_{_agentsList.Count}";
+            // Create empty GameObject instead of primitive to avoid scaling issues
+            var go = new GameObject($"NPC_Agent_{_agentsList.Count}");
             go.transform.position = position;
             
+            // Create visual mesh as child (properly scaled)
+            var visual = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            visual.name = "Visual";
+            visual.transform.SetParent(go.transform, false);
+            
             // Unity's default capsule is 2 units tall, 1 unit diameter
-            // Scale to match our agent dimensions
+            // Scale visual to match our agent dimensions
             float scaleY = agentHeight / 2f;
             float scaleXZ = agentRadius * 2f;
-            go.transform.localScale = new Vector3(scaleXZ, scaleY, scaleXZ);
+            visual.transform.localScale = new Vector3(scaleXZ, scaleY, scaleXZ);
+            visual.transform.localPosition = new Vector3(0, agentHeight / 2f, 0); // Offset to sit on ground
             
-            // Apply material
-            var renderer = go.GetComponent<Renderer>();
+            // Remove collider from visual - CharacterController will handle collision
+            var visualCollider = visual.GetComponent<CapsuleCollider>();
+            if (visualCollider) DestroyImmediate(visualCollider);
+            
+            // Apply material to visual
+            var renderer = visual.GetComponent<Renderer>();
             if (renderer)
             {
                 renderer.material = new Material(_sharedAgentMaterial);
             }
             
-            // IMPORTANT: Remove the default CapsuleCollider - CharacterController has its own collider
-            var capsuleCollider = go.GetComponent<CapsuleCollider>();
-            if (capsuleCollider)
-            {
-                DestroyImmediate(capsuleCollider);
-            }
-            
-            // Add CharacterController for AIPath movement
-            // CharacterController provides its own capsule collider internally
+            // Add CharacterController to root (unscaled, correct dimensions)
             var cc = go.AddComponent<CharacterController>();
             cc.height = agentHeight;
             cc.radius = agentRadius;
             cc.center = new Vector3(0, agentHeight / 2f, 0); // Center at half height
             cc.slopeLimit = 45f;
-            cc.stepOffset = 0.3f;
+            cc.stepOffset = Mathf.Min(0.3f, agentHeight * 0.2f); // 20% of height or 0.3, whichever is smaller
+            cc.skinWidth = 0.02f;
             
             return go;
         }

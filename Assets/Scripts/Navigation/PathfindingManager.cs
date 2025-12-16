@@ -438,11 +438,17 @@ namespace Navigation
         /// <summary>
         /// Check if a world position is on a walkable node.
         /// </summary>
-        public bool IsPositionWalkable(Vector3 worldPosition)
+        /// <param name="worldPosition">Position to check</param>
+        /// <param name="maxDistance">Maximum distance from position to consider "on" the navmesh</param>
+        public bool IsPositionWalkable(Vector3 worldPosition, float maxDistance = 1f)
         {
             if (!_isReady || _recastGraph == null) return false;
             var nearest = _recastGraph.GetNearest(worldPosition);
-            return nearest.node != null && nearest.node.Walkable;
+            if (nearest.node == null || !nearest.node.Walkable) return false;
+            
+            // Check if the closest point is within acceptable distance
+            float distance = Vector3.Distance(worldPosition, nearest.position);
+            return distance <= maxDistance;
         }
         
         /// <summary>
@@ -464,7 +470,7 @@ namespace Navigation
                 return false;
             }
             
-            // Use the graph directly to get nearest node without constraint first
+            // Use the graph directly to get nearest point on navmesh
             var nearest = _recastGraph.GetNearest(worldPosition);
             
             if (nearest.node == null)
@@ -479,18 +485,20 @@ namespace Navigation
                 return false;
             }
             
-            Vector3 nodePosition = (Vector3)nearest.node.position;
-            float distance = Vector3.Distance(worldPosition, nodePosition);
+            // IMPORTANT: Use nearest.position (actual closest point on navmesh surface)
+            // NOT nearest.node.position (which is Int3 internal representation)
+            Vector3 closestPoint = nearest.position;
+            float distance = Vector3.Distance(worldPosition, closestPoint);
             
             if (distance > maxDistance)
             {
-                if (debugLogs) Debug.LogWarning($"[PathfindingManager] GetNearestWalkable: Node too far ({distance:F2}m > {maxDistance}m)");
+                if (debugLogs) Debug.LogWarning($"[PathfindingManager] GetNearestWalkable: Point too far ({distance:F2}m > {maxDistance}m)");
                 return false;
             }
             
-            walkablePosition = nodePosition;
+            walkablePosition = closestPoint;
             
-            if (debugLogs) Debug.Log($"[PathfindingManager] GetNearestWalkable: Found walkable at {nodePosition} (dist: {distance:F2}m)");
+            if (debugLogs) Debug.Log($"[PathfindingManager] GetNearestWalkable: Found walkable at {closestPoint} (dist: {distance:F2}m)");
             return true;
         }
         

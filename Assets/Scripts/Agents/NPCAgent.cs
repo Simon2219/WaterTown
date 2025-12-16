@@ -67,6 +67,9 @@ namespace Agents
         /// <summary>Fired when movement is stopped (manually or due to error).</summary>
         public event Action<NPCAgent> MovementStopped;
         
+        /// <summary>Fired when a destination is unreachable. Args: (agent, targetPosition)</summary>
+        public event Action<NPCAgent, Vector3> DestinationUnreachable;
+        
         #endregion
         
         #region Public Properties
@@ -127,6 +130,13 @@ namespace Agents
         [Tooltip("When queue is full, should new destinations replace the last one?")]
         [SerializeField] private bool replaceLastWhenFull = true;
         
+        [Header("Path Failure Handling")]
+        [Tooltip("Number of consecutive path failures before giving up on a destination.")]
+        [SerializeField] private int maxPathFailures = 3;
+        
+        [Tooltip("Distance threshold to detect partial/unreachable paths (meters).")]
+        [SerializeField] private float unreachableDistanceThreshold = 2f;
+        
         [Header("Debug")]
         [SerializeField] private bool showDebugInfo;
         [SerializeField] private bool logStatusChanges;
@@ -154,6 +164,10 @@ namespace Agents
         private bool _visualsEnabled = true;
         private Vector3 _baseScale;
         private bool _initialized;
+        
+        // Path failure tracking
+        private int _consecutivePathFailures;
+        private Vector3 _currentTargetDestination;
         
         // Frame skip tracking for staggered updates
         private int _frameOffset;
@@ -190,6 +204,9 @@ namespace Agents
             _aiPath.simulateMovement = true;
             _aiPath.canSearch = true;
             _aiPath.enableRotation = true;
+            
+            // Subscribe to path completion callback to detect unreachable destinations
+            _seeker.pathCallback += OnPathComplete;
             
             AgentRenderer = GetComponent<Renderer>();
             if (!AgentRenderer)
@@ -228,6 +245,12 @@ namespace Agents
         
         private void OnDestroy()
         {
+            // Unsubscribe from path callback
+            if (_seeker)
+            {
+                _seeker.pathCallback -= OnPathComplete;
+            }
+            
             if (Manager)
             {
                 Manager.UnregisterAgent(this);
@@ -558,6 +581,10 @@ namespace Agents
         {
             if (!_aiPath) return false;
             
+            // Reset failure tracking for new destination
+            _consecutivePathFailures = 0;
+            _currentTargetDestination = destination;
+            
             _aiPath.destination = destination;
             _aiPath.SearchPath();
             
@@ -571,6 +598,102 @@ namespace Agents
             
             DestinationStarted?.Invoke(this, destination);
             return true;
+        }
+        
+        /// <summary>
+        /// Called when a path calculation completes. Used to detect unreachable destinations.
+        /// </summary>
+        private void OnPathComplete(Path path)
+        {
+            if (path == null) return;
+            
+            // Check if path failed or is partial (couldn't reach destination)
+            if (path.error)
+            {
+                _consecutivePathFailures++;
+                
+                if (logStatusChanges)
+                {
+                    Debug.LogWarning($"[NPCAgent] Agent {AgentId} path error: {path.errorLog}");
+                }
+                
+                HandlePathFailure();
+            }
+            else if (path is ABPath abPath)
+            {
+                // Check for partial path (A* found closest reachable point, not actual destination)
+                // A partial path means the destination is on a disconnected navmesh region
+                float distanceToTarget = Vector3.Distance(abPath.endPoint, _currentTargetDestination);
+                
+                // If the path endpoint is far from our target, it's likely unreachable
+                if (distanceToTarget > unreachableDistanceThreshold && _hasDestination)
+                {
+                    _consecutivePathFailures++;
+                    
+                    if (logStatusChanges)
+                    {
+                        Debug.LogWarning($"[NPCAgent] Agent {AgentId} partial path detected. " +
+                            $"Target: {_currentTargetDestination}, Path end: {abPath.endPoint}, " +
+                            $"Distance: {distanceToTarget:F2}m (failures: {_consecutivePathFailures})");
+                    }
+                    
+                    HandlePathFailure();
+                }
+                else
+                {
+                    // Valid path - reset failure counter
+                    _consecutivePathFailures = 0;
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Handle repeated path failures by giving up on unreachable destination.
+        /// </summary>
+        private void HandlePathFailure()
+        {
+            if (_consecutivePathFailures >= maxPathFailures)
+            {
+                if (logStatusChanges)
+                {
+                    Debug.LogWarning($"[NPCAgent] Agent {AgentId} giving up on unreachable destination: {_currentTargetDestination}");
+                }
+                
+                Vector3 unreachableTarget = _currentTargetDestination;
+                
+                // Stop trying to reach this destination
+                _hasDestination = false;
+                _consecutivePathFailures = 0;
+                
+                // Stop AIPath from auto-searching
+                if (_aiPath)
+                {
+                    _aiPath.SetPath(null);
+                    _aiPath.destination = transform.position;
+                }
+                
+                // Fire event
+                DestinationUnreachable?.Invoke(this, unreachableTarget);
+                
+                // Try next queued destination if any
+                if (_destinationQueue.Count > 0)
+                {
+                    Vector3 nextDest = _destinationQueue.Dequeue();
+                    
+                    if (logQueueChanges)
+                    {
+                        Debug.Log($"[NPCAgent] Agent {AgentId} trying next queued destination after failure. Remaining: {_destinationQueue.Count}");
+                    }
+                    
+                    QueueChanged?.Invoke(this, _destinationQueue.Count);
+                    SetDestinationInternal(nextDest);
+                }
+                else
+                {
+                    // No more destinations - agent is now idle
+                    MovementStopped?.Invoke(this);
+                }
+            }
         }
         
         /// <summary>
