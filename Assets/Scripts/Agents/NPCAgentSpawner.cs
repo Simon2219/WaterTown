@@ -33,16 +33,19 @@ namespace Agents
         [SerializeField] private bool useSpawnPoint = false;
         
         [Header("Ground Detection")]
-        [Tooltip("Layer mask for ground/platform geometry to raycast against for spawning.")]
+        [Tooltip("Layer mask for ground/platform raycasting (what surfaces agents can spawn/move on).")]
         [SerializeField] private LayerMask groundLayerMask = ~0;
         
-        [Tooltip("Y coordinate of your platforms for plane raycasting (fallback only).")]
-        [SerializeField] private float groundPlaneHeight = 0f;
+        [Tooltip("Height offset above the raycast hit point to spawn agents.")]
+        [SerializeField] private float spawnHeightOffset = 0.1f;
         
-        [Tooltip("Whether to validate spawn position is on navmesh (required for spawning).")]
-        [SerializeField] private bool requireNavmeshForSpawn = true;
+        [Tooltip("Whether to require a walkable navmesh position for spawning.")]
+        [SerializeField] private bool requireWalkableForSpawn = true;
         
-        [Tooltip("Maximum distance to search for walkable position if exact hit isn't walkable.")]
+        [Tooltip("Whether to require a walkable navmesh position for movement.")]
+        [SerializeField] private bool requireWalkableForMove = true;
+        
+        [Tooltip("Maximum distance to search for walkable position from raycast hit.")]
         [SerializeField] private float walkableSearchRadius = 2f;
         
         [Header("Raycasting")]
@@ -222,10 +225,14 @@ namespace Agents
             // Step 2: Didn't click agent - if we have one selected, move it
             if (_selectedAgent != null)
             {
-                if (GetGroundPosition(out Vector3 destination))
+                if (GetMoveDestination(out Vector3 destination))
                 {
                     if (debugLogs) Debug.Log($"[Spawner] → Moving agent #{_selectedAgent.AgentId} to {destination}");
                     MoveSelectedAgent(destination);
+                }
+                else
+                {
+                    if (debugLogs) Debug.LogWarning("[Spawner] ✗ Could not find valid move destination");
                 }
             }
             else
@@ -295,10 +302,27 @@ namespace Agents
         #region Ground Position
         
         /// <summary>
-        /// Get world position from mouse cursor by raycasting against ground layer mask.
-        /// Returns exact hit point if it's on the navmesh, otherwise tries to find nearest walkable position.
+        /// Get spawn position from mouse cursor.
+        /// Raycasts against ground layers and validates against navmesh.
         /// </summary>
         private bool GetGroundPosition(out Vector3 position)
+        {
+            return GetGroundPositionInternal(out position, requireWalkableForSpawn);
+        }
+        
+        /// <summary>
+        /// Get movement destination from mouse cursor.
+        /// Raycasts against ground layers and validates against navmesh.
+        /// </summary>
+        private bool GetMoveDestination(out Vector3 position)
+        {
+            return GetGroundPositionInternal(out position, requireWalkableForMove);
+        }
+        
+        /// <summary>
+        /// Core raycast logic for getting ground position.
+        /// </summary>
+        private bool GetGroundPositionInternal(out Vector3 position, bool requireWalkable)
         {
             position = Vector3.zero;
             
@@ -314,105 +338,72 @@ namespace Agents
             Vector2 mouseScreenPos = Mouse.current.position.ReadValue();
             Ray ray = mainCamera.ScreenPointToRay(mouseScreenPos);
             
-            // Raycast against ground layer mask (exclude agents)
-            LayerMask raycastMask = groundLayerMask & ~agentLayerMask;
-            
-            if (!Physics.Raycast(ray, out RaycastHit hit, maxRaycastDistance, raycastMask))
+            // Physics raycast against ground layers
+            if (!Physics.Raycast(ray, out RaycastHit hit, maxRaycastDistance, groundLayerMask))
             {
-                if (debugLogs) Debug.LogWarning("[Spawner] Raycast did not hit any ground geometry");
+                if (debugLogs) Debug.LogWarning("[Spawner] Raycast didn't hit any ground geometry");
                 return false;
             }
             
+            // Get the exact hit point
             Vector3 hitPoint = hit.point;
             
             if (drawDebugVisuals)
             {
                 Debug.DrawRay(ray.origin, ray.direction * hit.distance, Color.cyan, 2f);
                 Debug.DrawRay(hitPoint, Vector3.up * 2f, Color.yellow, 2f);
+                Debug.DrawRay(hitPoint, hit.normal * 1f, Color.magenta, 2f);
             }
             
             if (debugLogs)
             {
-                Debug.Log($"[Spawner] Raycast hit: {hit.collider.name} at {hitPoint}");
+                Debug.Log($"[Spawner] Raycast hit '{hit.collider.name}' at {hitPoint} (layer: {LayerMask.LayerToName(hit.collider.gameObject.layer)})");
             }
             
-            // Validate navmesh at hit point
-            if (_pathfindingManager && _pathfindingManager.IsReady)
+            // Check/snap to walkable navmesh position
+            if (requireWalkable && _pathfindingManager && _pathfindingManager.IsReady)
             {
-                // Check if exact hit point is walkable
-                if (_pathfindingManager.IsPositionWalkable(hitPoint))
-                {
-                    position = hitPoint;
-                    
-                    if (drawDebugVisuals)
-                    {
-                        Debug.DrawRay(position, Vector3.up * 3f, Color.green, 2f);
-                    }
-                    
-                    if (debugLogs)
-                    {
-                        Debug.Log($"[Spawner] ✓ Exact hit point is walkable: {position}");
-                    }
-                    
-                    return true;
-                }
-                
-                // Hit point not walkable - try to find nearest walkable position
                 if (_pathfindingManager.GetNearestWalkablePosition(hitPoint, out Vector3 walkablePos, walkableSearchRadius))
                 {
-                    position = walkablePos;
+                    // Use the walkable position but keep original Y if very close (to avoid floating)
+                    float yDiff = Mathf.Abs(walkablePos.y - hitPoint.y);
+                    if (yDiff < 0.5f)
+                    {
+                        // Keep XZ from navmesh, Y from raycast hit (more accurate ground height)
+                        position = new Vector3(walkablePos.x, hitPoint.y + spawnHeightOffset, walkablePos.z);
+                    }
+                    else
+                    {
+                        position = walkablePos + Vector3.up * spawnHeightOffset;
+                    }
                     
                     if (drawDebugVisuals)
                     {
                         Debug.DrawRay(position, Vector3.up * 3f, Color.green, 2f);
-                        Debug.DrawLine(hitPoint, position, Color.green, 2f);
                     }
                     
                     if (debugLogs)
                     {
-                        float snapDistance = Vector3.Distance(hitPoint, position);
-                        Debug.Log($"[Spawner] Hit point not walkable, snapped to nearest: {hitPoint} → {position} (distance: {snapDistance:F2}m)");
+                        Debug.Log($"[Spawner] Walkable position found: {position}");
                     }
                     
                     return true;
                 }
                 
-                // No walkable position found
-                if (requireNavmeshForSpawn)
+                if (debugLogs)
                 {
-                    if (debugLogs)
-                    {
-                        Debug.LogWarning($"[Spawner] ✗ No walkable navmesh found within {walkableSearchRadius}m of hit point {hitPoint}. Spawn blocked.");
-                    }
-                    return false;
+                    Debug.LogWarning($"[Spawner] No walkable navmesh within {walkableSearchRadius}m of {hitPoint}");
                 }
                 
-                // Fallback: use hit point even if not walkable (if not required)
-                if (debugLogs)
-                {
-                    Debug.LogWarning($"[Spawner] ⚠ No walkable navmesh found, but spawning anyway (requireNavmeshForSpawn=false)");
-                }
-            }
-            else if (requireNavmeshForSpawn)
-            {
-                if (debugLogs)
-                {
-                    Debug.LogWarning("[Spawner] ✗ PathfindingManager not ready. Spawn blocked (requireNavmeshForSpawn=true).");
-                }
-                return false;
+                return false; // Require walkable but none found
             }
             
-            // Use raw hit point (no navmesh validation available or not required)
-            position = hitPoint;
+            // Not requiring walkable, or pathfinding not ready - use raw hit point
+            position = hitPoint + Vector3.up * spawnHeightOffset;
             
             if (drawDebugVisuals)
             {
                 Debug.DrawRay(position, Vector3.up * 3f, Color.green, 2f);
-            }
-            
-            if (debugLogs)
-            {
-                Debug.Log($"[Spawner] Using raw hit point (no navmesh validation): {position}");
             }
             
             return true;

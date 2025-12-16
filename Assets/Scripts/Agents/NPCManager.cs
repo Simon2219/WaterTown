@@ -408,13 +408,11 @@ namespace Agents
         
         /// <summary>
         /// Spawn an agent at the specified world position.
-        /// Note: Position should already be validated by caller (e.g., NPCAgentSpawner).
+        /// Position should already be validated by caller (NPCAgentSpawner handles navmesh validation).
         /// </summary>
-        /// <param name="worldPosition">World position to spawn at (should be on navmesh)</param>
+        /// <param name="worldPosition">World position to spawn at (already validated)</param>
         public NPCAgent SpawnAgent(Vector3 worldPosition)
         {
-            // Use position as-is (already validated by spawner)
-            // The spawner ensures the position is on the navmesh before calling this
             Vector3 spawnPosition = worldPosition;
             
             if (debugSpawnLogs)
