@@ -524,7 +524,7 @@ namespace Agents
             aiPath.orientation = OrientationMode.YAxisForward;
             
             // Movement type
-            aiPath.canMove = true;
+            aiPath.simulateMovement = true;
             aiPath.canSearch = true;
         }
         

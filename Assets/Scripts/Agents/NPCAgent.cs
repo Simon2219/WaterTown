@@ -187,7 +187,7 @@ namespace Agents
             }
             
             // Configure AIPath
-            _aiPath.canMove = true;
+            _aiPath.simulateMovement = true;
             _aiPath.canSearch = true;
             _aiPath.enableRotation = true;
             

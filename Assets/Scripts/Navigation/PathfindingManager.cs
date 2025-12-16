@@ -3,28 +3,25 @@ using System.Collections.Generic;
 using UnityEngine;
 using Pathfinding;
 using Grid;
-using Pathfinding.Graphs.Grid;
 using Platforms;
 
 namespace Navigation
 {
     /// <summary>
-    /// Central manager for A* Pathfinding integration.
-    /// Uses GridGraph for pathfinding (FREE version).
+    /// Central manager for A* Pathfinding integration using RecastGraph.
+    /// Generates a NavMesh from scene geometry for true free movement.
     /// 
     /// Architecture:
     /// - Subscribes to GamePlatform static events for platform lifecycle
-    /// - Triggers local graph updates when platforms change
+    /// - Triggers local tile-based graph updates when platforms change
     /// - Provides position validation methods for other systems
     /// - Only this manager should call A* Pathfinding systems directly
     /// 
-    /// GridGraph Features:
-    /// - Single walkable surface per XZ position
-    /// - Ramps/slopes work within maxSlope angle
-    /// - 8-directional movement with path smoothing
-    /// - Dynamic updates via UpdateGraphs(bounds)
-    /// 
-    /// Note: For multi-level support (overhangs, tunnels), upgrade to A* PRO for LayerGridGraph.
+    /// RecastGraph Features:
+    /// - True NavMesh with free movement (not grid-based)
+    /// - Multi-level support (overhangs, ramps, tunnels)
+    /// - Tile-based for efficient local updates
+    /// - Automatic mesh generation from scene geometry
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(AstarPath))]
@@ -63,55 +60,113 @@ namespace Navigation
         
         #endregion
         
-        #region Configuration
+        #region Configuration - Graph Bounds
         
-        [Header("Graph Dimensions")]
-        [Tooltip("Width of the pathfinding graph in world units.")]
-        [SerializeField] private int graphWidth = 1000;
-        
-        [Tooltip("Depth of the pathfinding graph in world units.")]
-        [SerializeField] private int graphDepth = 1000;
-        
-        [Tooltip("Size of each pathfinding node in world units. Smaller = more precise but more memory.")]
-        [SerializeField] private float nodeSize = 1f;
-        
-        [Tooltip("Center position of the graph in world space.")]
+        [Header("Graph Bounds")]
+        [Tooltip("Center position of the navmesh in world space.")]
         [SerializeField] private Vector3 graphCenter = new Vector3(500, 0, 500);
         
+        [Tooltip("Size of the navmesh area in world units (X, Y, Z).")]
+        [SerializeField] private Vector3 graphSize = new Vector3(1000, 50, 1000);
+        
+        [Tooltip("Rotation of the navmesh bounds.")]
+        [SerializeField] private Vector3 graphRotation = Vector3.zero;
+        
+        #endregion
+        
+        #region Configuration - Agent Settings
+        
         [Header("Agent Settings")]
-        [Tooltip("Agent radius for collision testing.")]
+        [Tooltip("Agent radius for navigation. Agents cannot get closer to walls than this.")]
         [SerializeField] private float agentRadius = 0.3f;
         
-        [Tooltip("Agent height for collision testing and clearance under overhangs.")]
+        [Tooltip("Agent height. Areas with lower ceilings will be excluded.")]
         [SerializeField] private float agentHeight = 1.5f;
         
-        [Header("Collision Settings")]
-        [Tooltip("Layer mask for walkable surfaces (platforms, floors).")]
-        [SerializeField] private LayerMask walkableMask = ~0;
-        
-        [Tooltip("Layer mask for obstacles that block movement.")]
-        [SerializeField] private LayerMask obstacleMask = 0;
-        
-        [Tooltip("Height from which to raycast down to find ground.")]
-        [SerializeField] private float raycastHeight = 20f;
+        [Tooltip("Maximum height an agent can step up (stairs, curbs). Standard stairs ~0.3-0.4m.")]
+        [SerializeField] private float maxClimb = 0.4f;
         
         [Tooltip("Maximum slope angle for walkable surfaces (degrees).")]
-        [SerializeField] private float maxSlopeAngle = 45f;
+        [SerializeField] private float maxSlope = 45f;
         
-        [Header("Update Settings")]
-        [Tooltip("Extra padding around platform bounds when updating graph.")]
+        #endregion
+        
+        #region Configuration - Layers
+        
+        [Header("Layer Configuration")]
+        [Tooltip("Layers to include when scanning for walkable geometry (platforms, floors, terrain).")]
+        [SerializeField] private LayerMask walkableLayers = ~0;
+        
+        [Tooltip("Layers that should NEVER be walkable, even if in walkableLayers.")]
+        [SerializeField] private LayerMask unwalkableLayers = 0;
+        
+        #endregion
+        
+        #region Configuration - Quality & Performance
+        
+        [Header("Quality Settings")]
+        [Tooltip("Cell size for navmesh generation. Smaller = more precise but slower/more memory.\n" +
+                 "Recommended: 0.1-0.3 for detailed scenes, 0.3-0.5 for large open areas.")]
+        [Range(0.05f, 1f)]
+        [SerializeField] private float cellSize = 0.3f;
+        
+        [Tooltip("Cell height for vertical voxelization. Should be ~0.5-1x cellSize for most cases.")]
+        [Range(0.05f, 1f)]
+        [SerializeField] private float cellHeight = 0.2f;
+        
+        [Tooltip("Tile size in voxels. Larger tiles = faster initial scan, slower updates.\n" +
+                 "Smaller tiles = slower initial scan, faster local updates.\n" +
+                 "Recommended: 64-256 for frequently updated scenes.")]
+        [Range(16, 512)]
+        [SerializeField] private int tileSize = 128;
+        
+        [Tooltip("Minimum region area (in square world units). Removes small isolated walkable areas.")]
+        [SerializeField] private float minRegionArea = 1f;
+        
+        [Header("Performance Settings")]
+        [Tooltip("Use multi-threading for graph scanning (highly recommended).")]
+        [SerializeField] private bool useMultithreading = true;
+        
+        [Tooltip("Maximum tiles to update per frame when doing async updates.")]
+        [Range(1, 50)]
+        [SerializeField] private int maxTilesPerFrame = 10;
+        
+        #endregion
+        
+        #region Configuration - Updates
+        
+        [Header("Dynamic Update Settings")]
+        [Tooltip("Extra padding around platform bounds when updating graph (world units).")]
         [SerializeField] private float updatePadding = 0.5f;
         
-        [Tooltip("Delay before processing queued graph updates (batching).")]
+        [Tooltip("Delay before processing queued graph updates (seconds). Batches rapid changes.")]
         [SerializeField] private float updateDelay = 0.1f;
+        
+        [Tooltip("Minimum time between graph updates (seconds). Prevents update spam.")]
+        [SerializeField] private float updateCooldown = 0.2f;
+        
+        [Tooltip("If true, updates during platform movement are throttled for performance.")]
+        [SerializeField] private bool throttleMovementUpdates = true;
+        
+        [Tooltip("Interval for updates during platform movement (seconds).")]
+        [SerializeField] private float movementUpdateInterval = 0.5f;
+        
+        #endregion
+        
+        #region Configuration - References
         
         [Header("References")]
         [Tooltip("Reference to WorldGrid for coordinate transforms.")]
         [SerializeField] private WorldGrid worldGrid;
         
+        #endregion
+        
+        #region Configuration - Debug
+        
         [Header("Debug")]
         [SerializeField] private bool debugLogs = true;
-        [SerializeField] private bool debugDrawUpdates;
+        [SerializeField] private bool debugDrawUpdates = false;
+        [SerializeField] private bool debugDrawBounds = false;
         
         #endregion
         
@@ -119,26 +174,41 @@ namespace Navigation
         
         public bool IsReady => _isReady;
         public AstarPath AstarPath => _astarPath;
-        public GridGraph GridGraph => _gridGraph;
-        public float NodeSize => nodeSize;
+        public RecastGraph RecastGraph => _recastGraph;
+        
+        // Agent settings (read-only)
         public float AgentRadius => agentRadius;
         public float AgentHeight => agentHeight;
+        public float MaxClimb => maxClimb;
+        public float MaxSlope => maxSlope;
+        
+        // Quality settings (read-only)
+        public float CellSize => cellSize;
+        public int TileSize => tileSize;
         
         #endregion
         
         #region Private State
         
         private AstarPath _astarPath;
-        private GridGraph _gridGraph;
+        private RecastGraph _recastGraph;
         private bool _isReady;
         
         // Update batching
         private readonly HashSet<GamePlatform> _pendingUpdates = new();
+        private readonly HashSet<Bounds> _pendingBoundsUpdates = new();
         private float _lastUpdateRequest;
+        private float _lastUpdateProcessed;
         private bool _updateScheduled;
+        
+        // Movement update throttling
+        private float _lastMovementUpdate;
         
         // Platform tracking
         private readonly HashSet<GamePlatform> _registeredPlatforms = new();
+        
+        // Previous bounds tracking (for move operations)
+        private readonly Dictionary<GamePlatform, Bounds> _previousBounds = new();
         
         #endregion
         
@@ -191,6 +261,7 @@ namespace Navigation
                 }
             }
             _registeredPlatforms.Clear();
+            _previousBounds.Clear();
         }
         
         private void Start()
@@ -203,7 +274,11 @@ namespace Navigation
             // Process batched updates
             if (_updateScheduled && Time.time - _lastUpdateRequest >= updateDelay)
             {
-                ProcessPendingUpdates();
+                // Check cooldown
+                if (Time.time - _lastUpdateProcessed >= updateCooldown)
+                {
+                    ProcessPendingUpdates();
+                }
             }
         }
         
@@ -221,32 +296,35 @@ namespace Navigation
         
         private void InitializeGraph()
         {
-            if (debugLogs) Debug.Log("[PathfindingManager] Initializing GridGraph...");
+            if (debugLogs) Debug.Log("[PathfindingManager] Initializing RecastGraph...");
             
-            // Check if GridGraph already exists
+            // Check if RecastGraph already exists
             if (_astarPath.data.graphs != null && _astarPath.data.graphs.Length > 0)
             {
-                _gridGraph = _astarPath.data.gridGraph;
-                if (_gridGraph != null)
+                foreach (var graph in _astarPath.data.graphs)
                 {
-                    if (debugLogs) Debug.Log("[PathfindingManager] Using existing GridGraph from scene.");
-                    ConfigureExistingGraph();
-                    return;
+                    if (graph is RecastGraph existingGraph)
+                    {
+                        _recastGraph = existingGraph;
+                        if (debugLogs) Debug.Log("[PathfindingManager] Using existing RecastGraph from scene.");
+                        ConfigureExistingGraph();
+                        return;
+                    }
                 }
             }
             
-            // Create new GridGraph
+            // Create new RecastGraph
             CreateNewGraph();
         }
         
         private void CreateNewGraph()
         {
-            if (debugLogs) Debug.Log("[PathfindingManager] Creating new GridGraph...");
+            if (debugLogs) Debug.Log("[PathfindingManager] Creating new RecastGraph...");
             
-            _gridGraph = _astarPath.data.AddGraph(typeof(GridGraph)) as GridGraph;
-            if (_gridGraph == null)
+            _recastGraph = _astarPath.data.AddGraph(typeof(RecastGraph)) as RecastGraph;
+            if (_recastGraph == null)
             {
-                Debug.LogError("[PathfindingManager] Failed to create GridGraph!");
+                Debug.LogError("[PathfindingManager] Failed to create RecastGraph!");
                 return;
             }
             
@@ -259,55 +337,56 @@ namespace Navigation
         private void ConfigureExistingGraph()
         {
             // Apply runtime settings to existing graph
-            _gridGraph.collision.mask = obstacleMask;
-            _gridGraph.collision.heightMask = walkableMask;
-            _gridGraph.collision.diameter = agentRadius * 2f;
-            _gridGraph.collision.height = agentHeight;
-            _gridGraph.maxSlope = maxSlopeAngle;
+            ApplyGraphSettings(_recastGraph);
             
             _isReady = true;
             GraphReady?.Invoke();
             
-            if (debugLogs) Debug.Log("[PathfindingManager] GridGraph ready (existing).");
+            if (debugLogs) Debug.Log("[PathfindingManager] RecastGraph ready (existing).");
         }
         
         private void ConfigureGraph()
         {
-            // Calculate node count based on world size and node size
-            int width = Mathf.CeilToInt(graphWidth / nodeSize);
-            int depth = Mathf.CeilToInt(graphDepth / nodeSize);
-            
-            // Configure graph dimensions
-            _gridGraph.SetDimensions(width, depth, nodeSize);
-            _gridGraph.center = graphCenter;
-            
-            // === Collision Detection ===
-            _gridGraph.collision.type = ColliderType.Capsule;
-            _gridGraph.collision.diameter = agentRadius * 2f;
-            _gridGraph.collision.height = agentHeight;
-            _gridGraph.collision.mask = obstacleMask;
-            
-            // === Height Testing (finds walkable surfaces) ===
-            _gridGraph.collision.heightCheck = true;
-            _gridGraph.collision.heightMask = walkableMask;
-            _gridGraph.collision.fromHeight = raycastHeight;
-            
-            // === Walkability ===
-            _gridGraph.maxSlope = maxSlopeAngle;
-            _gridGraph.collision.collisionCheck = true;
-            
-            // === Connections ===
-            // 8-directional for smoother paths
-            _gridGraph.neighbours = NumNeighbours.Eight;
-            _gridGraph.cutCorners = true;
+            ApplyGraphSettings(_recastGraph);
             
             if (debugLogs)
             {
-                Debug.Log($"[PathfindingManager] GridGraph configured:\n" +
-                          $"  Dimensions: {width}x{depth} nodes ({nodeSize}m each)\n" +
-                          $"  Agent: radius={agentRadius}m, height={agentHeight}m\n" +
-                          $"  Max Slope: {maxSlopeAngle}°");
+                Debug.Log($"[PathfindingManager] RecastGraph configured:\n" +
+                          $"  Bounds: {graphSize} at {graphCenter}\n" +
+                          $"  Agent: radius={agentRadius}m, height={agentHeight}m, climb={maxClimb}m\n" +
+                          $"  Quality: cellSize={cellSize}m, tileSize={tileSize}\n" +
+                          $"  Max Slope: {maxSlope}°");
             }
+        }
+        
+        private void ApplyGraphSettings(RecastGraph graph)
+        {
+            // === Bounds ===
+            graph.forcedBoundsCenter = graphCenter;
+            graph.forcedBoundsSize = graphSize;
+            graph.rotation = graphRotation;
+            
+            // === Agent ===
+            graph.characterRadius = agentRadius;
+            graph.walkableHeight = agentHeight;
+            graph.walkableClimb = maxClimb;
+            graph.maxSlope = maxSlope;
+            
+            // === Voxelization Quality ===
+            graph.cellSize = cellSize;
+            graph.cellHeight = cellHeight;
+            graph.useTiles = true;
+            graph.editorTileSize = tileSize;
+            
+            // === Region Settings ===
+            graph.minRegionSize = minRegionArea;
+            
+            // === Layers ===
+            graph.mask = walkableLayers;
+            // Note: unwalkableLayers should be excluded from walkableLayers by user
+            
+            // === Performance ===
+            // Multi-threading is handled by AstarPath settings
         }
         
         /// <summary>
@@ -315,11 +394,11 @@ namespace Navigation
         /// </summary>
         public void ScanGraph()
         {
-            if (debugLogs) Debug.Log("[PathfindingManager] Scanning GridGraph...");
+            if (debugLogs) Debug.Log("[PathfindingManager] Scanning RecastGraph...");
             
             ScanStarted?.Invoke();
             
-            _astarPath.Scan(_gridGraph);
+            _astarPath.Scan(_recastGraph);
             
             _isReady = true;
             ScanCompleted?.Invoke();
@@ -327,8 +406,18 @@ namespace Navigation
             
             if (debugLogs) 
             {
-                Debug.Log($"[PathfindingManager] GridGraph scan complete.");
+                int tileCount = _recastGraph.tileXCount * _recastGraph.tileZCount;
+                Debug.Log($"[PathfindingManager] RecastGraph scan complete. Tiles: {tileCount}");
             }
+        }
+        
+        /// <summary>
+        /// Rescan the entire graph. Use sparingly - prefer local updates.
+        /// </summary>
+        public void RescanGraph()
+        {
+            if (debugLogs) Debug.Log("[PathfindingManager] Full rescan requested...");
+            ScanGraph();
         }
         
         #endregion
@@ -342,6 +431,12 @@ namespace Navigation
             SubscribeToPlatform(platform);
             _registeredPlatforms.Add(platform);
             
+            // Store initial bounds
+            _previousBounds[platform] = GetPlatformBounds(platform);
+            
+            // Queue update for the new platform area
+            QueuePlatformUpdate(platform);
+            
             if (debugLogs) Debug.Log($"[PathfindingManager] Platform registered: {platform.name}");
         }
         
@@ -350,7 +445,15 @@ namespace Navigation
             if (!platform) return;
             
             // Queue update for the area this platform occupied
-            QueueGraphUpdate(GetPlatformBounds(platform));
+            if (_previousBounds.TryGetValue(platform, out Bounds bounds))
+            {
+                QueueBoundsUpdate(bounds);
+                _previousBounds.Remove(platform);
+            }
+            else
+            {
+                QueueBoundsUpdate(GetPlatformBounds(platform));
+            }
             
             UnsubscribeFromPlatform(platform);
             _registeredPlatforms.Remove(platform);
@@ -375,20 +478,50 @@ namespace Navigation
         private void OnPlatformPlaced(GamePlatform platform)
         {
             if (debugLogs) Debug.Log($"[PathfindingManager] Platform placed: {platform.name}");
-            QueuePlatformUpdate(platform);
+            
+            // Update both old and new positions
+            if (_previousBounds.TryGetValue(platform, out Bounds oldBounds))
+            {
+                QueueBoundsUpdate(oldBounds);
+            }
+            
+            var newBounds = GetPlatformBounds(platform);
+            QueueBoundsUpdate(newBounds);
+            _previousBounds[platform] = newBounds;
         }
         
         private void OnPlatformPickedUp(GamePlatform platform)
         {
             if (debugLogs) Debug.Log($"[PathfindingManager] Platform picked up: {platform.name}");
-            // Update the area where the platform was (now empty)
-            QueuePlatformUpdate(platform);
+            
+            // Store current bounds before it moves
+            _previousBounds[platform] = GetPlatformBounds(platform);
+            
+            // Queue update for where it was
+            QueueBoundsUpdate(_previousBounds[platform]);
         }
         
         private void OnPlatformMoved(GamePlatform platform)
         {
-            // Only relevant during placement preview - batch these updates
-            QueuePlatformUpdate(platform);
+            // Throttle updates during movement for performance
+            if (throttleMovementUpdates)
+            {
+                if (Time.time - _lastMovementUpdate < movementUpdateInterval)
+                {
+                    return;
+                }
+                _lastMovementUpdate = Time.time;
+            }
+            
+            // Update both old position (now empty) and new position
+            if (_previousBounds.TryGetValue(platform, out Bounds oldBounds))
+            {
+                QueueBoundsUpdate(oldBounds);
+            }
+            
+            var newBounds = GetPlatformBounds(platform);
+            QueueBoundsUpdate(newBounds);
+            _previousBounds[platform] = newBounds;
         }
         
         #endregion
@@ -410,48 +543,53 @@ namespace Navigation
         /// <summary>
         /// Queue a bounds area for graph update.
         /// </summary>
-        public void QueueGraphUpdate(Bounds bounds)
+        public void QueueBoundsUpdate(Bounds bounds)
         {
             if (!_isReady) return;
             
-            // Expand bounds slightly for safety
+            // Expand bounds for safety
             bounds.Expand(updatePadding * 2f);
             
-            var guo = new GraphUpdateObject(bounds);
-            guo.updatePhysics = true;
-            
-            _astarPath.UpdateGraphs(guo);
-            
-            if (debugLogs) Debug.Log($"[PathfindingManager] Queued graph update: {bounds.center}, size: {bounds.size}");
+            _pendingBoundsUpdates.Add(bounds);
+            _lastUpdateRequest = Time.time;
+            _updateScheduled = true;
             
             if (debugDrawUpdates)
             {
                 DebugDrawBounds(bounds, Color.yellow, 2f);
             }
-            
-            GraphUpdated?.Invoke(bounds);
         }
         
         /// <summary>
-        /// Process all pending platform updates.
+        /// Queue a bounds area for graph update (public API).
+        /// </summary>
+        public void QueueGraphUpdate(Bounds bounds)
+        {
+            QueueBoundsUpdate(bounds);
+        }
+        
+        /// <summary>
+        /// Process all pending platform and bounds updates.
         /// </summary>
         private void ProcessPendingUpdates()
         {
-            if (_pendingUpdates.Count == 0)
+            if (_pendingUpdates.Count == 0 && _pendingBoundsUpdates.Count == 0)
             {
                 _updateScheduled = false;
                 return;
             }
             
-            // Calculate combined bounds of all pending platforms
+            // Collect all bounds
             Bounds combinedBounds = new Bounds();
             bool first = true;
             
+            // From pending platforms
             foreach (var platform in _pendingUpdates)
             {
                 if (!platform) continue;
                 
                 var platformBounds = GetPlatformBounds(platform);
+                platformBounds.Expand(updatePadding * 2f);
                 
                 if (first)
                 {
@@ -464,32 +602,81 @@ namespace Navigation
                 }
             }
             
-            _pendingUpdates.Clear();
-            _updateScheduled = false;
-            
-            if (!first) // Had at least one valid platform
+            // From pending bounds
+            foreach (var bounds in _pendingBoundsUpdates)
             {
-                QueueGraphUpdate(combinedBounds);
+                if (first)
+                {
+                    combinedBounds = bounds;
+                    first = false;
+                }
+                else
+                {
+                    combinedBounds.Encapsulate(bounds);
+                }
+            }
+            
+            _pendingUpdates.Clear();
+            _pendingBoundsUpdates.Clear();
+            _updateScheduled = false;
+            _lastUpdateProcessed = Time.time;
+            
+            if (!first) // Had at least one valid update
+            {
+                UpdateGraphInBounds(combinedBounds);
             }
         }
         
         /// <summary>
-        /// Force immediate graph update for an area.
+        /// Update the RecastGraph within the specified bounds (tile-based local update).
+        /// </summary>
+        private void UpdateGraphInBounds(Bounds bounds)
+        {
+            if (!_isReady || _recastGraph == null) return;
+            
+            if (debugLogs) 
+            {
+                Debug.Log($"[PathfindingManager] Updating graph in bounds: center={bounds.center}, size={bounds.size}");
+            }
+            
+            // Use GraphUpdateObject for tile-based updates
+            // RecastGraph automatically determines which tiles need rebuilding based on bounds
+            var guo = new GraphUpdateObject(bounds)
+            {
+                updatePhysics = true,  // Re-scan physics for the area
+                modifyWalkability = false,  // Let RecastGraph determine walkability from geometry
+                modifyTag = false
+            };
+            
+            // Queue the update - A* will process affected tiles only
+            _astarPath.UpdateGraphs(guo);
+            
+            if (debugDrawUpdates)
+            {
+                DebugDrawBounds(bounds, Color.green, 1f);
+            }
+            
+            GraphUpdated?.Invoke(bounds);
+        }
+        
+        /// <summary>
+        /// Force immediate graph update for an area (synchronous).
+        /// Use sparingly - prefer queued updates.
         /// </summary>
         public void UpdateGraphImmediate(Bounds bounds)
         {
-            if (!_isReady) return;
+            if (!_isReady || _recastGraph == null) return;
             
             bounds.Expand(updatePadding * 2f);
             
+            if (debugLogs) Debug.Log($"[PathfindingManager] Immediate graph update: {bounds.center}");
+            
+            // Synchronous update
             var guo = new GraphUpdateObject(bounds);
             guo.updatePhysics = true;
             
-            // Use FlushGraphUpdates to process immediately
             _astarPath.UpdateGraphs(guo);
             _astarPath.FlushGraphUpdates();
-            
-            if (debugLogs) Debug.Log($"[PathfindingManager] Immediate graph update: {bounds.center}");
             
             GraphUpdated?.Invoke(bounds);
         }
@@ -502,7 +689,8 @@ namespace Navigation
             if (!platform || !_isReady) return;
             
             var bounds = GetPlatformBounds(platform);
-            QueueGraphUpdate(bounds);
+            bounds.Expand(updatePadding * 2f);
+            UpdateGraphInBounds(bounds);
         }
         
         #endregion
@@ -514,10 +702,10 @@ namespace Navigation
         /// </summary>
         public bool IsPositionWalkable(Vector3 worldPosition)
         {
-            if (!_isReady || _gridGraph == null) return false;
+            if (!_isReady || _recastGraph == null) return false;
             
-            var node = _gridGraph.GetNearest(worldPosition).node;
-            return node != null && node.Walkable;
+            var nearest = _recastGraph.GetNearest(worldPosition);
+            return nearest.node != null && nearest.node.Walkable;
         }
         
         /// <summary>
@@ -527,11 +715,10 @@ namespace Navigation
         {
             walkablePosition = worldPosition;
             
-            if (!_isReady || _gridGraph == null) return false;
+            if (!_isReady || _recastGraph == null) return false;
             
-            var constraint = NNConstraint.Default;
-            constraint.constrainWalkability = true;
-            constraint.walkable = true;
+            // Use new 5.4 API with NearestNodeConstraint
+            var constraint = NearestNodeConstraint.Walkable;
             
             var nearest = _astarPath.GetNearest(worldPosition, constraint);
             
@@ -562,6 +749,15 @@ namespace Navigation
             return !path.error && path.vectorPath.Count > 0;
         }
         
+        /// <summary>
+        /// Sample the navmesh at a position with a max distance.
+        /// Returns true if a point on the navmesh was found.
+        /// </summary>
+        public bool SamplePosition(Vector3 worldPosition, out Vector3 navmeshPosition, float maxDistance = 5f)
+        {
+            return GetNearestWalkablePosition(worldPosition, out navmeshPosition, maxDistance);
+        }
+        
         #endregion
         
         #region Utility Methods
@@ -573,13 +769,22 @@ namespace Navigation
         {
             if (!platform) return new Bounds();
             
-            // Calculate bounds from footprint
-            var footprint = platform.Footprint;
-            float halfWidth = footprint.x * 0.5f;
-            float halfDepth = footprint.y * 0.5f;
+            // Try to get bounds from colliders first
+            var colliders = platform.GetComponentsInChildren<Collider>();
+            if (colliders.Length > 0)
+            {
+                Bounds bounds = colliders[0].bounds;
+                for (int i = 1; i < colliders.Length; i++)
+                {
+                    bounds.Encapsulate(colliders[i].bounds);
+                }
+                return bounds;
+            }
             
+            // Fallback: Calculate bounds from footprint
+            var footprint = platform.Footprint;
             Vector3 center = platform.transform.position;
-            Vector3 size = new Vector3(footprint.x + updatePadding * 2f, 2f, footprint.y + updatePadding * 2f);
+            Vector3 size = new Vector3(footprint.x, agentHeight * 2f, footprint.y);
             
             return new Bounds(center, size);
         }
@@ -599,14 +804,26 @@ namespace Navigation
         }
         
         /// <summary>
-        /// Set the graph center (useful when WorldGrid changes).
+        /// Set the graph bounds center.
         /// </summary>
         public void SetGraphCenter(Vector3 center)
         {
             graphCenter = center;
-            if (_gridGraph != null)
+            if (_recastGraph != null)
             {
-                _gridGraph.center = center;
+                _recastGraph.forcedBoundsCenter = center;
+            }
+        }
+        
+        /// <summary>
+        /// Set the graph bounds size.
+        /// </summary>
+        public void SetGraphSize(Vector3 size)
+        {
+            graphSize = size;
+            if (_recastGraph != null)
+            {
+                _recastGraph.forcedBoundsSize = size;
             }
         }
         
@@ -615,13 +832,16 @@ namespace Navigation
         /// </summary>
         public string GetGraphInfo()
         {
-            if (_gridGraph == null) return "No graph initialized";
+            if (_recastGraph == null) return "No graph initialized";
             
-            return $"GridGraph:\n" +
-                   $"  Size: {_gridGraph.width}x{_gridGraph.depth} nodes\n" +
-                   $"  Node Size: {_gridGraph.nodeSize}m\n" +
-                   $"  Center: {_gridGraph.center}\n" +
-                   $"  Max Slope: {_gridGraph.maxSlope}°";
+            int tileCount = _recastGraph.tileXCount * _recastGraph.tileZCount;
+            
+            return $"RecastGraph:\n" +
+                   $"  Bounds: {_recastGraph.forcedBoundsSize} at {_recastGraph.forcedBoundsCenter}\n" +
+                   $"  Tiles: {_recastGraph.tileXCount}x{_recastGraph.tileZCount} = {tileCount}\n" +
+                   $"  Cell Size: {_recastGraph.cellSize}m\n" +
+                   $"  Agent: radius={_recastGraph.characterRadius}m, height={_recastGraph.walkableHeight}m\n" +
+                   $"  Max Climb: {_recastGraph.walkableClimb}m, Max Slope: {_recastGraph.maxSlope}°";
         }
         
         private void DebugDrawBounds(Bounds bounds, Color color, float duration)
@@ -650,23 +870,89 @@ namespace Navigation
         
         #endregion
         
+        #region Runtime Configuration API
+        
+        /// <summary>
+        /// Update agent settings at runtime. Requires rescan to take effect.
+        /// </summary>
+        public void SetAgentSettings(float radius, float height, float climb, float slope)
+        {
+            agentRadius = radius;
+            agentHeight = height;
+            maxClimb = climb;
+            maxSlope = slope;
+            
+            if (_recastGraph != null)
+            {
+                _recastGraph.characterRadius = radius;
+                _recastGraph.walkableHeight = height;
+                _recastGraph.walkableClimb = climb;
+                _recastGraph.maxSlope = slope;
+            }
+        }
+        
+        /// <summary>
+        /// Update quality settings at runtime. Requires rescan to take effect.
+        /// </summary>
+        public void SetQualitySettings(float newCellSize, int newTileSize)
+        {
+            cellSize = Mathf.Clamp(newCellSize, 0.05f, 1f);
+            tileSize = Mathf.Clamp(newTileSize, 16, 512);
+            
+            if (_recastGraph != null)
+            {
+                _recastGraph.cellSize = cellSize;
+                _recastGraph.editorTileSize = tileSize;
+            }
+        }
+        
+        /// <summary>
+        /// Update layer masks at runtime. Requires rescan to take effect.
+        /// </summary>
+        public void SetLayerMasks(LayerMask walkable, LayerMask unwalkable)
+        {
+            walkableLayers = walkable;
+            unwalkableLayers = unwalkable;
+            
+            if (_recastGraph != null)
+            {
+                _recastGraph.mask = walkableLayers;
+            }
+        }
+        
+        #endregion
+        
         #region Editor
         
 #if UNITY_EDITOR
         private void OnDrawGizmosSelected()
         {
+            if (!debugDrawBounds) return;
+            
             // Draw graph bounds
             Gizmos.color = new Color(0.2f, 0.8f, 0.2f, 0.3f);
-            Vector3 size = new Vector3(graphWidth, 1f, graphDepth);
-            Gizmos.DrawWireCube(graphCenter, size);
+            Gizmos.DrawWireCube(graphCenter, graphSize);
             
             // Draw agent size
             Gizmos.color = Color.cyan;
             Gizmos.DrawWireSphere(transform.position, agentRadius);
+            Gizmos.DrawLine(transform.position, transform.position + Vector3.up * agentHeight);
+        }
+        
+        private void OnValidate()
+        {
+            // Clamp values
+            agentRadius = Mathf.Max(0.1f, agentRadius);
+            agentHeight = Mathf.Max(0.5f, agentHeight);
+            maxClimb = Mathf.Clamp(maxClimb, 0f, agentHeight);
+            maxSlope = Mathf.Clamp(maxSlope, 0f, 85f);
+            cellSize = Mathf.Clamp(cellSize, 0.05f, 1f);
+            cellHeight = Mathf.Clamp(cellHeight, 0.05f, 1f);
+            tileSize = Mathf.Clamp(tileSize, 16, 512);
+            minRegionArea = Mathf.Max(0f, minRegionArea);
         }
 #endif
         
         #endregion
     }
 }
-
