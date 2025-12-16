@@ -64,11 +64,21 @@ namespace Agents
         [SerializeField] private string agentLayerName = "NPCAgent";
         
         [Header("Status Colors")]
-        [SerializeField] private Color idleColor = new Color(0.3f, 0.7f, 0.3f, 1f);
-        [SerializeField] private Color movingColor = new Color(0.3f, 0.5f, 0.9f, 1f);
-        [SerializeField] private Color selectedColor = new Color(1f, 0.9f, 0.2f, 1f);
-        [SerializeField] private Color waitingColor = new Color(0.9f, 0.6f, 0.2f, 1f);
-        [SerializeField] private Color errorColor = new Color(0.9f, 0.2f, 0.2f, 1f);
+        [Tooltip("Green - Agent is idle with no destination")]
+        [SerializeField] private Color idleColor = new Color(0.2f, 0.8f, 0.2f, 1f);
+        
+        [Tooltip("Blue - Agent is actively moving")]
+        [SerializeField] private Color movingColor = new Color(0.2f, 0.4f, 0.9f, 1f);
+        
+        [Tooltip("Orange - Agent is calculating path or waiting")]
+        [SerializeField] private Color calculatingColor = new Color(1f, 0.6f, 0.1f, 1f);
+        
+        [Tooltip("Red - Agent encountered an error")]
+        [SerializeField] private Color errorColor = new Color(0.9f, 0.1f, 0.1f, 1f);
+        
+        [Header("Selection Visual")]
+        [Tooltip("Color tint when agent is selected (multiplied with status color)")]
+        [SerializeField] private Color selectedTint = new Color(1f, 1f, 0.5f, 1f);
         
         [Header("Selection Settings")]
         [SerializeField] private float selectedScaleMultiplier = 1.1f;
@@ -121,9 +131,9 @@ namespace Agents
         
         public Color IdleColor => idleColor;
         public Color MovingColor => movingColor;
-        public Color SelectedColor => selectedColor;
-        public Color WaitingColor => waitingColor;
+        public Color CalculatingColor => calculatingColor;
         public Color ErrorColor => errorColor;
+        public Color SelectedTint => selectedTint;
         
         /// <summary>All registered agents.</summary>
         public IReadOnlyList<NPCAgent> AllAgents => _agentsList;
@@ -521,10 +531,11 @@ namespace Agents
             aiPath.simulateMovement = true;  // Actually move the transform
             aiPath.updatePosition = true;    // Let AIPath update position
             aiPath.updateRotation = true;    // Let AIPath update rotation
-            aiPath.canSearch = true;         // Allow automatic path recalculation
             
-            // Ensure not stopped
-            aiPath.isStopped = false;
+            // Start in idle state - NPCAgent will enable searching when destination is set
+            aiPath.canSearch = false;        // Don't auto-search until destination is set
+            aiPath.isStopped = true;         // Start stopped
+            aiPath.destination = aiPath.position;  // No destination initially
         }
         
         private GameObject CreateProceduralAgent(Vector3 position)
@@ -609,17 +620,36 @@ namespace Agents
             }
         }
         
+        /// <summary>
+        /// Get the color for a given agent status.
+        /// Green = Idle, Blue = Moving, Orange = Calculating, Red = Error
+        /// </summary>
         public Color GetColorForStatus(AgentStatus status)
         {
             return status switch
             {
                 AgentStatus.Idle => idleColor,
                 AgentStatus.Moving => movingColor,
-                AgentStatus.Selected => selectedColor,
-                AgentStatus.Waiting => waitingColor,
+                AgentStatus.Calculating => calculatingColor,
                 AgentStatus.Error => errorColor,
                 _ => idleColor
             };
+        }
+        
+        /// <summary>
+        /// Get color for an agent, taking selection into account.
+        /// </summary>
+        public Color GetColorForAgent(NPCAgent agent)
+        {
+            Color baseColor = GetColorForStatus(agent.Status);
+            
+            // Apply selection tint if selected
+            if (agent.IsSelected)
+            {
+                return baseColor * selectedTint;
+            }
+            
+            return baseColor;
         }
         
         public void SetLODCamera(Camera camera)

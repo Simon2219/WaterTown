@@ -7,14 +7,19 @@ namespace Agents
 {
     /// <summary>
     /// Agent status for visual feedback and logic.
+    /// Green = Idle, Blue = Moving, Orange = Calculating, Red = Error
+    /// Note: Selection is separate from status (overlay color).
     /// </summary>
     public enum AgentStatus : byte
     {
+        /// <summary>Agent is idle with no destination. Color: Green</summary>
         Idle = 0,
+        /// <summary>Agent is actively moving to destination. Color: Blue</summary>
         Moving = 1,
-        Selected = 2,
-        Waiting = 3,
-        Error = 4
+        /// <summary>Agent is calculating path or waiting. Color: Orange</summary>
+        Calculating = 2,
+        /// <summary>Agent encountered an error (path failed, etc). Color: Red</summary>
+        Error = 3
     }
 
     /// <summary>
@@ -153,7 +158,6 @@ namespace Agents
         
         // State
         private AgentStatus _status = AgentStatus.Idle;
-        private AgentStatus _statusBeforeSelection = AgentStatus.Idle;
         private AgentLODLevel _lodLevel = AgentLODLevel.High;
         private bool _isSelected;
         private bool _hasDestination;
@@ -196,10 +200,12 @@ namespace Agents
                 return;
             }
             
-            // Configure AIPath
+            // Configure AIPath - start in idle state
             _aiPath.simulateMovement = true;
-            _aiPath.canSearch = true;
+            _aiPath.canSearch = false;  // Don't auto-search until destination is set
             _aiPath.enableRotation = true;
+            _aiPath.isStopped = true;   // Start stopped
+            _aiPath.destination = transform.position;  // No destination initially
             
             AgentRenderer = GetComponent<Renderer>();
             if (!AgentRenderer)
@@ -302,8 +308,6 @@ namespace Agents
         
         private void UpdateStatus()
         {
-            if (_isSelected) return;
-            
             AgentStatus newStatus = DetermineStatus();
             
             if (newStatus != _status)
@@ -320,37 +324,53 @@ namespace Agents
             }
         }
         
+        /// <summary>
+        /// Determine agent status based on AIPath state.
+        /// Uses AIPath's built-in properties as per documentation.
+        /// </summary>
         private AgentStatus DetermineStatus()
         {
             if (!_aiPath) return AgentStatus.Error;
             
-            // Check for path errors
-            if (_seeker.GetCurrentPath() != null && _seeker.GetCurrentPath().error)
+            // Check for unreachable/error state
+            if (_unreachableDetected)
             {
                 return AgentStatus.Error;
             }
             
-            if (_hasDestination)
+            // Check for path errors from Seeker
+            var currentPath = _seeker?.GetCurrentPath();
+            if (currentPath != null && currentPath.error)
             {
-                if (_aiPath.pathPending)
-                {
-                    return AgentStatus.Waiting;
-                }
-                
-                if (_aiPath.reachedDestination)
-                {
-                    return AgentStatus.Idle;
-                }
-                
-                if (_aiPath.hasPath && _aiPath.velocity.sqrMagnitude > 0.01f)
-                {
-                    return AgentStatus.Moving;
-                }
-                
-                return AgentStatus.Waiting;
+                return AgentStatus.Error;
             }
             
-            return AgentStatus.Idle;
+            // No destination = Idle
+            if (!_hasDestination)
+            {
+                return AgentStatus.Idle;
+            }
+            
+            // Path is being calculated
+            if (_aiPath.pathPending)
+            {
+                return AgentStatus.Calculating;
+            }
+            
+            // Has path and moving
+            if (_aiPath.hasPath && !_aiPath.reachedEndOfPath)
+            {
+                return AgentStatus.Moving;
+            }
+            
+            // Reached destination
+            if (_aiPath.reachedDestination)
+            {
+                return AgentStatus.Idle;
+            }
+            
+            // Waiting for something (has destination but no path yet, or path just finished)
+            return AgentStatus.Calculating;
         }
         
         private void CheckDestinationReached()
@@ -401,31 +421,57 @@ namespace Agents
         /// </summary>
         private void CompleteCurrentDestination()
         {
+            if (logStatusChanges)
+            {
+                Debug.Log($"[NPCAgent] Agent {AgentId} completed destination, queue remaining: {_destinationQueue.Count}");
+            }
+            
             _hasDestination = false;
             _unreachableDetected = false;
             
+            // CRITICAL: Stop AIPath auto-recalculation when destination is reached
+            // Otherwise it will keep recalculating paths to the same spot!
+            if (_aiPath)
+            {
+                _aiPath.canSearch = false;  // Stop auto path recalculation
+                _aiPath.SetPath(null);      // Clear current path
+            }
+            
             DestinationReached?.Invoke(this);
-            ProcessNextQueuedDestination();
-        }
-        
-        private void ProcessNextQueuedDestination()
-        {
+            
+            // Check if there are more destinations in queue
             if (_destinationQueue.Count > 0)
             {
-                Vector3 nextDest = _destinationQueue.Dequeue();
-                
-                if (logQueueChanges)
-                {
-                    Debug.Log($"[NPCAgent] Agent {AgentId} processing next queued destination. Remaining: {_destinationQueue.Count}");
-                }
-                
-                QueueChanged?.Invoke(this, _destinationQueue.Count);
-                SetDestinationInternal(nextDest);
+                ProcessNextQueuedDestination();
             }
             else
             {
+                // No more destinations - fully idle
                 AllDestinationsCompleted?.Invoke(this);
             }
+        }
+        
+        /// <summary>
+        /// Process the next destination from the queue.
+        /// Called after current destination is completed.
+        /// </summary>
+        private void ProcessNextQueuedDestination()
+        {
+            if (_destinationQueue.Count == 0)
+            {
+                Debug.LogWarning($"[NPCAgent] ProcessNextQueuedDestination called with empty queue!");
+                return;
+            }
+            
+            Vector3 nextDest = _destinationQueue.Dequeue();
+            
+            if (logQueueChanges)
+            {
+                Debug.Log($"[NPCAgent] Agent {AgentId} starting next queued destination: {nextDest}. Remaining in queue: {_destinationQueue.Count}");
+            }
+            
+            QueueChanged?.Invoke(this, _destinationQueue.Count);
+            SetDestinationInternal(nextDest);
         }
         
         #endregion
@@ -482,7 +528,7 @@ namespace Agents
         #region Visual Updates
         
         /// <summary>
-        /// Update visual appearance based on status.
+        /// Update visual appearance based on status and selection.
         /// </summary>
         internal void UpdateVisuals()
         {
@@ -490,10 +536,12 @@ namespace Agents
             
             if (AgentMaterial)
             {
-                Color color = Manager.GetColorForStatus(_status);
+                // Use GetColorForAgent which handles both status color and selection tint
+                Color color = Manager.GetColorForAgent(this);
                 AgentMaterial.color = color;
             }
             
+            // Scale up when selected for visual feedback
             transform.localScale = _isSelected 
                 ? _baseScale * Manager.SelectedScaleMultiplier 
                 : _baseScale;
@@ -780,19 +828,15 @@ namespace Agents
         #region Public API - Selection
         
         /// <summary>
-        /// Select this agent.
+        /// Select this agent. Selection is visual-only and doesn't affect status.
         /// </summary>
         public void Select()
         {
             if (_isSelected) return;
             
-            _statusBeforeSelection = _status;
             _isSelected = true;
-            _status = AgentStatus.Selected;
-            
             UpdateVisuals();
             SelectionChanged?.Invoke(this, true);
-            StatusChanged?.Invoke(this, _status);
             
             if (logStatusChanges)
             {
@@ -808,11 +852,8 @@ namespace Agents
             if (!_isSelected) return;
             
             _isSelected = false;
-            _status = _statusBeforeSelection;
-            
             UpdateVisuals();
             SelectionChanged?.Invoke(this, false);
-            StatusChanged?.Invoke(this, _status);
             
             if (logStatusChanges)
             {
@@ -834,15 +875,11 @@ namespace Agents
         #region Public API - Status
         
         /// <summary>
-        /// Manually set status (use sparingly).
+        /// Manually set status (use sparingly - prefer letting the system determine status).
         /// </summary>
         public void SetStatus(AgentStatus newStatus)
         {
-            if (newStatus == AgentStatus.Selected)
-            {
-                Select();
-                return;
-            }
+            if (_status == newStatus) return;
             
             _status = newStatus;
             UpdateVisuals();
