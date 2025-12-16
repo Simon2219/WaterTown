@@ -110,9 +110,8 @@ namespace Navigation
         [Range(0.05f, 1f)]
         [SerializeField] private float cellSize = 0.3f;
         
-        [Tooltip("Cell height for vertical voxelization. Should be ~0.5-1x cellSize for most cases.")]
-        [Range(0.05f, 1f)]
-        [SerializeField] private float cellHeight = 0.2f;
+        // Note: Cell height is configured directly on the RecastGraph in the Inspector
+        // It's typically set to 0.5-1x the cellSize value
         
         [Tooltip("Tile size in voxels. Larger tiles = faster initial scan, slower updates.\n" +
                  "Smaller tiles = slower initial scan, faster local updates.\n" +
@@ -374,7 +373,8 @@ namespace Navigation
             
             // === Voxelization Quality ===
             graph.cellSize = cellSize;
-            graph.cellHeight = cellHeight;
+            // Note: cellHeight is typically derived from cellSize in A* Pro 5.4
+            // It can be configured in the Inspector on the RecastGraph component
             graph.useTiles = true;
             graph.editorTileSize = tileSize;
             
@@ -947,7 +947,6 @@ namespace Navigation
             maxClimb = Mathf.Clamp(maxClimb, 0f, agentHeight);
             maxSlope = Mathf.Clamp(maxSlope, 0f, 85f);
             cellSize = Mathf.Clamp(cellSize, 0.05f, 1f);
-            cellHeight = Mathf.Clamp(cellHeight, 0.05f, 1f);
             tileSize = Mathf.Clamp(tileSize, 16, 512);
             minRegionArea = Mathf.Max(0f, minRegionArea);
         }
