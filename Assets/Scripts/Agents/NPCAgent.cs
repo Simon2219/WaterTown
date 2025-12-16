@@ -414,8 +414,8 @@ namespace Agents
             // Detect when path calculation finishes (was pending, now not)
             if (_wasPathPending && !currentlyPending)
             {
-                // Try to get the path from AIPath first, then fall back to Seeker
-                var path = _aiPath.hasPath ? _aiPath.path : _seeker.GetCurrentPath();
+                // Get the current path from Seeker
+                var path = _seeker.GetCurrentPath();
                 
                 // Only process if this is a new path we haven't checked
                 if (path != null && path != _lastCheckedPath)
