@@ -157,13 +157,13 @@ namespace Agents
         private AgentLODLevel _lodLevel = AgentLODLevel.High;
         private bool _isSelected;
         private bool _hasDestination;
-        private bool _wasAtDestination = true;
         private bool _visualsEnabled = true;
         private Vector3 _baseScale;
         private bool _initialized;
         
         // Path failure tracking
         private Vector3 _currentTargetDestination;
+        private bool _unreachableDetected;  // Prevents re-checking after giving up
         
         // Frame skip tracking for staggered updates
         private int _frameOffset;
@@ -357,26 +357,25 @@ namespace Agents
         {
             if (!_aiPath || !_hasDestination) return;
             
+            // Already detected as unreachable - don't check again
+            if (_unreachableDetected) return;
+            
             // SUCCESS: Agent reached the actual destination
-            if (_aiPath.reachedDestination && !_wasAtDestination)
+            if (_aiPath.reachedDestination)
             {
-                _wasAtDestination = true;
-                _hasDestination = false;
-                
                 if (logStatusChanges)
                 {
                     Debug.Log($"[NPCAgent] Agent {AgentId} reached destination");
                 }
                 
-                DestinationReached?.Invoke(this);
-                ProcessNextQueuedDestination();
+                CompleteCurrentDestination();
                 return;
             }
             
             // FAILURE CHECK: Agent reached end of path but NOT the destination
             // This means the destination is unreachable - agent is at closest point
             // Using AIPath's built-in properties as per documentation
-            if (_aiPath.reachedEndOfPath && !_aiPath.reachedDestination && !_aiPath.pathPending)
+            if (_aiPath.reachedEndOfPath && !_aiPath.pathPending)
             {
                 // Verify by checking distance between path end and target
                 float distanceToTarget = Vector3.Distance(_aiPath.endOfPath, _currentTargetDestination);
@@ -385,14 +384,28 @@ namespace Agents
                 {
                     if (logStatusChanges)
                     {
-                        Debug.LogWarning($"[NPCAgent] Agent {AgentId} stuck at closest point. " +
+                        Debug.LogWarning($"[NPCAgent] Agent {AgentId} UNREACHABLE - at closest point. " +
                             $"EndOfPath: {_aiPath.endOfPath}, Target: {_currentTargetDestination}, " +
-                            $"Distance: {distanceToTarget:F2}m - GIVING UP");
+                            $"Distance: {distanceToTarget:F2}m");
                     }
                     
+                    // Mark as unreachable to prevent re-checking
+                    _unreachableDetected = true;
                     GiveUpOnDestination();
                 }
             }
+        }
+        
+        /// <summary>
+        /// Called when agent successfully reaches destination.
+        /// </summary>
+        private void CompleteCurrentDestination()
+        {
+            _hasDestination = false;
+            _unreachableDetected = false;
+            
+            DestinationReached?.Invoke(this);
+            ProcessNextQueuedDestination();
         }
         
         private void ProcessNextQueuedDestination()
@@ -596,6 +609,9 @@ namespace Agents
             // Track target for failure detection
             _currentTargetDestination = destination;
             
+            // Reset failure tracking for new destination
+            _unreachableDetected = false;
+            
             // Re-enable AIPath (might have been disabled by GiveUpOnDestination)
             _aiPath.canSearch = true;
             _aiPath.isStopped = false;
@@ -605,7 +621,6 @@ namespace Agents
             _aiPath.SearchPath();
             
             _hasDestination = true;
-            _wasAtDestination = false;
             
             if (logStatusChanges)
             {
@@ -617,12 +632,11 @@ namespace Agents
         }
         
         /// <summary>
-        /// Give up on current destination - stop all pathfinding attempts.
+        /// Give up on current destination - COMPLETELY stop all pathfinding.
+        /// Does NOT try queued destinations (they may also be unreachable).
         /// </summary>
         private void GiveUpOnDestination()
         {
-            if (!_hasDestination) return;
-            
             Vector3 unreachableTarget = _currentTargetDestination;
             
             if (logStatusChanges)
@@ -630,39 +644,43 @@ namespace Agents
                 Debug.LogWarning($"[NPCAgent] Agent {AgentId} GIVING UP on unreachable destination: {unreachableTarget}");
             }
             
-            // CRITICAL: Stop trying to reach this destination
+            // Clear ALL state
             _hasDestination = false;
             
-            // CRITICAL: Disable auto-searching to prevent AIPath from starting new paths
-            if (_aiPath)
-            {
-                _aiPath.canSearch = false;  // Stop auto path recalculation
-                _aiPath.SetPath(null);      // Clear current path
-                _aiPath.destination = transform.position;  // Set destination to current pos
-                _aiPath.isStopped = true;   // Stop movement
-            }
-            
-            // Fire event
-            DestinationUnreachable?.Invoke(this, unreachableTarget);
-            
-            // Try next queued destination if any
+            // Clear the entire queue - don't try other destinations automatically
+            // (user should manually give new commands after unreachable)
             if (_destinationQueue.Count > 0)
             {
-                Vector3 nextDest = _destinationQueue.Dequeue();
+                int clearedCount = _destinationQueue.Count;
+                _destinationQueue.Clear();
                 
                 if (logQueueChanges)
                 {
-                    Debug.Log($"[NPCAgent] Agent {AgentId} trying next queued destination after failure. Remaining: {_destinationQueue.Count}");
+                    Debug.Log($"[NPCAgent] Agent {AgentId} cleared {clearedCount} queued destinations due to unreachable");
                 }
                 
-                QueueChanged?.Invoke(this, _destinationQueue.Count);
-                SetDestinationInternal(nextDest);
+                QueueChanged?.Invoke(this, 0);
             }
-            else
+            
+            // COMPLETELY stop AIPath - use multiple methods to ensure it stops
+            if (_aiPath)
             {
-                // No more destinations - agent is now idle
-                MovementStopped?.Invoke(this);
+                // 1. Stop auto path recalculation
+                _aiPath.canSearch = false;
+                
+                // 2. Stop movement simulation
+                _aiPath.isStopped = true;
+                
+                // 3. Clear the current path
+                _aiPath.SetPath(null);
+                
+                // 4. Set destination to current position (so if anything re-enables, it won't move)
+                _aiPath.destination = transform.position;
             }
+            
+            // Fire events
+            DestinationUnreachable?.Invoke(this, unreachableTarget);
+            MovementStopped?.Invoke(this);
         }
         
         /// <summary>
@@ -687,6 +705,7 @@ namespace Agents
             }
             
             _hasDestination = false;
+            _unreachableDetected = false;
             
             if (logStatusChanges)
             {
