@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using Pathfinding;
 using Grid;
+using Pathfinding.Graphs.Grid;
 using Platforms;
 
 namespace Navigation

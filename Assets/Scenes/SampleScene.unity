@@ -1141,15 +1141,12 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Agents.NPCManager
   agentPrefab: {fileID: 5820498489352171571, guid: efb73eb572df6694db03a913cf616245, type: 3}
-  agentType:
-    agentTypeID: -1372625422
   defaultSpeed: 3.5
-  defaultAngularSpeed: 120
+  defaultRotationSpeed: 360
   defaultAcceleration: 8
-  defaultStoppingDistance: 0.1
+  defaultEndReachedDistance: 0.2
   agentRadius: 0.3
   agentHeight: 1.8
-  navMeshSearchRadius: 1.5
   agentLayerName: NPCAgent
   idleColor: {r: 0.3, g: 0.7, b: 0.3, a: 1}
   movingColor: {r: 0.3, g: 0.5, b: 0.9, a: 1}
@@ -1181,12 +1178,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Agents.NPCAgentSpawner
   spawnAgentAction: {fileID: 2121372450}
   selectMoveAction: {fileID: 94176683}
-  agentType:
-    agentTypeID: -1372625422
   spawnPoint: {fileID: 0}
   useSpawnPoint: 0
   groundPlaneHeight: 0
-  navMeshSearchRadius: 1
+  snapToWalkable: 1
+  walkableSearchRadius: 5
   maxRaycastDistance: 500
   agentLayerMask:
     serializedVersion: 2
@@ -2784,6 +2780,125 @@ MonoBehaviour:
   OnBuildModeExited:
     m_PersistentCalls:
       m_Calls: []
+--- !u!1 &1792908539
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1792908542}
+  - component: {fileID: 1792908541}
+  - component: {fileID: 1792908540}
+  m_Layer: 0
+  m_Name: Pathfinding Manager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1792908540
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1792908539}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4a7feb65b68b8ca43bf1ca94534c437a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Navigation.PathfindingManager
+  graphWidth: 1000
+  graphDepth: 1000
+  nodeSize: 1
+  graphCenter: {x: 500, y: 0, z: 500}
+  agentRadius: 0.3
+  agentHeight: 1.5
+  walkableMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  obstacleMask:
+    serializedVersion: 2
+    m_Bits: 0
+  raycastHeight: 10
+  maxSlopeAngle: 45
+  updatePadding: 0.5
+  updateDelay: 0.1
+  worldGrid: {fileID: 0}
+  debugLogs: 1
+  debugDrawUpdates: 0
+--- !u!114 &1792908541
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1792908539}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 78396926cbbfc4ac3b48fc5fc34a87d1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: AstarPathfindingProject::AstarPath
+  version: 1
+  data:
+    dataString: UEsDBBQAAAgIAAAIIeyiNXIUNQAAAD4AAAAJACQAbWV0YS5qc29uCgAgAAAAAAABABgAAIA+1d6xnQEAgD7V3rGdAQCAPtXesZ0Bq1YqSy0qzszPU7JSMNEz0jM011FQSi9KLMgoBooYgDilmSkgdnQskFNSWZDql5ibChGoBQBQSwECLQAUAAAICAAACCHsojVyFDUAAAA+AAAACQAkAAAAAAAAAAAAAAAAAAAAbWV0YS5qc29uCgAgAAAAAAABABgAAIA+1d6xnQEAgD7V3rGdAQCAPtXesZ0BUEsFBgAAAAABAAEAWwAAAIAAAAAAAA==
+    upgradeData: 
+    file_cachedStartup: {fileID: 0}
+    data_cachedStartup: 
+    cacheStartup: 0
+  showNavGraphs: 1
+  showUnwalkableNodes: 1
+  debugMode: 0
+  debugFloor: 0
+  debugRoof: 1
+  manualDebugFloorRoof: 0
+  showSearchTree: 0
+  unwalkableNodeDebugSize: 0.3
+  logPathResults: 1
+  maxNearestNodeDistance: 100
+  scanOnStartup: 1
+  fullGetNearestSearch: 0
+  prioritizeGraphs: 0
+  prioritizeGraphsLimit: 1
+  colorSettings:
+    _SolidColor: {r: 0.11764706, g: 0.4, b: 0.7882353, a: 0.9}
+    _UnwalkableNode: {r: 1, g: 0, b: 0, a: 0.5}
+    _BoundsHandles: {r: 0.29, g: 0.454, b: 0.741, a: 0.9}
+    _ConnectionLowLerp: {r: 0, g: 1, b: 0, a: 0.5}
+    _ConnectionHighLerp: {r: 1, g: 0, b: 0, a: 0.5}
+    _MeshEdgeColor: {r: 0, g: 0, b: 0, a: 0.5}
+    _AreaColors:
+    - {r: 0, g: 0, b: 0, a: 0}
+  tagNames: []
+  heuristic: 2
+  heuristicScale: 1
+  threadCount: 1
+  maxFrameTime: 1
+  batchGraphUpdates: 0
+  graphUpdateBatchingInterval: 0.2
+  euclideanEmbedding:
+    mode: 0
+    seed: 0
+    pivotPointRoot: {fileID: 0}
+    spreadOutCount: 1
+  showGraphs: 0
+--- !u!4 &1792908542
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1792908539}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 51.85416, y: -0, z: 40.61589}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1001 &1811326647
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -2952,3 +3067,4 @@ SceneRoots:
   - {fileID: 479294917}
   - {fileID: 928800692}
   - {fileID: 1784496930}
+  - {fileID: 1792908542}

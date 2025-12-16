@@ -295,6 +295,7 @@ public class PlatformSocketSystem : MonoBehaviour
             socketIndex++;
         }
 
+        
         // +X edge (East - local x ≈ +halfWidth), outward direction is (+1, 0)
         Vector2Int outwardPlusX = new Vector2Int(1, 0);
         for (int segmentIndex = 0; segmentIndex < footprintLength; segmentIndex++)
