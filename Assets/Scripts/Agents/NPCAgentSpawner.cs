@@ -293,7 +293,8 @@ namespace Agents
         
         /// <summary>
         /// Get world position from mouse cursor.
-        /// Uses plane raycast at groundPlaneHeight.
+        /// First tries to raycast against actual geometry (platforms, ground).
+        /// Falls back to plane raycast at groundPlaneHeight if no geometry hit.
         /// Optionally snaps to nearest walkable graph node.
         /// </summary>
         private bool GetGroundPosition(out Vector3 position)
@@ -312,53 +313,97 @@ namespace Agents
             Vector2 mouseScreenPos = Mouse.current.position.ReadValue();
             Ray ray = mainCamera.ScreenPointToRay(mouseScreenPos);
             
-            // Plane raycast at ground height
-            var plane = new Plane(Vector3.up, new Vector3(0f, groundPlaneHeight, 0f));
+            Vector3 hitPoint = Vector3.zero;
+            bool foundHit = false;
             
-            if (!plane.Raycast(ray, out float dist))
+            // Step 1: Try to raycast against actual geometry (platforms, ground, etc.)
+            // Exclude agent layer so we don't hit agents
+            LayerMask geometryMask = ~agentLayerMask;
+            if (Physics.Raycast(ray, out RaycastHit hit, maxRaycastDistance, geometryMask))
             {
-                return false;
-            }
-            
-            // Calculate hit point
-            Vector3 hitPoint = ray.origin + ray.direction * dist;
-            
-            if (drawDebugVisuals)
-            {
-                Debug.DrawRay(ray.origin, ray.direction * dist, Color.cyan, 2f);
-                Debug.DrawRay(hitPoint, Vector3.up * 2f, Color.yellow, 2f);
-            }
-            
-            // Optionally snap to walkable position
-            if (snapToWalkable && _pathfindingManager && _pathfindingManager.IsReady)
-            {
-                if (_pathfindingManager.GetNearestWalkablePosition(hitPoint, out Vector3 walkablePos, walkableSearchRadius))
-            {
-                    position = walkablePos;
+                hitPoint = hit.point;
+                foundHit = true;
                 
                 if (drawDebugVisuals)
                 {
-                    Debug.DrawRay(position, Vector3.up * 3f, Color.green, 2f);
+                    Debug.DrawRay(ray.origin, ray.direction * hit.distance, Color.cyan, 2f);
+                    Debug.DrawRay(hitPoint, Vector3.up * 2f, Color.yellow, 2f);
                 }
                 
-                return true;
+                if (debugLogs)
+                {
+                    Debug.Log($"[Spawner] Raycast hit: {hit.collider.name} at {hitPoint}");
+                }
             }
             
-            if (debugLogs)
+            // Step 2: Fall back to plane raycast if no geometry hit
+            if (!foundHit)
             {
-                    Debug.LogWarning($"[Spawner] No walkable position within {walkableSearchRadius}m of {hitPoint}");
+                var plane = new Plane(Vector3.up, new Vector3(0f, groundPlaneHeight, 0f));
+                
+                if (plane.Raycast(ray, out float dist))
+                {
+                    hitPoint = ray.origin + ray.direction * dist;
+                    foundHit = true;
+                    
+                    if (drawDebugVisuals)
+                    {
+                        Debug.DrawRay(ray.origin, ray.direction * dist, Color.magenta, 2f);
+                        Debug.DrawRay(hitPoint, Vector3.up * 2f, Color.yellow, 2f);
+                    }
+                    
+                    if (debugLogs)
+                    {
+                        Debug.Log($"[Spawner] Plane raycast fallback at Y={groundPlaneHeight}: {hitPoint}");
+                    }
+                }
             }
             
-                // Fall back to raw position
-                position = hitPoint;
-                return true;
+            if (!foundHit)
+            {
+                if (debugLogs) Debug.LogWarning("[Spawner] Could not find ground position (no raycast hit)");
+                return false;
             }
             
+            // Step 3: Optionally snap to walkable position on navmesh
+            if (snapToWalkable && _pathfindingManager && _pathfindingManager.IsReady)
+            {
+                if (_pathfindingManager.GetNearestWalkablePosition(hitPoint, out Vector3 walkablePos, walkableSearchRadius))
+                {
+                    position = walkablePos;
+                    
+                    if (drawDebugVisuals)
+                    {
+                        Debug.DrawRay(position, Vector3.up * 3f, Color.green, 2f);
+                        Debug.DrawLine(hitPoint, position, Color.green, 2f);
+                    }
+                    
+                    if (debugLogs)
+                    {
+                        float snapDistance = Vector3.Distance(hitPoint, position);
+                        Debug.Log($"[Spawner] Snapped to walkable: {hitPoint} → {position} (distance: {snapDistance:F2}m)");
+                    }
+                    
+                    return true;
+                }
+                
+                if (debugLogs)
+                {
+                    Debug.LogWarning($"[Spawner] No walkable position within {walkableSearchRadius}m of {hitPoint}. Using raw position.");
+                }
+            }
+            
+            // Use raw hit point (either from geometry or plane)
             position = hitPoint;
             
             if (drawDebugVisuals)
             {
                 Debug.DrawRay(position, Vector3.up * 3f, Color.green, 2f);
+            }
+            
+            if (debugLogs)
+            {
+                Debug.Log($"[Spawner] Using raw position: {position}");
             }
             
             return true;

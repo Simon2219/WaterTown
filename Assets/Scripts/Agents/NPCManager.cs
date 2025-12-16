@@ -510,6 +510,7 @@ namespace Agents
         
         private void ConfigureAIPath(AIPath aiPath)
         {
+            // Movement settings
             aiPath.maxSpeed = defaultSpeed;
             aiPath.rotationSpeed = defaultRotationSpeed;
             aiPath.maxAcceleration = defaultAcceleration;
@@ -517,15 +518,23 @@ namespace Agents
             aiPath.slowdownDistance = 0.6f;
             aiPath.pickNextWaypointDist = 2f;
             
-            // Configure for ground movement
+            // Ground/gravity settings
+            // Note: With CharacterController, AIPath uses SimpleMove which handles gravity internally
             aiPath.gravity = new Vector3(0, -9.81f, 0);
-            aiPath.groundMask = ~0; // All layers
-            aiPath.enableRotation = true;
-            aiPath.orientation = OrientationMode.YAxisForward;
+            aiPath.groundMask = ~0; // All layers for ground detection
             
-            // Movement type
-            aiPath.simulateMovement = true;
-            aiPath.canSearch = true;
+            // Rotation settings
+            aiPath.enableRotation = true;
+            aiPath.orientation = OrientationMode.ZAxisForward; // Z-forward for 3D ground movement
+            
+            // Movement control - CRITICAL for movement to work
+            aiPath.simulateMovement = true;  // Actually move the transform
+            aiPath.updatePosition = true;    // Let AIPath update position
+            aiPath.updateRotation = true;    // Let AIPath update rotation
+            aiPath.canSearch = true;         // Allow automatic path recalculation
+            
+            // Ensure not stopped
+            aiPath.isStopped = false;
         }
         
         private GameObject CreateProceduralAgent(Vector3 position)
@@ -547,19 +556,21 @@ namespace Agents
                 renderer.material = new Material(_sharedAgentMaterial);
             }
             
-            // Configure collider
-            var collider = go.GetComponent<CapsuleCollider>();
-            if (collider)
+            // IMPORTANT: Remove the default CapsuleCollider - CharacterController has its own collider
+            var capsuleCollider = go.GetComponent<CapsuleCollider>();
+            if (capsuleCollider)
             {
-                collider.height = 2f;
-                collider.radius = 0.5f;
+                DestroyImmediate(capsuleCollider);
             }
             
-            // Add CharacterController for AIPath ground detection
+            // Add CharacterController for AIPath movement
+            // CharacterController provides its own capsule collider internally
             var cc = go.AddComponent<CharacterController>();
-            cc.height = 2f;
-            cc.radius = 0.5f;
-            cc.center = Vector3.zero;
+            cc.height = agentHeight;
+            cc.radius = agentRadius;
+            cc.center = new Vector3(0, agentHeight / 2f, 0); // Center at half height
+            cc.slopeLimit = 45f;
+            cc.stepOffset = 0.3f;
             
             return go;
         }
