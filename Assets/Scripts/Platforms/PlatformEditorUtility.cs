@@ -100,9 +100,9 @@ namespace Platforms
                     UnityEditor.Undo.DestroyObjectImmediate(linksParent.GetChild(i).gameObject);
             }
             
-            // Only queue rebuild if we're active (skip during shutdown)
-            if (gameObject.activeInHierarchy)
-                _platform.QueueRebuild();
+            // NOTE: NavMesh rebuild removed - A* Pathfinding will handle graph updates
+            // if (gameObject.activeInHierarchy)
+            //     _platform.QueueRebuild();
         }
         
         

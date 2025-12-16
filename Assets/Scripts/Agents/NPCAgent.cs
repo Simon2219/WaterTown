@@ -445,6 +445,7 @@ public class NPCAgent : MonoBehaviour
     }
     */
     
+    /* TODO: A* Pathfinding - Update for A* link traversal
     private void StartLinkTraversal(float baseOffset)
     {
         _isTraversingLink = true;
@@ -479,109 +480,7 @@ public class NPCAgent : MonoBehaviour
         
         LinkTraversalStarted?.Invoke(this);
     }
-    
-    private Vector3 CalculateLinkPosition(float easedProgress, float baseOffset)
-    {
-        // Interpolate ground position
-        Vector3 groundPos = Vector3.Lerp(_linkStartPos, _linkEndPos, easedProgress);
-        
-        // Calculate height based on mode
-        float height;
-        switch (linkHeightMode)
-        {
-            case LinkHeightMode.KeepStartHeight:
-                height = _linkStartHeight;
-                break;
-                
-            case LinkHeightMode.UseCurrentHeight:
-                height = transform.position.y;
-                break;
-                
-            case LinkHeightMode.InterpolateHeight:
-                float startH = _linkStartPos.y + baseOffset;
-                float endH = _linkEndPos.y + baseOffset;
-                // Use same easing for height
-                height = EasingFunctions.Lerp(startH, endH, _linkProgress, linkMovementEasing);
-                break;
-                
-            case LinkHeightMode.FollowLinkEndpoints:
-            default:
-                height = groundPos.y + baseOffset;
-                break;
-        }
-        
-        return new Vector3(groundPos.x, height, groundPos.z);
-    }
-    
-    private void HandleLinkRotation(float easedProgress)
-    {
-        switch (linkRotationMode)
-        {
-            case LinkRotationMode.None:
-                break;
-                
-            case LinkRotationMode.KeepStartRotation:
-                transform.rotation = _linkStartRotation;
-                break;
-                
-            case LinkRotationMode.InstantLookAhead:
-                Vector3 dir = (_linkEndPos - _linkStartPos).normalized;
-                if (dir.sqrMagnitude > 0.001f)
-                {
-                    dir.y = 0;
-                    if (dir.sqrMagnitude > 0.001f)
-                    {
-                        transform.rotation = Quaternion.LookRotation(dir);
-                    }
-                }
-                break;
-                
-            case LinkRotationMode.SmoothLookAhead:
-                Vector3 moveDir = (_linkEndPos - _linkStartPos).normalized;
-                if (moveDir.sqrMagnitude > 0.001f)
-                {
-                    moveDir.y = 0;
-                    if (moveDir.sqrMagnitude > 0.001f)
-                    {
-                        Quaternion targetRot = Quaternion.LookRotation(moveDir);
-                        // Apply rotation easing
-                        float rotProgress = EasingFunctions.Evaluate(linkRotationEasing, _linkProgress);
-                        transform.rotation = Quaternion.Slerp(_linkStartRotation, targetRot, 
-                            rotProgress * linkRotationSpeed * Time.deltaTime * 10f);
-                    }
-                }
-                break;
-        }
-    }
-    
-    private bool ShouldInterruptLink()
-    {
-        return linkInterruptBehavior switch
-        {
-            LinkInterruptBehavior.CancelImmediately => true,
-            LinkInterruptBehavior.WaitForSafePoint => _linkProgress >= linkSafePointThreshold,
-            LinkInterruptBehavior.FinishLinkFirst => _linkProgress >= 1f,
-            _ => false
-        };
-    }
-    
-    private void FinalizeLinkTraversal(float baseOffset)
-    {
-        // Snap to exact end position
-        Vector3 finalPos = _linkEndPos;
-        finalPos.y = linkHeightMode == LinkHeightMode.KeepStartHeight 
-            ? _linkStartHeight 
-            : _linkEndPos.y + baseOffset;
-        transform.position = finalPos;
-        
-        // Sync final position
-        _navAgent.nextPosition = transform.position;
-        
-        // Complete the link traversal
-        _navAgent.CompleteOffMeshLink();
-        
-        CompleteOrCancelLinkTraversal(true);
-    }
+    */
     
     private void CompleteOrCancelLinkTraversal(bool completed)
     {
