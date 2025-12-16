@@ -601,7 +601,7 @@ namespace Agents
             // Agent dimensions
             rvo.radius = agentRadius;
             rvo.height = agentHeight;
-            rvo.center = new Vector3(0, agentHeight / 2f, 0);
+            rvo.center = agentHeight / 2f;  // Y offset from transform position
             
             // Avoidance behavior
             rvo.agentTimeHorizon = agentTimeHorizon;
