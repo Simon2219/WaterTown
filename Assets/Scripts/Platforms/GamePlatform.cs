@@ -1,7 +1,7 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
-using Unity.AI.Navigation;
+// TODO: A* Pathfinding - Remove Unity NavMesh imports
+// using Unity.AI.Navigation;
 using UnityEngine;
 using Grid;
 using Interfaces;
@@ -9,12 +9,15 @@ using Interfaces;
 namespace Platforms
 {
     /// <summary>
-    /// Core platform component - manages identity, lifecycle, footprint, NavMesh, and coordinates sub-systems
+    /// Core platform component - manages identity, lifecycle, footprint, and coordinates sub-systems
     /// Sub-components handle specific responsibilities: Sockets, Railings, Pickup, Editor utilities
     /// External systems should call facade methods on GamePlatform rather than accessing sub-components directly
+    /// 
+    /// NOTE: Unity NavMesh has been removed. A* Pathfinding Project will be used for pathfinding.
     /// </summary>
     [DisallowMultipleComponent]
-    [RequireComponent(typeof(NavMeshSurface))]
+    // TODO: A* Pathfinding - Add A* graph requirements if needed
+    // [RequireComponent(typeof(NavMeshSurface))]
     [RequireComponent(typeof(PlatformSocketSystem))]
     [RequireComponent(typeof(PlatformRailingSystem))]
     [RequireComponent(typeof(PickupHandler))]
@@ -100,7 +103,7 @@ namespace Platforms
         
         
         
-        #region Footprint & NavMesh
+        #region Footprint
         
         
         [Header("Footprint (cells @ 1m)")]
@@ -109,25 +112,18 @@ namespace Platforms
         public Vector2Int Footprint => footprintSize;
         
         
-        [Header("NavMesh Rebuild")]
-        [SerializeField]
-        [Tooltip("Delay before rebuilding this platform's NavMesh after changes.")]
-        private float rebuildDebounceSeconds = 0.1f;
-
-        
-        // Cached transform for "Links" GameObject
+        // Cached transform for "Links" GameObject (kept for potential future use with A*)
         private Transform _linksParentTransform;
         public Transform LinksParentTransform => _linksParentTransform;
         
-        private NavMeshSurface _navSurface;
-        public NavMeshSurface NavSurface => _navSurface;
+        // NOTE: NavMeshSurface removed - A* Pathfinding will handle graph generation
+        // private NavMeshSurface _navSurface;
+        // public NavMeshSurface NavSurface => _navSurface;
         
         
         private Vector3 _lastPos;
         private Quaternion _lastRot;
         private Vector3 _lastScale;
-
-        private Coroutine _pendingRebuild;
         
         
         #endregion
@@ -208,8 +204,9 @@ namespace Platforms
         
         private void Awake()
         {
-            if(!TryGetComponent(out _navSurface))
-                throw ErrorHandler.MissingDependency($"[GamePlatform] NavMesh Surface '{nameof(NavMeshSurface)}' not found.", this);
+            // NOTE: NavMeshSurface check removed - A* Pathfinding will handle graph generation
+            // if(!TryGetComponent(out _navSurface))
+            //     throw ErrorHandler.MissingDependency($"[GamePlatform] NavMesh Surface '{nameof(NavMeshSurface)}' not found.", this);
             
             if(!TryGetComponent(out _socketSystem))
                 throw ErrorHandler.MissingDependency($"[GamePlatform] Socket System '{nameof(PlatformSocketSystem)}' not found.", this);
@@ -302,7 +299,7 @@ namespace Platforms
             // Initialize Sub Systems
             InitializeSubComponents();
             
-            // Ensure Links parent exists for NavMesh links
+            // Ensure Links parent exists (kept for potential future use with A*)
             EnsureLinksParentExists();
         }
         
@@ -532,36 +529,9 @@ namespace Platforms
         
         
         
-        #region NavMesh Interface Methods
-        
-        
-        public void BuildLocalNavMesh()
-        {
-            if (NavSurface) NavSurface.BuildNavMesh();
-        }
-
-
-        public void QueueRebuild()
-        {
-            if (!NavSurface) return;
-            if (!gameObject.activeInHierarchy) return;
-            
-            if (_pendingRebuild != null)
-                StopCoroutine(_pendingRebuild);
-            _pendingRebuild = StartCoroutine(RebuildAfterDelay(rebuildDebounceSeconds));
-        }
-
-
-        private IEnumerator RebuildAfterDelay(float delay)
-        {
-            yield return new WaitForSeconds(delay);
-            if (NavSurface)
-                NavSurface.BuildNavMesh();
-            _pendingRebuild = null;
-        }
-        
-        
-        #endregion
+        // NOTE: NavMesh Interface Methods region removed
+        // BuildLocalNavMesh() and QueueRebuild() are no longer needed
+        // A* Pathfinding Project will handle graph generation separately
         
         
         

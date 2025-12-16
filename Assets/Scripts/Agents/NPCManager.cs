@@ -1,7 +1,8 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.AI;
+// TODO: A* Pathfinding - Replace with A* pathfinding includes
+// using UnityEngine.AI;
 
 namespace Agents
 {
@@ -9,6 +10,8 @@ namespace Agents
     /// Central manager for all NPC agents.
     /// Handles spawning, registration, and performance optimization via LOD and culling.
     /// Designed for 500+ agents with batched updates.
+    /// 
+    /// TODO: A* Pathfinding - Update spawning to use A* graph validation instead of NavMesh.
     /// </summary>
     [DisallowMultipleComponent]
     public class NPCManager : MonoBehaviour
@@ -37,16 +40,15 @@ namespace Agents
         #region Configuration - Agent Settings
         
         [Header("Agent Prefab Settings")]
-        [Tooltip("Optional prefab with pre-configured NavMeshAgent.\n" +
-                 "RECOMMENDED: Create a prefab with NavMeshAgent already set to your agent type.\n" +
-                 "This avoids the 'not close enough to NavMesh' warning that occurs when\n" +
-                 "dynamically adding NavMeshAgent for non-default agent types.\n" +
+        [Tooltip("Optional prefab with pre-configured pathfinding components.\n" +
+                 "RECOMMENDED: Create a prefab with A* pathfinding components already set up.\n" +
                  "If null, agents are created procedurally as capsules.")]
         [SerializeField] private GameObject agentPrefab;
         
         [Header("Default Agent Settings")]
-        [Tooltip("NavMesh Agent Type. Must match the agent type used when baking NavMeshSurfaces.")]
-        [SerializeField] private NavMeshAgentType agentType;
+        // TODO: A* Pathfinding - Replace with A* agent type selection
+        // [Tooltip("NavMesh Agent Type. Must match the agent type used when baking NavMeshSurfaces.")]
+        // [SerializeField] private NavMeshAgentType agentType;
         
         [SerializeField] private float defaultSpeed = 3.5f;
         [SerializeField] private float defaultAngularSpeed = 120f;
@@ -56,8 +58,8 @@ namespace Agents
         [SerializeField] private float agentHeight = 1.8f;
         
         [Header("Spawn Settings")]
-        [Tooltip("Maximum distance to search for NavMesh when spawning.")]
-        [SerializeField] private float navMeshSearchRadius = 2f;
+        [Tooltip("Maximum distance to search for valid pathfinding position when spawning.")]
+        [SerializeField] private float pathfindingSearchRadius = 2f;
         
         [Tooltip("Layer to assign spawned agents to. Important for selection raycasts!")]
         [SerializeField] private string agentLayerName = "NPCAgent";
@@ -399,12 +401,14 @@ namespace Agents
         
         /// <summary>
         /// Spawn an agent at the specified world position.
-        /// The position should already be on or very near a NavMesh (use NPCAgentSpawner for proper positioning).
+        /// TODO: A* Pathfinding - Update to validate position using A* graph.
         /// </summary>
         /// <param name="worldPosition">World position to spawn at</param>
-        /// <param name="overrideAgentTypeID">Optional: override the default agent type ID. Use -1 to use default.</param>
+        /// <param name="overrideAgentTypeID">Optional: override the default agent type ID (not used with A*).</param>
         public NPCAgent SpawnAgent(Vector3 worldPosition, int overrideAgentTypeID = -1)
         {
+            // TODO: A* Pathfinding - Use A* graph to validate and snap spawn position
+            /*
             // Determine which agent type we're spawning
             int finalAgentType = overrideAgentTypeID >= 0 ? overrideAgentTypeID : agentType.AgentTypeID;
             
@@ -416,28 +420,31 @@ namespace Agents
             };
             
             // Find nearest NavMesh position for THIS agent type
-            if (!NavMesh.SamplePosition(worldPosition, out NavMeshHit navHit, navMeshSearchRadius, filter))
+            if (!NavMesh.SamplePosition(worldPosition, out NavMeshHit navHit, pathfindingSearchRadius, filter))
             {
-                Debug.LogWarning($"[NPCManager] No NavMesh for agent type {finalAgentType} within {navMeshSearchRadius}m of {worldPosition}. " +
+                Debug.LogWarning($"[NPCManager] No NavMesh for agent type {finalAgentType} within {pathfindingSearchRadius}m of {worldPosition}. " +
                                  "Make sure you're clicking on a NavMesh area baked for this agent type!");
                 return null;
             }
             
             // Use the NavMesh position
             Vector3 navMeshPosition = navHit.position;
+            */
+            
+            // For now, use the world position directly (A* will handle validation)
+            Vector3 spawnPosition = worldPosition;
             
             if (debugSpawnLogs)
             {
                 Debug.Log($"[NPCManager] Spawn:\n" +
                           $"  Requested: {worldPosition}\n" +
-                          $"  NavMesh: {navMeshPosition}\n" +
-                          $"  AgentType: {finalAgentType}");
+                          $"  Position: {spawnPosition}");
             }
             
-            // Create GameObject AT NAVMESH POSITION
+            // Create GameObject AT SPAWN POSITION
             GameObject agentGo = agentPrefab 
-                ? Instantiate(agentPrefab, navMeshPosition, Quaternion.identity)
-                : CreateProceduralAgent(navMeshPosition);
+                ? Instantiate(agentPrefab, spawnPosition, Quaternion.identity)
+                : CreateProceduralAgent(spawnPosition);
             
             // Set layer for selection raycasts
             int layer = LayerMask.NameToLayer(agentLayerName);
@@ -450,6 +457,8 @@ namespace Agents
                 Debug.LogWarning($"[NPCManager] Layer '{agentLayerName}' not found!");
             }
             
+            // TODO: A* Pathfinding - Add/configure A* pathfinding components (Seeker, AIPath, etc.)
+            /*
             // Get/Add NavMeshAgent
             // Note: Unity may log a warning here if default agent type differs from our type.
             // This is harmless - we configure the correct type immediately after.
@@ -464,9 +473,10 @@ namespace Agents
             ConfigureNavMeshAgent(navAgent);
             
             // Warp to ensure proper placement on the correct NavMesh
-            navAgent.Warp(navMeshPosition);
+            navAgent.Warp(spawnPosition);
+            */
             
-            // Now add NPCAgent (NavMeshAgent already exists)
+            // Now add NPCAgent
             var npcAgent = agentGo.GetComponent<NPCAgent>();
             if (!npcAgent)
             {
@@ -480,7 +490,7 @@ namespace Agents
             
             if (debugSpawnLogs)
             {
-                Debug.Log($"[NPCManager] ✓ Agent {agentId} spawned at {navMeshPosition}. OnNavMesh: {navAgent.isOnNavMesh}");
+                Debug.Log($"[NPCManager] ✓ Agent {agentId} spawned at {spawnPosition}.");
             }
             
             return npcAgent;
@@ -530,6 +540,7 @@ namespace Agents
             return go;
         }
         
+        /* TODO: A* Pathfinding - Replace with A* agent configuration
         private void ConfigureNavMeshAgent(NavMeshAgent navAgent)
         {
             // Note: agentTypeID is set AFTER Warp() in SpawnAgent - must be on NavMesh first
@@ -547,6 +558,7 @@ namespace Agents
             // Note: autoTraverseOffMeshLink is configured by NPCAgent based on its useAutoLinkTraversal setting
             navAgent.autoBraking = true;
         }
+        */
         
         #endregion
         

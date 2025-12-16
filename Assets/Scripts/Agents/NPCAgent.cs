@@ -1,7 +1,8 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.AI;
+// TODO: A* Pathfinding - Replace with A* pathfinding includes
+// using UnityEngine.AI;
 
 namespace Agents
 {
@@ -77,11 +78,12 @@ public enum LinkRotationMode
 
 /// <summary>
 /// Individual NPC agent component.
-/// Handles NavMeshAgent control, destination queue, link traversal, and visual state.
-/// Performance is managed by NPCManager through LOD and culling.
+/// TODO: A* Pathfinding - This class will be converted to use A* Pathfinding Project's Seeker/AIPath components.
+/// Currently all NavMesh-related code is commented out, keeping the structure for conversion.
 /// </summary>
 [DisallowMultipleComponent]
-[RequireComponent(typeof(NavMeshAgent))]
+// TODO: A* Pathfinding - Replace with A* component requirements (e.g., Seeker, AIPath)
+// [RequireComponent(typeof(NavMeshAgent))]
 public class NPCAgent : MonoBehaviour
 {
     #region Events
@@ -138,19 +140,28 @@ public class NPCAgent : MonoBehaviour
     /// <summary>Number of destinations in queue (not including current).</summary>
     public int QueuedDestinationCount => _destinationQueue.Count;
     
+    // TODO: A* Pathfinding - Update IsMoving to use A* path checking
     /// <summary>Whether this agent is actively moving.</summary>
+    public bool IsMoving => _isTraversingLink; // Simplified - will be updated for A*
+    /*
     public bool IsMoving => _navAgent && _navAgent.hasPath && 
                             _navAgent.remainingDistance > _navAgent.stoppingDistance &&
                             (_navAgent.velocity.sqrMagnitude > 0.01f || _isTraversingLink);
+    */
     
     /// <summary>Whether this agent is currently traversing a link.</summary>
     public bool IsTraversingLink => _isTraversingLink;
     
+    // TODO: A* Pathfinding - Update CurrentDestination to use A* destination
     /// <summary>Current destination (if any).</summary>
+    public Vector3? CurrentDestination => _hasDestination ? _currentDestination : null;
+    /*
     public Vector3? CurrentDestination => _hasDestination && _navAgent ? (Vector3?)_navAgent.destination : null;
+    */
     
-    /// <summary>Reference to NavMeshAgent.</summary>
-    public NavMeshAgent NavAgent => _navAgent;
+    // TODO: A* Pathfinding - Replace NavAgent property with A* equivalent (e.g., AIPath)
+    /// <summary>Reference to pathfinding component (placeholder for A*).</summary>
+    // public NavMeshAgent NavAgent => _navAgent;
     
     /// <summary>Current LOD level.</summary>
     public AgentLODLevel LODLevel => _lodLevel;
@@ -169,8 +180,8 @@ public class NPCAgent : MonoBehaviour
     #region Serialized Fields - Link Traversal
     
     [Header("Link Traversal - Mode")]
-    [Tooltip("If TRUE: Unity handles link traversal automatically (recommended for flush/same-height platforms).\n" +
-             "If FALSE: Manual traversal with custom easing/height/rotation control (for special effects or height differences).")]
+    [Tooltip("If TRUE: Pathfinding handles link traversal automatically.\n" +
+             "If FALSE: Manual traversal with custom easing/height/rotation control.")]
     [SerializeField] private bool useAutoLinkTraversal = true;
     
     [Header("Link Traversal - Manual Settings (only used when Auto is OFF)")]
@@ -237,7 +248,8 @@ public class NPCAgent : MonoBehaviour
     internal Renderer AgentRenderer;
     internal Material AgentMaterial;
     
-    private NavMeshAgent _navAgent;
+    // TODO: A* Pathfinding - Replace with A* pathfinding component reference
+    // private NavMeshAgent _navAgent;
     private AgentStatus _status = AgentStatus.Idle;
     private AgentStatus _statusBeforeSelection = AgentStatus.Idle;
     private AgentLODLevel _lodLevel = AgentLODLevel.High;
@@ -247,6 +259,9 @@ public class NPCAgent : MonoBehaviour
     private bool _visualsEnabled = true;
     private Vector3 _baseScale;
     private bool _initialized;
+    
+    // Current destination (stored since we don't have NavMeshAgent)
+    private Vector3 _currentDestination;
     
     // Frame skip tracking for staggered updates
     private int _frameOffset;
@@ -281,15 +296,16 @@ public class NPCAgent : MonoBehaviour
         Manager = manager;
         AgentId = agentId;
         
-        _navAgent = GetComponent<NavMeshAgent>();
-        if (!_navAgent)
-        {
-            Debug.LogError($"[NPCAgent] Agent {agentId} missing NavMeshAgent component!");
-            return;
-        }
+        // TODO: A* Pathfinding - Get A* pathfinding component here
+        // _navAgent = GetComponent<NavMeshAgent>();
+        // if (!_navAgent)
+        // {
+        //     Debug.LogError($"[NPCAgent] Agent {agentId} missing NavMeshAgent component!");
+        //     return;
+        // }
         
-        // Configure link traversal mode based on setting
-        _navAgent.autoTraverseOffMeshLink = useAutoLinkTraversal;
+        // TODO: A* Pathfinding - Configure A* link traversal mode
+        // _navAgent.autoTraverseOffMeshLink = useAutoLinkTraversal;
         
         AgentRenderer = GetComponent<Renderer>();
         if (AgentRenderer)
@@ -318,7 +334,8 @@ public class NPCAgent : MonoBehaviour
     
     private void Awake()
     {
-        _navAgent = GetComponent<NavMeshAgent>();
+        // TODO: A* Pathfinding - Get A* pathfinding component here
+        // _navAgent = GetComponent<NavMeshAgent>();
     }
     
     private void OnDestroy()
@@ -343,10 +360,10 @@ public class NPCAgent : MonoBehaviour
     /// </summary>
     internal void UpdateFull()
     {
-        if (!_initialized || !_navAgent) return;
+        if (!_initialized) return;
         
-        // Handle off-mesh link traversal
-        HandleOffMeshLinkTraversal();
+        // TODO: A* Pathfinding - Handle A* link traversal
+        // HandleOffMeshLinkTraversal();
         
         // Process any pending immediate destination
         ProcessPendingDestination();
@@ -355,13 +372,14 @@ public class NPCAgent : MonoBehaviour
         CheckDestinationReached();
     }
     
+    /* TODO: A* Pathfinding - Update this for A* link traversal
     /// <summary>
     /// Handles manual off-mesh link traversal with full configuration options.
     /// Only active when useAutoLinkTraversal is FALSE.
     /// </summary>
     private void HandleOffMeshLinkTraversal()
     {
-        // Skip if using Unity's automatic traversal
+        // Skip if using automatic traversal
         if (useAutoLinkTraversal)
         {
             _isTraversingLink = false;
@@ -425,6 +443,7 @@ public class NPCAgent : MonoBehaviour
             FinalizeLinkTraversal(baseOffset);
         }
     }
+    */
     
     private void StartLinkTraversal(float baseOffset)
     {
@@ -566,7 +585,8 @@ public class NPCAgent : MonoBehaviour
     
     private void CompleteOrCancelLinkTraversal(bool completed)
     {
-        _navAgent.updatePosition = true;
+        // TODO: A* Pathfinding - Re-enable pathfinding position updates
+        // _navAgent.updatePosition = true;
         _isTraversingLink = false;
         _linkInterruptPending = false;
         
@@ -596,10 +616,10 @@ public class NPCAgent : MonoBehaviour
     /// </summary>
     internal void UpdateReduced()
     {
-        if (!_initialized || !_navAgent) return;
+        if (!_initialized) return;
         
-        // Still need to handle link traversal even at lower LOD
-        HandleOffMeshLinkTraversal();
+        // TODO: A* Pathfinding - Handle A* link traversal
+        // HandleOffMeshLinkTraversal();
         ProcessPendingDestination();
         
         UpdateStatus();
@@ -611,10 +631,10 @@ public class NPCAgent : MonoBehaviour
     /// </summary>
     internal void UpdateMinimal()
     {
-        if (!_initialized || !_navAgent) return;
+        if (!_initialized) return;
         
-        // Handle link traversal
-        HandleOffMeshLinkTraversal();
+        // TODO: A* Pathfinding - Handle A* link traversal
+        // HandleOffMeshLinkTraversal();
         ProcessPendingDestination();
         
         CheckDestinationReached();
@@ -657,12 +677,15 @@ public class NPCAgent : MonoBehaviour
     
     private AgentStatus DetermineStatus()
     {
+        // TODO: A* Pathfinding - Update to use A* path status
+        /*
         if (!_navAgent) return AgentStatus.Error;
         
         if (_navAgent.pathStatus == NavMeshPathStatus.PathInvalid)
         {
             return AgentStatus.Error;
         }
+        */
         
         if (_isTraversingLink)
         {
@@ -671,6 +694,8 @@ public class NPCAgent : MonoBehaviour
         
         if (_hasDestination)
         {
+            // TODO: A* Pathfinding - Check A* path status
+            /*
             if (_navAgent.pathPending)
             {
                 return AgentStatus.Waiting;
@@ -685,6 +710,7 @@ public class NPCAgent : MonoBehaviour
             {
                 return AgentStatus.Moving;
             }
+            */
             
             return AgentStatus.Waiting;
         }
@@ -696,6 +722,8 @@ public class NPCAgent : MonoBehaviour
     {
         if (!_hasDestination) return;
         
+        // TODO: A* Pathfinding - Check A* destination reached
+        /*
         // Check if NavMesh destination reached
         if (!_navAgent.pathPending && _navAgent.remainingDistance <= _navAgent.stoppingDistance && !_isTraversingLink)
         {
@@ -726,6 +754,7 @@ public class NPCAgent : MonoBehaviour
                 AllDestinationsCompleted?.Invoke(this);
             }
         }
+        */
         
         _wasAtDestination = !_hasDestination;
     }
@@ -809,6 +838,8 @@ public class NPCAgent : MonoBehaviour
     /// <returns>True if destination was accepted (set or queued).</returns>
     public bool SetDestination(Vector3 destination, bool immediate = false)
     {
+        // TODO: A* Pathfinding - Validate destination using A* graph
+        /*
         if (!_navAgent)
         {
             Debug.LogWarning($"[NPCAgent] Agent {AgentId} has no NavMeshAgent.");
@@ -823,6 +854,10 @@ public class NPCAgent : MonoBehaviour
         }
         
         Vector3 validDest = hit.position;
+        */
+        
+        // For now, accept the destination as-is (A* will validate)
+        Vector3 validDest = destination;
         
         if (immediate)
         {
@@ -926,6 +961,8 @@ public class NPCAgent : MonoBehaviour
     
     private bool SetDestinationInternal(Vector3 destination)
     {
+        // TODO: A* Pathfinding - Set A* destination and check validity
+        /*
         if (!_navAgent.isOnNavMesh)
         {
             Debug.LogWarning($"[NPCAgent] Agent {AgentId} is not on NavMesh. Position: {transform.position}");
@@ -954,6 +991,20 @@ public class NPCAgent : MonoBehaviour
         }
         
         return result;
+        */
+        
+        // Placeholder implementation - store destination, actual pathfinding will be added with A*
+        _currentDestination = destination;
+        _hasDestination = true;
+        _wasAtDestination = false;
+        
+        if (logStatusChanges)
+        {
+            Debug.Log($"[NPCAgent] Agent {AgentId} destination set to {destination} (pathfinding not yet implemented)");
+        }
+        
+        DestinationStarted?.Invoke(this, destination);
+        return true;
     }
     
     /// <summary>
@@ -961,8 +1012,6 @@ public class NPCAgent : MonoBehaviour
     /// </summary>
     public void Stop()
     {
-        if (!_navAgent) return;
-        
         // Clean up link traversal
         if (_isTraversingLink)
         {
@@ -979,7 +1028,8 @@ public class NPCAgent : MonoBehaviour
             QueueChanged?.Invoke(this, 0);
         }
         
-        _navAgent.ResetPath();
+        // TODO: A* Pathfinding - Stop A* pathfinding
+        // _navAgent.ResetPath();
         _hasDestination = false;
         
         if (logStatusChanges)
@@ -1025,15 +1075,16 @@ public class NPCAgent : MonoBehaviour
     }
     
     /// <summary>
-    /// Teleport agent to position (snapped to NavMesh). Clears queue.
+    /// Teleport agent to position. Clears queue.
+    /// TODO: A* Pathfinding - Snap to nearest graph node
     /// </summary>
     public bool Teleport(Vector3 worldPosition)
     {
-        if (!_navAgent) return false;
-        
         // Stop everything
         Stop();
         
+        // TODO: A* Pathfinding - Sample nearest walkable position and warp
+        /*
         if (!NavMesh.SamplePosition(worldPosition, out NavMeshHit hit, 5f, NavMesh.AllAreas))
         {
             Debug.LogWarning($"[NPCAgent] Agent {AgentId} teleport failed - no NavMesh near {worldPosition}");
@@ -1042,10 +1093,15 @@ public class NPCAgent : MonoBehaviour
         
         _navAgent.Warp(hit.position);
         _smoothedPosition = hit.position;
+        */
+        
+        // Simple teleport for now
+        transform.position = worldPosition;
+        _smoothedPosition = worldPosition;
         
         if (logStatusChanges)
         {
-            Debug.Log($"[NPCAgent] Agent {AgentId} teleported to {hit.position}");
+            Debug.Log($"[NPCAgent] Agent {AgentId} teleported to {worldPosition}");
         }
         
         return true;
@@ -1130,17 +1186,18 @@ public class NPCAgent : MonoBehaviour
     #region Public API - Configuration
     
     /// <summary>
-    /// Sets whether to use Unity's automatic link traversal or manual traversal.
-    /// TRUE = Unity handles it (recommended for flush platforms).
+    /// Sets whether to use automatic link traversal or manual traversal.
+    /// TRUE = Pathfinding handles it (recommended).
     /// FALSE = Manual traversal with custom easing/height control.
     /// </summary>
     public void SetAutoLinkTraversal(bool useAuto)
     {
         useAutoLinkTraversal = useAuto;
-        if (_navAgent)
-        {
-            _navAgent.autoTraverseOffMeshLink = useAuto;
-        }
+        // TODO: A* Pathfinding - Configure A* link traversal mode
+        // if (_navAgent)
+        // {
+        //     _navAgent.autoTraverseOffMeshLink = useAuto;
+        // }
     }
     
     /// <summary>
@@ -1189,12 +1246,14 @@ public class NPCAgent : MonoBehaviour
     {
         if (!showDebugInfo) return;
         
-        if (!_navAgent) _navAgent = GetComponent<NavMeshAgent>();
-        if (!_navAgent) return;
-        
         // Draw current position marker
         Gizmos.color = Color.cyan;
         Gizmos.DrawWireSphere(transform.position, 0.2f);
+        
+        // TODO: A* Pathfinding - Draw A* path when implemented
+        /*
+        if (!_navAgent) _navAgent = GetComponent<NavMeshAgent>();
+        if (!_navAgent) return;
         
         // Draw path
         if (_navAgent.hasPath && _navAgent.path.corners.Length > 0)
@@ -1215,12 +1274,21 @@ public class NPCAgent : MonoBehaviour
             Gizmos.DrawWireSphere(_navAgent.destination, 0.3f);
             Gizmos.DrawLine(transform.position, _navAgent.destination);
         }
+        */
+        
+        // Draw current destination (simplified)
+        if (_hasDestination)
+        {
+            Gizmos.color = Color.green;
+            Gizmos.DrawWireSphere(_currentDestination, 0.3f);
+            Gizmos.DrawLine(transform.position, _currentDestination);
+        }
         
         // Draw queued destinations
         if (_destinationQueue.Count > 0)
         {
             Gizmos.color = Color.blue;
-            Vector3 prev = _hasDestination ? _navAgent.destination : transform.position;
+            Vector3 prev = _hasDestination ? _currentDestination : transform.position;
             foreach (var dest in _destinationQueue)
             {
                 Gizmos.DrawWireSphere(dest, 0.2f);
@@ -1241,13 +1309,6 @@ public class NPCAgent : MonoBehaviour
             Vector3 progressPos = Vector3.Lerp(_linkStartPos, _linkEndPos, _linkProgress);
             Gizmos.color = Color.red;
             Gizmos.DrawWireSphere(progressPos, 0.1f);
-        }
-        
-        // Draw velocity direction
-        if (_navAgent.velocity.sqrMagnitude > 0.01f)
-        {
-            Gizmos.color = Color.blue;
-            Gizmos.DrawRay(transform.position, _navAgent.velocity);
         }
     }
     

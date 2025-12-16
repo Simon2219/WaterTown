@@ -10,7 +10,7 @@ namespace Platforms
 
 
 ///
-/// Manages all platform-specific logic: registration, adjacency, socket connections, and NavMesh links
+/// Manages all platform-specific logic: registration, adjacency, and socket connections
 /// Separated from TownManager to isolate platform concerns from town-level orchestration
 ///
 [DisallowMultipleComponent]
@@ -246,8 +246,7 @@ public class PlatformManager : MonoBehaviour
 
 
     /// Event handler called when ANY platform is placed
-    /// Registers platform in grid, triggers adjacency update, and rebuilds NavMesh
-    /// Note: NavMeshLinks are handled by NavMeshManager via event subscription
+    /// Registers platform in grid and triggers adjacency update
     ///
     private void OnPlatformPlaced(GamePlatform platform)
     {
@@ -261,16 +260,12 @@ public class PlatformManager : MonoBehaviour
 
         // Force immediate adjacency computation so connections are known
         RecomputeAdjacencyForAffectedPlatforms();
-
-        // Rebuild NavMesh for this platform and all affected neighbors
-        RebuildNavMeshForPlatformAndNeighbors(platform);
     }
 
 
 
     /// Event handler called when ANY platform is picked up
     /// Clears Occupied flags, cell ownership, and marks adjacency dirty
-    /// Note: NavMeshLinks are handled by NavMeshManager via event subscription
     ///
     private void OnPlatformPickedUp(GamePlatform platform)
     {
@@ -509,8 +504,6 @@ public class PlatformManager : MonoBehaviour
         if (platform.gameObject.activeInHierarchy)
             platform.ResetConnections();
 
-        // Note: NavMeshLinks are handled by NavMeshManager via event subscription
-
         // Invoke UnityEvent for platform removed
         PlatformRemoved?.Invoke(platform);
 
@@ -567,27 +560,9 @@ public class PlatformManager : MonoBehaviour
 
 
     ///
-    /// Rebuilds NavMesh for a platform and all its neighbors
-    /// Called only when platform is successfully placed (not while moving)
-    ///
-    private void RebuildNavMeshForPlatformAndNeighbors(GamePlatform platform)
-    {
-        if (!platform) return;
-
-        var affectedPlatforms = GetAffectedPlatforms(platform);
-
-        foreach (var p in affectedPlatforms)
-        {
-            if (p && !p.IsPickedUp)
-                p.QueueRebuild();
-        }
-    }
-
-
-    ///
     /// Public method for checking if two platforms are adjacent and connecting them
     /// Used by editor tools (SceneLinkTester)
-    /// Each platform updates its own sockets - connections trigger NavMesh link requests automatically
+    /// Each platform updates its own sockets - connections are determined automatically
     ///
     public void ConnectPlatformsIfAdjacent(GamePlatform platformA, GamePlatform platformB)
     {
@@ -616,12 +591,10 @@ public class PlatformManager : MonoBehaviour
             else return;
         }
 
-        // Each platform updates its own sockets - NavMesh links are requested automatically
+        // Each platform updates its own sockets
         platformA.RefreshSocketStatuses();
         platformB.RefreshSocketStatuses();
     }
-
-
 
 
 
@@ -630,7 +603,6 @@ public class PlatformManager : MonoBehaviour
     /// Recomputes adjacency only for platforms marked as needing update
     /// Much more efficient than updating all platforms every frame
     /// This is batched to run once per frame maximum via LateUpdate
-    /// Note: NavMeshLinks are handled by NavMeshManager via event subscription (not during preview movement)
     ///
     private void RecomputeAdjacencyForAffectedPlatforms()
     {

@@ -1,6 +1,7 @@
 using System;
 using UnityEngine;
-using UnityEngine.AI;
+// TODO: A* Pathfinding - Replace with A* pathfinding includes for position validation
+// using UnityEngine.AI;
 using UnityEngine.InputSystem;
 
 namespace Agents
@@ -12,6 +13,8 @@ namespace Agents
     /// 1. Click anywhere → raycast
     /// 2. If raycast hits an Agent → select it
     /// 3. If agent is already selected AND click on ground → move agent there
+    /// 
+    /// TODO: A* Pathfinding - Update ground position validation to use A* graph.
     /// </summary>
     [DisallowMultipleComponent]
     public class NPCAgentSpawner : MonoBehaviour
@@ -26,19 +29,20 @@ namespace Agents
         [SerializeField] private InputActionReference selectMoveAction;
         
         [Header("Spawn Settings")]
-        [Tooltip("NavMesh Agent Type for spawned agents. Must match the NavMeshSurface baking type.")]
-        [SerializeField] private NavMeshAgentType agentType;
+        // TODO: A* Pathfinding - Replace with A* agent type configuration
+        // [Tooltip("NavMesh Agent Type for spawned agents. Must match the NavMeshSurface baking type.")]
+        // [SerializeField] private NavMeshAgentType agentType;
         
         [Tooltip("Optional fixed spawn point. If set and enabled, agents spawn here.")]
         [SerializeField] private Transform spawnPoint;
         [SerializeField] private bool useSpawnPoint = false;
         
         [Header("Ground Detection")]
-        [Tooltip("Y coordinate of your NavMesh/platforms for plane raycasting.")]
+        [Tooltip("Y coordinate of your platforms for plane raycasting.")]
         [SerializeField] private float groundPlaneHeight = 0f;
         
-        [Tooltip("Search radius for finding NavMesh from click point.")]
-        [SerializeField] private float navMeshSearchRadius = 5f;
+        [Tooltip("Search radius for finding valid pathfinding position from click point.")]
+        [SerializeField] private float pathfindingSearchRadius = 5f;
         
         [Header("Raycasting")]
         [Tooltip("Maximum raycast distance.")]
@@ -160,7 +164,8 @@ namespace Agents
                 return;
             }
             
-            var agent = _manager.SpawnAgent(pos, agentType.AgentTypeID);
+            // TODO: A* Pathfinding - Pass agent type configuration if needed
+            var agent = _manager.SpawnAgent(pos);
             if (agent)
             {
                 if (debugLogs) Debug.Log($"[Spawner] ✓ Spawned agent #{agent.AgentId}");
@@ -282,8 +287,9 @@ namespace Agents
         #region Ground Position
         
         /// <summary>
-        /// Get world position from mouse cursor, then snap to nearest NavMesh point.
+        /// Get world position from mouse cursor.
         /// Uses plane raycast at groundPlaneHeight (same as WorldGrid.RaycastToCell).
+        /// TODO: A* Pathfinding - Optionally snap to nearest walkable graph node.
         /// </summary>
         private bool GetGroundPosition(out Vector3 position)
         {
@@ -318,8 +324,10 @@ namespace Agents
                 Debug.DrawRay(hitPoint, Vector3.up * 2f, Color.yellow, 2f);
             }
             
+            // TODO: A* Pathfinding - Use A* graph to find nearest walkable position
+            /*
             // Find nearest NavMesh point
-            if (NavMesh.SamplePosition(hitPoint, out NavMeshHit navHit, navMeshSearchRadius, NavMesh.AllAreas))
+            if (NavMesh.SamplePosition(hitPoint, out NavMeshHit navHit, pathfindingSearchRadius, NavMesh.AllAreas))
             {
                 position = navHit.position;
                 
@@ -333,10 +341,21 @@ namespace Agents
             
             if (debugLogs)
             {
-                Debug.LogWarning($"[Spawner] No NavMesh within {navMeshSearchRadius}m of {hitPoint}");
+                Debug.LogWarning($"[Spawner] No NavMesh within {pathfindingSearchRadius}m of {hitPoint}");
             }
             
             return false;
+            */
+            
+            // For now, return the hit point directly (A* will handle validation)
+            position = hitPoint;
+            
+            if (drawDebugVisuals)
+            {
+                Debug.DrawRay(position, Vector3.up * 3f, Color.green, 2f);
+            }
+            
+            return true;
         }
         
         #endregion
@@ -349,7 +368,8 @@ namespace Agents
         public NPCAgent SpawnAt(Vector3 position)
         {
             if (!_manager) return null;
-            var agent = _manager.SpawnAgent(position, agentType.AgentTypeID);
+            // TODO: A* Pathfinding - Pass agent type configuration if needed
+            var agent = _manager.SpawnAgent(position);
             if (agent) OnAgentSpawned?.Invoke(agent);
             return agent;
         }
