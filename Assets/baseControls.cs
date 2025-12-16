@@ -109,6 +109,15 @@ public partial class @BaseControls: IInputActionCollection2, IDisposable
                     ""processors"": """",
                     ""interactions"": """",
                     ""initialStateCheck"": false
+                },
+                {
+                    ""name"": ""SpawnNPC"",
+                    ""type"": ""Button"",
+                    ""id"": ""b8bf3fb3-6424-448c-abe2-7ca361ca89ac"",
+                    ""expectedControlType"": """",
+                    ""processors"": """",
+                    ""interactions"": """",
+                    ""initialStateCheck"": false
                 }
             ],
             ""bindings"": [
@@ -169,17 +178,6 @@ public partial class @BaseControls: IInputActionCollection2, IDisposable
                 },
                 {
                     ""name"": """",
-                    ""id"": ""b3c1c7f0-bd20-4ee7-a0f1-899b24bca6d7"",
-                    ""path"": ""<Keyboard>/enter"",
-                    ""interactions"": """",
-                    ""processors"": """",
-                    ""groups"": ""Keyboard&Mouse"",
-                    ""action"": ""Select"",
-                    ""isComposite"": false,
-                    ""isPartOfComposite"": false
-                },
-                {
-                    ""name"": """",
                     ""id"": ""7d7ca361-0ffd-4a52-adfe-8472e4f8141d"",
                     ""path"": ""<Mouse>/rightButton"",
                     ""interactions"": """",
@@ -197,6 +195,17 @@ public partial class @BaseControls: IInputActionCollection2, IDisposable
                     ""processors"": """",
                     ""groups"": """",
                     ""action"": ""Context"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""c1a2e265-1f95-4261-8dbc-e266a6dbb51f"",
+                    ""path"": """",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""SpawnNPC"",
                     ""isComposite"": false,
                     ""isPartOfComposite"": false
                 }
@@ -1241,6 +1250,7 @@ public partial class @BaseControls: IInputActionCollection2, IDisposable
         m_Player = asset.FindActionMap("Player", throwIfNotFound: true);
         m_Player_Select = m_Player.FindAction("Select", throwIfNotFound: true);
         m_Player_Context = m_Player.FindAction("Context", throwIfNotFound: true);
+        m_Player_SpawnNPC = m_Player.FindAction("SpawnNPC", throwIfNotFound: true);
         // Build Mode
         m_BuildMode = asset.FindActionMap("Build Mode", throwIfNotFound: true);
         m_BuildMode_Move = m_BuildMode.FindAction("Move", throwIfNotFound: true);
@@ -1355,6 +1365,7 @@ public partial class @BaseControls: IInputActionCollection2, IDisposable
     private List<IPlayerActions> m_PlayerActionsCallbackInterfaces = new List<IPlayerActions>();
     private readonly InputAction m_Player_Select;
     private readonly InputAction m_Player_Context;
+    private readonly InputAction m_Player_SpawnNPC;
     /// <summary>
     /// Provides access to input actions defined in input action map "Player".
     /// </summary>
@@ -1374,6 +1385,10 @@ public partial class @BaseControls: IInputActionCollection2, IDisposable
         /// Provides access to the underlying input action "Player/Context".
         /// </summary>
         public InputAction @Context => m_Wrapper.m_Player_Context;
+        /// <summary>
+        /// Provides access to the underlying input action "Player/SpawnNPC".
+        /// </summary>
+        public InputAction @SpawnNPC => m_Wrapper.m_Player_SpawnNPC;
         /// <summary>
         /// Provides access to the underlying input action map instance.
         /// </summary>
@@ -1406,6 +1421,9 @@ public partial class @BaseControls: IInputActionCollection2, IDisposable
             @Context.started += instance.OnContext;
             @Context.performed += instance.OnContext;
             @Context.canceled += instance.OnContext;
+            @SpawnNPC.started += instance.OnSpawnNPC;
+            @SpawnNPC.performed += instance.OnSpawnNPC;
+            @SpawnNPC.canceled += instance.OnSpawnNPC;
         }
 
         /// <summary>
@@ -1423,6 +1441,9 @@ public partial class @BaseControls: IInputActionCollection2, IDisposable
             @Context.started -= instance.OnContext;
             @Context.performed -= instance.OnContext;
             @Context.canceled -= instance.OnContext;
+            @SpawnNPC.started -= instance.OnSpawnNPC;
+            @SpawnNPC.performed -= instance.OnSpawnNPC;
+            @SpawnNPC.canceled -= instance.OnSpawnNPC;
         }
 
         /// <summary>
@@ -2102,6 +2123,13 @@ public partial class @BaseControls: IInputActionCollection2, IDisposable
         /// <seealso cref="UnityEngine.InputSystem.InputAction.performed" />
         /// <seealso cref="UnityEngine.InputSystem.InputAction.canceled" />
         void OnContext(InputAction.CallbackContext context);
+        /// <summary>
+        /// Method invoked when associated input action "SpawnNPC" is either <see cref="UnityEngine.InputSystem.InputAction.started" />, <see cref="UnityEngine.InputSystem.InputAction.performed" /> or <see cref="UnityEngine.InputSystem.InputAction.canceled" />.
+        /// </summary>
+        /// <seealso cref="UnityEngine.InputSystem.InputAction.started" />
+        /// <seealso cref="UnityEngine.InputSystem.InputAction.performed" />
+        /// <seealso cref="UnityEngine.InputSystem.InputAction.canceled" />
+        void OnSpawnNPC(InputAction.CallbackContext context);
     }
     /// <summary>
     /// Interface to implement callback methods for all input action callbacks associated with input actions defined by "Build Mode" which allows adding and removing callbacks.

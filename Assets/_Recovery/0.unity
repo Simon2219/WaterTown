@@ -1203,15 +1203,19 @@ MonoBehaviour:
   m_GameObject: {fileID: 479294915}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 79d28e59986eba845b3c6321c66fd9c1, type: 3}
+  m_Script: {fileID: 11500000, guid: 6960838ed0a0fd04498a2622616c9760, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::NavMeshLinkManager
-  widthPerSocket: 1
-  linkDepth: 0.5
-  heightOffset: 0.5
+  m_EditorClassIdentifier: Assembly-CSharp::Navigation.NavMeshManager
   agentType:
     agentTypeID: -1372625422
-  debugLogs: 1
+  areaType: 0
+  costModifier: 1
+  bidirectional: 1
+  widthPerSocket: 1
+  linkDepth: 1
+  heightOffset: 0.5
+  navMeshSampleRadius: 0.5
+  debugLogs: 0
   drawDebugGizmos: 1
   debugDrawDuration: 10
 --- !u!114 &522639835
