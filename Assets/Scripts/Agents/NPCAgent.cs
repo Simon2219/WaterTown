@@ -91,11 +91,12 @@ public class NPCAgent : MonoBehaviour
     /// <summary>Fired when status changes. Args: (agent, newStatus)</summary>
     public event Action<NPCAgent, AgentStatus> StatusChanged;
     
-    /// <summary>Fired when current destination is reached.</summary>
-    public event Action<NPCAgent> DestinationReached;
+    // TODO: A* Pathfinding - Re-enable when destination tracking is implemented
+    // /// <summary>Fired when current destination is reached.</summary>
+    // public event Action<NPCAgent> DestinationReached;
     
-    /// <summary>Fired when all queued destinations are completed.</summary>
-    public event Action<NPCAgent> AllDestinationsCompleted;
+    // /// <summary>Fired when all queued destinations are completed.</summary>
+    // public event Action<NPCAgent> AllDestinationsCompleted;
     
     /// <summary>Fired when a new destination starts being processed.</summary>
     public event Action<NPCAgent, Vector3> DestinationStarted;
@@ -109,8 +110,9 @@ public class NPCAgent : MonoBehaviour
     /// <summary>Fired when LOD level changes. Args: (agent, newLevel)</summary>
     public event Action<NPCAgent, AgentLODLevel> LODChanged;
     
-    /// <summary>Fired when link traversal starts.</summary>
-    public event Action<NPCAgent> LinkTraversalStarted;
+    // TODO: A* Pathfinding - Re-enable when link traversal is implemented
+    // /// <summary>Fired when link traversal starts.</summary>
+    // public event Action<NPCAgent> LinkTraversalStarted;
     
     /// <summary>Fired when link traversal completes.</summary>
     public event Action<NPCAgent> LinkTraversalCompleted;
@@ -191,33 +193,34 @@ public class NPCAgent : MonoBehaviour
     [Tooltip("How to handle height during link traversal.")]
     [SerializeField] private LinkHeightMode linkHeightMode = LinkHeightMode.InterpolateHeight;
     
-    [Tooltip("Additional smoothing applied to position during link traversal (0 = none, 1 = max).")]
-    [Range(0f, 1f)]
-    [SerializeField] private float linkPositionSmoothing = 0.1f;
+    // TODO: A* Pathfinding - Re-enable link traversal settings when implemented
+    // [Tooltip("Additional smoothing applied to position during link traversal (0 = none, 1 = max).")]
+    // [Range(0f, 1f)]
+    // [SerializeField] private float linkPositionSmoothing = 0.1f;
     
-    [Tooltip("Minimum duration for link traversal regardless of distance (prevents instant traversal).")]
-    [SerializeField] private float minLinkDuration = 0.1f;
+    // [Tooltip("Minimum duration for link traversal regardless of distance (prevents instant traversal).")]
+    // [SerializeField] private float minLinkDuration = 0.1f;
     
-    [Tooltip("Speed multiplier during link traversal (1 = normal speed).")]
-    [SerializeField] private float linkSpeedMultiplier = 1f;
+    // [Tooltip("Speed multiplier during link traversal (1 = normal speed).")]
+    // [SerializeField] private float linkSpeedMultiplier = 1f;
     
-    [Header("Link Traversal - Rotation (Manual only)")]
-    [Tooltip("How to handle rotation during link traversal.")]
-    [SerializeField] private LinkRotationMode linkRotationMode = LinkRotationMode.SmoothLookAhead;
+    // [Header("Link Traversal - Rotation (Manual only)")]
+    // [Tooltip("How to handle rotation during link traversal.")]
+    // [SerializeField] private LinkRotationMode linkRotationMode = LinkRotationMode.SmoothLookAhead;
     
-    [Tooltip("Easing function for rotation during link traversal.")]
-    [SerializeField] private EasingType linkRotationEasing = EasingType.EaseOutQuad;
+    // [Tooltip("Easing function for rotation during link traversal.")]
+    // [SerializeField] private EasingType linkRotationEasing = EasingType.EaseOutQuad;
     
-    [Tooltip("Rotation speed multiplier during link traversal.")]
-    [SerializeField] private float linkRotationSpeed = 5f;
+    // [Tooltip("Rotation speed multiplier during link traversal.")]
+    // [SerializeField] private float linkRotationSpeed = 5f;
     
-    [Header("Link Traversal - Behavior")]
-    [Tooltip("How to handle new destinations while traversing a link.")]
-    [SerializeField] private LinkInterruptBehavior linkInterruptBehavior = LinkInterruptBehavior.FinishLinkFirst;
+    // [Header("Link Traversal - Behavior")]
+    // [Tooltip("How to handle new destinations while traversing a link.")]
+    // [SerializeField] private LinkInterruptBehavior linkInterruptBehavior = LinkInterruptBehavior.FinishLinkFirst;
     
-    [Tooltip("Progress threshold considered 'safe' for WaitForSafePoint behavior (0.5 = midpoint).")]
-    [Range(0f, 1f)]
-    [SerializeField] private float linkSafePointThreshold = 0.5f;
+    // [Tooltip("Progress threshold considered 'safe' for WaitForSafePoint behavior (0.5 = midpoint).")]
+    // [Range(0f, 1f)]
+    // [SerializeField] private float linkSafePointThreshold = 0.5f;
     
     #endregion
     
@@ -280,7 +283,8 @@ public class NPCAgent : MonoBehaviour
     private float _linkProgress;
     private float _linkDuration;
     private Vector3 _smoothedPosition;
-    private bool _linkInterruptPending;
+    // TODO: A* Pathfinding - Re-enable when link interruption is implemented
+    // private bool _linkInterruptPending;
     
     #endregion
     

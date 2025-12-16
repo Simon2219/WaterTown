@@ -41,8 +41,9 @@ namespace Agents
         [Tooltip("Y coordinate of your platforms for plane raycasting.")]
         [SerializeField] private float groundPlaneHeight = 0f;
         
-        [Tooltip("Search radius for finding valid pathfinding position from click point.")]
-        [SerializeField] private float pathfindingSearchRadius = 5f;
+        // TODO: A* Pathfinding - Use when implementing position validation
+        // [Tooltip("Search radius for finding valid pathfinding position from click point.")]
+        // [SerializeField] private float pathfindingSearchRadius = 5f;
         
         [Header("Raycasting")]
         [Tooltip("Maximum raycast distance.")]

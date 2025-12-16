@@ -58,8 +58,9 @@ namespace Agents
         [SerializeField] private float agentHeight = 1.8f;
         
         [Header("Spawn Settings")]
-        [Tooltip("Maximum distance to search for valid pathfinding position when spawning.")]
-        [SerializeField] private float pathfindingSearchRadius = 2f;
+        // TODO: A* Pathfinding - Use when implementing spawn position validation
+        // [Tooltip("Maximum distance to search for valid pathfinding position when spawning.")]
+        // [SerializeField] private float pathfindingSearchRadius = 2f;
         
         [Tooltip("Layer to assign spawned agents to. Important for selection raycasts!")]
         [SerializeField] private string agentLayerName = "NPCAgent";
