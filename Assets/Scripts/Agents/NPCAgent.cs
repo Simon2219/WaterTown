@@ -131,10 +131,7 @@ namespace Agents
         [SerializeField] private bool replaceLastWhenFull = true;
         
         [Header("Path Failure Handling")]
-        [Tooltip("Number of consecutive path failures before giving up on a destination.")]
-        [SerializeField] private int maxPathFailures = 3;
-        
-        [Tooltip("Distance threshold to detect partial/unreachable paths (meters).")]
+        [Tooltip("Distance threshold to detect unreachable destination (meters). If agent reaches end of path but is further than this from target, destination is unreachable.")]
         [SerializeField] private float unreachableDistanceThreshold = 0.5f;
         
         [Header("Debug")]
@@ -166,10 +163,7 @@ namespace Agents
         private bool _initialized;
         
         // Path failure tracking
-        private int _consecutivePathFailures;
         private Vector3 _currentTargetDestination;
-        private bool _wasPathPending;
-        private Path _lastCheckedPath;
         
         // Frame skip tracking for staggered updates
         private int _frameOffset;
@@ -361,14 +355,9 @@ namespace Agents
         
         private void CheckDestinationReached()
         {
-            if (!_aiPath) return;
+            if (!_aiPath || !_hasDestination) return;
             
-            // Check for path completion (replaces deprecated Seeker.pathCallback)
-            CheckPathCompletion();
-            
-            if (!_hasDestination) return;
-            
-            // Check if destination reached
+            // SUCCESS: Agent reached the actual destination
             if (_aiPath.reachedDestination && !_wasAtDestination)
             {
                 _wasAtDestination = true;
@@ -380,66 +369,49 @@ namespace Agents
                 }
                 
                 DestinationReached?.Invoke(this);
+                ProcessNextQueuedDestination();
+                return;
+            }
+            
+            // FAILURE CHECK: Agent reached end of path but NOT the destination
+            // This means the destination is unreachable - agent is at closest point
+            // Using AIPath's built-in properties as per documentation
+            if (_aiPath.reachedEndOfPath && !_aiPath.reachedDestination && !_aiPath.pathPending)
+            {
+                // Verify by checking distance between path end and target
+                float distanceToTarget = Vector3.Distance(_aiPath.endOfPath, _currentTargetDestination);
                 
-                // Process next queued destination
-                if (_destinationQueue.Count > 0)
+                if (distanceToTarget > unreachableDistanceThreshold)
                 {
-                    Vector3 nextDest = _destinationQueue.Dequeue();
-                    
-                    if (logQueueChanges)
+                    if (logStatusChanges)
                     {
-                        Debug.Log($"[NPCAgent] Agent {AgentId} processing next queued destination. Remaining: {_destinationQueue.Count}");
+                        Debug.LogWarning($"[NPCAgent] Agent {AgentId} stuck at closest point. " +
+                            $"EndOfPath: {_aiPath.endOfPath}, Target: {_currentTargetDestination}, " +
+                            $"Distance: {distanceToTarget:F2}m - GIVING UP");
                     }
                     
-                    QueueChanged?.Invoke(this, _destinationQueue.Count);
-                    SetDestinationInternal(nextDest);
-                }
-                else
-                {
-                    AllDestinationsCompleted?.Invoke(this);
+                    GiveUpOnDestination();
                 }
             }
         }
         
-        /// <summary>
-        /// Check if path calculation just completed and validate the result.
-        /// Replaces deprecated Seeker.pathCallback approach.
-        /// </summary>
-        private void CheckPathCompletion()
+        private void ProcessNextQueuedDestination()
         {
-            if (!_aiPath || !_hasDestination) return;
-            
-            bool currentlyPending = _aiPath.pathPending;
-            
-            // Detect when path calculation finishes (was pending, now not)
-            if (_wasPathPending && !currentlyPending)
+            if (_destinationQueue.Count > 0)
             {
-                // Get the current path from Seeker
-                var path = _seeker.GetCurrentPath();
+                Vector3 nextDest = _destinationQueue.Dequeue();
                 
-                // Only process if this is a new path we haven't checked
-                if (path != null && path != _lastCheckedPath)
+                if (logQueueChanges)
                 {
-                    _lastCheckedPath = path;
-                    OnPathComplete(path);
+                    Debug.Log($"[NPCAgent] Agent {AgentId} processing next queued destination. Remaining: {_destinationQueue.Count}");
                 }
+                
+                QueueChanged?.Invoke(this, _destinationQueue.Count);
+                SetDestinationInternal(nextDest);
             }
-            
-            _wasPathPending = currentlyPending;
-            
-            // Additional check: If agent has destination but no valid path and not pending, it's stuck
-            if (_hasDestination && !currentlyPending && !_aiPath.hasPath)
+            else
             {
-                _consecutivePathFailures++;
-                if (logStatusChanges)
-                {
-                    Debug.LogWarning($"[NPCAgent] Agent {AgentId} has no path and not searching - failure #{_consecutivePathFailures}");
-                }
-                
-                if (_consecutivePathFailures >= maxPathFailures)
-                {
-                    GiveUpOnDestination();
-                }
+                AllDestinationsCompleted?.Invoke(this);
             }
         }
         
@@ -621,10 +593,8 @@ namespace Agents
         {
             if (!_aiPath) return false;
             
-            // Reset failure tracking for new destination
-            _consecutivePathFailures = 0;
+            // Track target for failure detection
             _currentTargetDestination = destination;
-            _lastCheckedPath = null;  // Reset so we check the new path
             
             // Re-enable AIPath (might have been disabled by GiveUpOnDestination)
             _aiPath.canSearch = true;
@@ -636,7 +606,6 @@ namespace Agents
             
             _hasDestination = true;
             _wasAtDestination = false;
-            _wasPathPending = true;  // We just started a search
             
             if (logStatusChanges)
             {
@@ -645,62 +614,6 @@ namespace Agents
             
             DestinationStarted?.Invoke(this, destination);
             return true;
-        }
-        
-        /// <summary>
-        /// Called when a path calculation completes. Used to detect unreachable destinations.
-        /// </summary>
-        private void OnPathComplete(Path path)
-        {
-            if (path == null || !_hasDestination) return;
-            
-            bool isFailure = false;
-            string failureReason = "";
-            
-            // Check 1: Path error
-            if (path.error)
-            {
-                isFailure = true;
-                failureReason = $"Path error: {path.errorLog}";
-            }
-            // Check 2: Path has no waypoints or only 1 waypoint (going nowhere)
-            else if (path.vectorPath == null || path.vectorPath.Count <= 1)
-            {
-                isFailure = true;
-                failureReason = $"Path has {path.vectorPath?.Count ?? 0} waypoints (going nowhere)";
-            }
-            // Check 3: Partial path - endpoint far from target
-            else if (path is ABPath abPath)
-            {
-                float distanceToTarget = Vector3.Distance(abPath.endPoint, _currentTargetDestination);
-                
-                if (distanceToTarget > unreachableDistanceThreshold)
-                {
-                    isFailure = true;
-                    failureReason = $"Partial path - endpoint {distanceToTarget:F2}m from target (threshold: {unreachableDistanceThreshold}m)";
-                }
-            }
-            
-            if (isFailure)
-            {
-                _consecutivePathFailures++;
-                
-                if (logStatusChanges)
-                {
-                    Debug.LogWarning($"[NPCAgent] Agent {AgentId} path failure #{_consecutivePathFailures}: {failureReason}");
-                }
-                
-                // Immediately give up - don't wait for multiple failures if path is clearly impossible
-                if (_consecutivePathFailures >= maxPathFailures || path.vectorPath == null || path.vectorPath.Count <= 1)
-                {
-                    GiveUpOnDestination();
-                }
-            }
-            else
-            {
-                // Valid path - reset failure counter
-                _consecutivePathFailures = 0;
-            }
         }
         
         /// <summary>
@@ -719,7 +632,6 @@ namespace Agents
             
             // CRITICAL: Stop trying to reach this destination
             _hasDestination = false;
-            _consecutivePathFailures = 0;
             
             // CRITICAL: Disable auto-searching to prevent AIPath from starting new paths
             if (_aiPath)
@@ -775,7 +687,6 @@ namespace Agents
             }
             
             _hasDestination = false;
-            _consecutivePathFailures = 0;
             
             if (logStatusChanges)
             {
