@@ -408,30 +408,18 @@ namespace Agents
         
         /// <summary>
         /// Spawn an agent at the specified world position.
+        /// Note: Position should already be validated by caller (e.g., NPCAgentSpawner).
         /// </summary>
-        /// <param name="worldPosition">World position to spawn at</param>
+        /// <param name="worldPosition">World position to spawn at (should be on navmesh)</param>
         public NPCAgent SpawnAgent(Vector3 worldPosition)
         {
-            // Validate spawn position using PathfindingManager
+            // Use position as-is (already validated by spawner)
+            // The spawner ensures the position is on the navmesh before calling this
             Vector3 spawnPosition = worldPosition;
-            
-            if (_pathfindingManager && _pathfindingManager.IsReady)
-            {
-                if (_pathfindingManager.GetNearestWalkablePosition(worldPosition, out Vector3 walkablePos, 5f))
-                {
-                    spawnPosition = walkablePos;
-                }
-                else
-                {
-                    Debug.LogWarning($"[NPCManager] No walkable position near {worldPosition}. Spawning at exact position.");
-                }
-            }
             
             if (debugSpawnLogs)
             {
-                Debug.Log($"[NPCManager] Spawn:\n" +
-                          $"  Requested: {worldPosition}\n" +
-                          $"  Position: {spawnPosition}");
+                Debug.Log($"[NPCManager] Spawning agent at: {spawnPosition}");
             }
             
             // Create GameObject
