@@ -284,6 +284,18 @@ namespace Agents
         {
             if (_selectedAgent == null) return;
             
+            // Check if destination is actually reachable from agent's current position
+            if (requireWalkableForMove && _pathfindingManager && _pathfindingManager.IsReady)
+            {
+                Vector3 agentPos = _selectedAgent.transform.position;
+                
+                if (!_pathfindingManager.CanReach(agentPos, destination))
+                {
+                    if (debugLogs) Debug.LogWarning($"[Spawner] ✗ Destination unreachable from agent position");
+                    return;
+                }
+            }
+            
             bool success = _selectedAgent.SetDestination(destination);
             
             if (success)

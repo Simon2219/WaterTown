@@ -503,15 +503,47 @@ namespace Navigation
         }
         
         /// <summary>
-        /// Check if a path exists between two positions.
+        /// Check if a path exists between two positions that actually reaches the destination.
+        /// Returns false for partial paths (closest reachable point, but not destination).
         /// </summary>
-        public bool CanReach(Vector3 from, Vector3 to)
+        /// <param name="from">Start position</param>
+        /// <param name="to">Target position</param>
+        /// <param name="acceptableDistance">How close the path endpoint must be to target (default 0.5m)</param>
+        public bool CanReach(Vector3 from, Vector3 to, float acceptableDistance = 0.5f)
         {
             if (!_isReady) return false;
+            
             var path = ABPath.Construct(from, to);
             AstarPath.StartPath(path);
             path.BlockUntilCalculated();
-            return !path.error && path.vectorPath.Count > 0;
+            
+            // Check for errors
+            if (path.error)
+            {
+                if (debugLogs) Debug.Log($"[PathfindingManager] CanReach: Path error - {path.errorLog}");
+                return false;
+            }
+            
+            // Check if path has waypoints
+            if (path.vectorPath == null || path.vectorPath.Count == 0)
+            {
+                if (debugLogs) Debug.Log($"[PathfindingManager] CanReach: No path found");
+                return false;
+            }
+            
+            // CRITICAL: Check if path endpoint actually reaches the destination
+            // A* may return a "partial" path to the closest reachable point
+            Vector3 pathEndPoint = path.vectorPath[path.vectorPath.Count - 1];
+            float distanceToTarget = Vector3.Distance(pathEndPoint, to);
+            
+            if (distanceToTarget > acceptableDistance)
+            {
+                if (debugLogs) Debug.Log($"[PathfindingManager] CanReach: Partial path only - endpoint {distanceToTarget:F2}m from target");
+                return false;
+            }
+            
+            if (debugLogs) Debug.Log($"[PathfindingManager] CanReach: Valid path found ({path.vectorPath.Count} waypoints)");
+            return true;
         }
         
         /// <summary>
