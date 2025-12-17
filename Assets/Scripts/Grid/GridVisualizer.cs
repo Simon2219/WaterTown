@@ -28,9 +28,11 @@ namespace Grid
         public struct FlagColor { public WorldGrid.CellFlag flag; public Color color; }
         public FlagColor[] flagColors = new[]
         {
-            new FlagColor{ flag = WorldGrid.CellFlag.Locked,    color = new Color(0.80f, 0.25f, 0.25f, 0.35f) },
-            new FlagColor{ flag = WorldGrid.CellFlag.Buildable, color = new Color(0.25f, 0.80f, 0.35f, 0.35f) },
-            new FlagColor{ flag = WorldGrid.CellFlag.Occupied,  color = new Color(0.25f, 0.50f, 0.90f, 0.35f) },
+            new FlagColor{ flag = WorldGrid.CellFlag.Locked,        color = new Color(0.80f, 0.25f, 0.25f, 0.35f) }, // Red - cannot change
+            new FlagColor{ flag = WorldGrid.CellFlag.Buildable,     color = new Color(0.25f, 0.80f, 0.35f, 0.35f) }, // Green - can build here
+            new FlagColor{ flag = WorldGrid.CellFlag.Occupied,      color = new Color(0.25f, 0.50f, 0.90f, 0.35f) }, // Blue - placed platform
+            new FlagColor{ flag = WorldGrid.CellFlag.OccupyPreview, color = new Color(0.95f, 0.75f, 0.20f, 0.35f) }, // Yellow/Orange - preview platform
+            new FlagColor{ flag = WorldGrid.CellFlag.ModuleBlocked, color = new Color(0.60f, 0.20f, 0.60f, 0.35f) }, // Purple - module blocking socket
         };
 
         [Header("Tube Look")]

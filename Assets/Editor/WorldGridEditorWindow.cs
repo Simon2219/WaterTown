@@ -305,15 +305,46 @@ public class WorldGridEditorWindow : EditorWindow
 
                     if (_visualizer.flagColors != null)
                     {
+                        int removeIndex = -1;
                         for (int i = 0; i < _visualizer.flagColors.Length; i++)
                         {
                             var fc = _visualizer.flagColors[i];
                             using (new EditorGUILayout.HorizontalScope())
                             {
-                                fc.flag  = (WorldGrid.CellFlag)EditorGUILayout.EnumPopup(GUIContent.none, fc.flag, GUILayout.Width(160));
+                                fc.flag  = (WorldGrid.CellFlag)EditorGUILayout.EnumPopup(GUIContent.none, fc.flag, GUILayout.Width(120));
                                 fc.color = EditorGUILayout.ColorField(fc.color);
+                                if (GUILayout.Button("×", GUILayout.Width(22)))
+                                    removeIndex = i;
                             }
                             _visualizer.flagColors[i] = fc;
+                        }
+                        
+                        // Handle removal after iteration
+                        if (removeIndex >= 0)
+                        {
+                            Undo.RecordObject(_visualizer, "Remove Flag Color");
+                            var list = new System.Collections.Generic.List<GridVisualizer.FlagColor>(_visualizer.flagColors);
+                            list.RemoveAt(removeIndex);
+                            _visualizer.flagColors = list.ToArray();
+                        }
+                    }
+                    
+                    // Add new flag color button
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        GUILayout.FlexibleSpace();
+                        if (GUILayout.Button("+ Add Flag Color", GUILayout.Width(120)))
+                        {
+                            Undo.RecordObject(_visualizer, "Add Flag Color");
+                            var list = _visualizer.flagColors != null 
+                                ? new System.Collections.Generic.List<GridVisualizer.FlagColor>(_visualizer.flagColors) 
+                                : new System.Collections.Generic.List<GridVisualizer.FlagColor>();
+                            list.Add(new GridVisualizer.FlagColor 
+                            { 
+                                flag = WorldGrid.CellFlag.Empty, 
+                                color = new Color(0.5f, 0.5f, 0.5f, 0.35f) 
+                            });
+                            _visualizer.flagColors = list.ToArray();
                         }
                     }
 

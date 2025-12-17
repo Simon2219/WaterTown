@@ -13,7 +13,11 @@ namespace Platforms
 /// Manages all platform-specific logic: registration, adjacency, and socket connections
 /// Separated from TownManager to isolate platform concerns from town-level orchestration
 ///
+/// EXECUTION ORDER: This runs after GamePlatform to ensure all platforms have processed
+/// their HasMoved events and updated occupiedCells BEFORE we process adjacency updates.
+///
 [DisallowMultipleComponent]
+[DefaultExecutionOrder(10)] // Run after GamePlatform (which is at -10)
 public class PlatformManager : MonoBehaviour
 {
     #region Inspector Fields

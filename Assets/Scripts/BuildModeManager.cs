@@ -180,11 +180,13 @@ namespace Building
             
             _currentPickup.UpdateValidityVisuals();
             
-            // Trigger adjacency update for preview (only for affected platforms, not all)
-            if (_currentPickup is GamePlatform platform && platformManager != null)
-            {
-                platformManager.TriggerAdjacencyUpdate(platform);
-            }
+            // NOTE: Adjacency updates are handled automatically by the HasMoved event chain:
+            // GamePlatform.LateUpdate detects movement → fires HasMoved → 
+            // PlatformManager.OnPlatformHasMoved updates cells and marks adjacency dirty →
+            // PlatformManager.LateUpdate processes dirty platforms
+            // 
+            // Manual TriggerAdjacencyUpdate here was redundant and used stale cell data
+            // because it ran BEFORE GamePlatform.LateUpdate updated occupiedCells.
         }
         
         #endregion
@@ -239,8 +241,7 @@ namespace Building
         /// </summary>
         private void PickupExistingPlatform(IPickupable pickupable)
         {
-            Debug.Log("LOL");
-            if (pickupable == null) {Debug.Log("Uhm okey"); return;}
+            if (pickupable == null) return;
 
             if (_currentPickup != null)
             {

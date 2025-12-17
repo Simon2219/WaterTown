@@ -245,10 +245,15 @@ namespace Navigation
         {
             if (!platform || _registeredPlatforms.Contains(platform)) return;
             
+            // Only subscribe to events and register - don't queue any updates yet.
+            // Updates will be queued when the platform is actually Placed (not during preview).
+            // For new platforms being placed, the flow is: Created → PickedUp (preview) → Placed (final)
+            // We only want NavMesh updates on Placed (and Destroyed).
             SubscribeToPlatform(platform);
             _registeredPlatforms.Add(platform);
-            _previousBounds[platform] = GetPlatformBounds(platform);
-            QueuePlatformUpdate(platform);
+            
+            // Don't store bounds or queue updates - the platform may be at origin (0,0,0)
+            // and hasn't been placed yet. Bounds will be stored on PickedUp for existing platforms.
             
             if (debugLogs) Debug.Log($"[PathfindingManager] Platform registered: {platform.name}");
         }
@@ -304,12 +309,17 @@ namespace Navigation
         
         private void OnPlatformPickedUp(GamePlatform platform)
         {
-            if (debugLogs) Debug.Log($"[PathfindingManager] Platform picked up: {platform.name}");
+            if (debugLogs) Debug.Log($"[PathfindingManager] Platform picked up: {platform.name}, IsNewObject: {platform.IsNewObject}");
             
-            // Store bounds and update to mark as unwalkable
-            var bounds = GetPlatformBounds(platform);
-            _previousBounds[platform] = bounds;
-            QueueBoundsUpdate(bounds);
+            // Only update NavMesh for EXISTING platforms (not new objects being placed for the first time).
+            // New objects haven't been on the NavMesh yet, so there's nothing to clear.
+            // Existing platforms need their old position cleared from the NavMesh.
+            if (!platform.IsNewObject)
+            {
+                var bounds = GetPlatformBounds(platform);
+                _previousBounds[platform] = bounds;
+                QueueBoundsUpdate(bounds);
+            }
         }
         
         private void OnPlatformMoved(GamePlatform platform)

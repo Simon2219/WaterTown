@@ -14,8 +14,12 @@ namespace Platforms
     /// External systems should call facade methods on GamePlatform rather than accessing sub-components directly
     /// 
     /// NOTE: Unity NavMesh has been removed. A* Pathfinding Project will be used for pathfinding.
+    /// 
+    /// EXECUTION ORDER: This runs before PlatformManager to ensure HasMoved event fires
+    /// and updates occupiedCells BEFORE PlatformManager processes adjacency updates.
     /// </summary>
     [DisallowMultipleComponent]
+    [DefaultExecutionOrder(-10)] // Run before PlatformManager (which is at 0)
     // TODO: A* Pathfinding - Add A* graph requirements if needed
     // [RequireComponent(typeof(NavMeshSurface))]
     [RequireComponent(typeof(PlatformSocketSystem))]
