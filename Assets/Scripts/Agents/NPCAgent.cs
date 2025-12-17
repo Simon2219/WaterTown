@@ -1,14 +1,12 @@
 using System;
-using System.Collections.Generic;
 using UnityEngine;
 using Pathfinding;
 
 namespace Agents
 {
     /// <summary>
-    /// Agent status for visual feedback and logic.
-    /// Green = Idle, Blue = Moving, Orange = Calculating, Red = Error
-    /// Note: Selection is separate from status (overlay color).
+    /// Agent status for visual feedback.
+    /// Maps from NavigationState with additional context.
     /// </summary>
     public enum AgentStatus : byte
     {
@@ -38,12 +36,12 @@ namespace Agents
     }
 
     /// <summary>
-    /// Individual NPC agent component using A* Pathfinding Project.
-    /// Requires Seeker and AIPath components for pathfinding.
+    /// Individual NPC agent component.
+    /// Uses AgentNavigator for pathfinding and movement.
+    /// Handles identity, status, LOD, visuals, and selection.
     /// </summary>
     [DisallowMultipleComponent]
-    [RequireComponent(typeof(Seeker))]
-    [RequireComponent(typeof(AIPath))]
+    [RequireComponent(typeof(AgentNavigator))]
     public class NPCAgent : MonoBehaviour
     {
         #region Events
@@ -88,27 +86,6 @@ namespace Agents
         /// <summary>Whether this agent is selected.</summary>
         public bool IsSelected => _isSelected;
         
-        /// <summary>Whether this agent has a current destination.</summary>
-        public bool HasDestination => _hasDestination;
-        
-        /// <summary>Whether this agent has queued destinations.</summary>
-        public bool HasQueuedDestinations => _destinationQueue.Count > 0;
-        
-        /// <summary>Number of destinations in queue (not including current).</summary>
-        public int QueuedDestinationCount => _destinationQueue.Count;
-        
-        /// <summary>Whether this agent is actively moving.</summary>
-        public bool IsMoving => _aiPath && !_aiPath.reachedDestination && _aiPath.hasPath;
-        
-        /// <summary>Current destination (if any).</summary>
-        public Vector3? CurrentDestination => _hasDestination ? (Vector3?)_aiPath.destination : null;
-        
-        /// <summary>Reference to AIPath component.</summary>
-        public AIPath AIPath => _aiPath;
-        
-        /// <summary>Reference to Seeker component.</summary>
-        public Seeker Seeker => _seeker;
-        
         /// <summary>Current LOD level.</summary>
         public AgentLODLevel LODLevel => _lodLevel;
         
@@ -118,31 +95,44 @@ namespace Agents
         /// <summary>Distance to main camera (updated by manager).</summary>
         public float CameraDistance { get; internal set; }
         
+        // Navigation delegated properties
+        /// <summary>Whether this agent has a current destination.</summary>
+        public bool HasDestination => _navigator && _navigator.HasDestination;
+        
+        /// <summary>Whether this agent has queued destinations.</summary>
+        public bool HasQueuedDestinations => _navigator && _navigator.HasQueuedDestinations;
+        
+        /// <summary>Number of destinations in queue.</summary>
+        public int QueuedDestinationCount => _navigator ? _navigator.QueuedDestinationCount : 0;
+        
+        /// <summary>Whether this agent is actively moving.</summary>
+        public bool IsMoving => _navigator && _navigator.IsMoving;
+        
+        /// <summary>Current destination (if any).</summary>
+        public Vector3? CurrentDestination => _navigator?.CurrentDestination;
+        
         /// <summary>Remaining distance to destination.</summary>
-        public float RemainingDistance => _aiPath ? _aiPath.remainingDistance : 0f;
+        public float RemainingDistance => _navigator ? _navigator.RemainingDistance : 0f;
         
         /// <summary>Whether the agent has reached its destination.</summary>
-        public bool ReachedDestination => _aiPath && _aiPath.reachedDestination;
+        public bool ReachedDestination => _navigator && _navigator.ReachedDestination;
+        
+        /// <summary>Reference to Navigator component.</summary>
+        public AgentNavigator Navigator => _navigator;
+        
+        /// <summary>Reference to AIPath component.</summary>
+        public AIPath AIPath => _navigator?.AIPath;
+        
+        /// <summary>Reference to Seeker component.</summary>
+        public Seeker Seeker => _navigator?.Seeker;
         
         #endregion
         
         #region Serialized Fields
         
-        [Header("Destination Queue")]
-        [Tooltip("Maximum number of destinations that can be queued. 0 = unlimited.")]
-        [SerializeField] private int maxQueueSize = 10;
-        
-        [Tooltip("When queue is full, should new destinations replace the last one?")]
-        [SerializeField] private bool replaceLastWhenFull = true;
-        
-        [Header("Path Failure Handling")]
-        [Tooltip("Distance threshold to detect unreachable destination (meters). If agent reaches end of path but is further than this from target, destination is unreachable.")]
-        [SerializeField] private float unreachableDistanceThreshold = 0.5f;
-        
         [Header("Debug")]
         [SerializeField] private bool showDebugInfo;
         [SerializeField] private bool logStatusChanges;
-        [SerializeField] private bool logQueueChanges;
         
         #endregion
         
@@ -152,29 +142,18 @@ namespace Agents
         internal Renderer AgentRenderer;
         internal Material AgentMaterial;
         
-        // A* Pathfinding components
-        private AIPath _aiPath;
-        private Seeker _seeker;
+        private AgentNavigator _navigator;
         
-        // State
         private AgentStatus _status = AgentStatus.Idle;
         private AgentLODLevel _lodLevel = AgentLODLevel.High;
         private bool _isSelected;
-        private bool _hasDestination;
         private bool _visualsEnabled = true;
         private Vector3 _baseScale;
         private bool _initialized;
         
-        // Path failure tracking
-        private Vector3 _currentTargetDestination;
-        private bool _unreachableDetected;  // Prevents re-checking after giving up
-        
         // Frame skip tracking for staggered updates
         private int _frameOffset;
         private static int _globalFrameOffset;
-        
-        // Destination queue
-        private readonly Queue<Vector3> _destinationQueue = new();
         
         #endregion
         
@@ -190,23 +169,19 @@ namespace Agents
             Manager = manager;
             AgentId = agentId;
             
-            // Get A* components
-            _aiPath = GetComponent<AIPath>();
-            _seeker = GetComponent<Seeker>();
-            
-            if (!_aiPath || !_seeker)
+            // Get and initialize navigator
+            _navigator = GetComponent<AgentNavigator>();
+            if (!_navigator)
             {
-                Debug.LogError($"[NPCAgent] Agent {agentId} missing AIPath or Seeker component!");
+                Debug.LogError($"[NPCAgent] Agent {agentId} missing AgentNavigator component!");
                 return;
             }
+            _navigator.Initialize();
             
-            // Configure AIPath - start in idle state
-            _aiPath.simulateMovement = true;
-            _aiPath.canSearch = false;  // Don't auto-search until destination is set
-            _aiPath.enableRotation = true;
-            _aiPath.isStopped = true;   // Start stopped
-            _aiPath.destination = transform.position;  // No destination initially
+            // Subscribe to navigator events
+            SubscribeToNavigatorEvents();
             
+            // Get renderer
             AgentRenderer = GetComponent<Renderer>();
             if (!AgentRenderer)
             {
@@ -219,8 +194,6 @@ namespace Agents
             }
             
             _baseScale = transform.localScale;
-            
-            // Stagger frame updates to distribute load across frames
             _frameOffset = _globalFrameOffset++ % 10;
             
             _initialized = true;
@@ -232,18 +205,103 @@ namespace Agents
             }
         }
         
+        private void SubscribeToNavigatorEvents()
+        {
+            _navigator.StateChanged += OnNavigatorStateChanged;
+            _navigator.DestinationReached += OnNavigatorDestinationReached;
+            _navigator.AllDestinationsCompleted += OnNavigatorAllDestinationsCompleted;
+            _navigator.DestinationStarted += OnNavigatorDestinationStarted;
+            _navigator.QueueChanged += OnNavigatorQueueChanged;
+            _navigator.Stopped += OnNavigatorStopped;
+            _navigator.DestinationUnreachable += OnNavigatorDestinationUnreachable;
+        }
+        
+        private void UnsubscribeFromNavigatorEvents()
+        {
+            if (!_navigator) return;
+            
+            _navigator.StateChanged -= OnNavigatorStateChanged;
+            _navigator.DestinationReached -= OnNavigatorDestinationReached;
+            _navigator.AllDestinationsCompleted -= OnNavigatorAllDestinationsCompleted;
+            _navigator.DestinationStarted -= OnNavigatorDestinationStarted;
+            _navigator.QueueChanged -= OnNavigatorQueueChanged;
+            _navigator.Stopped -= OnNavigatorStopped;
+            _navigator.DestinationUnreachable -= OnNavigatorDestinationUnreachable;
+        }
+        
+        #endregion
+        
+        #region Navigator Event Handlers
+        
+        private void OnNavigatorStateChanged(NavigationState navState)
+        {
+            // Map NavigationState to AgentStatus
+            AgentStatus newStatus = navState switch
+            {
+                NavigationState.Idle => AgentStatus.Idle,
+                NavigationState.Moving => AgentStatus.Moving,
+                NavigationState.Calculating => AgentStatus.Calculating,
+                NavigationState.Error => AgentStatus.Error,
+                _ => AgentStatus.Idle
+            };
+            
+            if (newStatus != _status)
+            {
+                AgentStatus oldStatus = _status;
+                _status = newStatus;
+                UpdateVisuals();
+                StatusChanged?.Invoke(this, _status);
+                
+                if (logStatusChanges)
+                {
+                    Debug.Log($"[NPCAgent] Agent {AgentId} status: {oldStatus} -> {newStatus}");
+                }
+            }
+        }
+        
+        private void OnNavigatorDestinationReached()
+        {
+            DestinationReached?.Invoke(this);
+        }
+        
+        private void OnNavigatorAllDestinationsCompleted()
+        {
+            AllDestinationsCompleted?.Invoke(this);
+        }
+        
+        private void OnNavigatorDestinationStarted(Vector3 destination)
+        {
+            DestinationStarted?.Invoke(this, destination);
+        }
+        
+        private void OnNavigatorQueueChanged(int queueCount)
+        {
+            QueueChanged?.Invoke(this, queueCount);
+        }
+        
+        private void OnNavigatorStopped()
+        {
+            MovementStopped?.Invoke(this);
+        }
+        
+        private void OnNavigatorDestinationUnreachable(Vector3 target)
+        {
+            DestinationUnreachable?.Invoke(this, target);
+        }
+        
         #endregion
         
         #region Unity Lifecycle
         
         private void Awake()
         {
-            _aiPath = GetComponent<AIPath>();
-            _seeker = GetComponent<Seeker>();
+            _navigator = GetComponent<AgentNavigator>();
         }
         
         private void OnDestroy()
         {
+            UnsubscribeFromNavigatorEvents();
+            
             if (Manager)
             {
                 Manager.UnregisterAgent(this);
@@ -265,9 +323,7 @@ namespace Agents
         internal void UpdateFull()
         {
             if (!_initialized) return;
-            
-            UpdateStatus();
-            CheckDestinationReached();
+            _navigator?.UpdateNavigation();
         }
         
         /// <summary>
@@ -276,9 +332,7 @@ namespace Agents
         internal void UpdateReduced()
         {
             if (!_initialized) return;
-            
-            UpdateStatus();
-            CheckDestinationReached();
+            _navigator?.UpdateNavigation();
         }
         
         /// <summary>
@@ -287,8 +341,7 @@ namespace Agents
         internal void UpdateMinimal()
         {
             if (!_initialized) return;
-            
-            CheckDestinationReached();
+            _navigator?.UpdateNavigation();
         }
         
         /// <summary>
@@ -306,182 +359,6 @@ namespace Agents
             };
         }
         
-        private void UpdateStatus()
-        {
-            AgentStatus newStatus = DetermineStatus();
-            
-            if (newStatus != _status)
-            {
-                AgentStatus oldStatus = _status;
-                _status = newStatus;
-                UpdateVisuals();
-                StatusChanged?.Invoke(this, _status);
-                
-                if (logStatusChanges)
-                {
-                    Debug.Log($"[NPCAgent] Agent {AgentId} status: {oldStatus} -> {newStatus}");
-                }
-            }
-        }
-        
-        /// <summary>
-        /// Determine agent status based on AIPath state.
-        /// Uses AIPath's built-in properties as per documentation:
-        /// - hasPath: true if agent has a valid path
-        /// - pathPending: true if path is being calculated
-        /// - reachedEndOfPath: true if agent reached end of calculated path
-        /// - reachedDestination: true if agent actually reached the destination
-        /// </summary>
-        private AgentStatus DetermineStatus()
-        {
-            if (!_aiPath) return AgentStatus.Error;
-            
-            // Check for unreachable/error state (set by CheckDestinationReached)
-            if (_unreachableDetected)
-            {
-                return AgentStatus.Error;
-            }
-            
-            // No destination = Idle
-            if (!_hasDestination)
-            {
-                return AgentStatus.Idle;
-            }
-            
-            // Path is being calculated
-            if (_aiPath.pathPending)
-            {
-                return AgentStatus.Calculating;
-            }
-            
-            // Has valid path and actively moving (not yet at end of path)
-            if (_aiPath.hasPath && !_aiPath.reachedEndOfPath)
-            {
-                return AgentStatus.Moving;
-            }
-            
-            // Reached the actual destination = success, will transition to Idle
-            if (_aiPath.reachedDestination)
-            {
-                return AgentStatus.Idle;
-            }
-            
-            // Reached end of path but NOT destination = unreachable (will be caught by CheckDestinationReached)
-            // Show as Calculating until the check runs and sets _unreachableDetected
-            if (_aiPath.reachedEndOfPath && !_aiPath.reachedDestination)
-            {
-                return AgentStatus.Calculating;  // Briefly, before Error is detected
-            }
-            
-            // Fallback: waiting for path
-            return AgentStatus.Calculating;
-        }
-        
-        private void CheckDestinationReached()
-        {
-            if (!_aiPath || !_hasDestination) return;
-            
-            // Already detected as unreachable - don't check again
-            if (_unreachableDetected) return;
-            
-            // SUCCESS: Agent reached the actual destination
-            // reachedDestination = true means both:
-            //   1. reachedEndOfPath is true (reached end of calculated path)
-            //   2. The path endpoint is close to the destination
-            if (_aiPath.reachedDestination)
-            {
-                if (logStatusChanges)
-                {
-                    Debug.Log($"[NPCAgent] Agent {AgentId} reached destination");
-                }
-                CompleteCurrentDestination();
-                return;
-            }
-            
-            // UNREACHABLE CHECK: Using AIPath's built-in properties
-            // reachedEndOfPath = true means agent reached the END of the calculated path
-            // reachedDestination = false means that endpoint is NOT the actual destination
-            // Combined: Agent is at the closest reachable point, but destination is elsewhere
-            if (_aiPath.reachedEndOfPath && !_aiPath.reachedDestination)
-            {
-                // Double-check: Compare endOfPath with destination
-                // If they're far apart, the destination is definitely unreachable
-                float endToDestDist = Vector3.Distance(_aiPath.endOfPath, _aiPath.destination);
-                
-                if (endToDestDist > unreachableDistanceThreshold)
-                {
-                    if (logStatusChanges)
-                    {
-                        Debug.LogWarning($"[NPCAgent] Agent {AgentId} UNREACHABLE - reached end of path but not destination. " +
-                            $"EndOfPath: {_aiPath.endOfPath}, Destination: {_aiPath.destination}, " +
-                            $"Gap: {endToDestDist:F2}m");
-                    }
-                    
-                    _unreachableDetected = true;
-                    GiveUpOnDestination();
-                    return;
-                }
-            }
-        }
-        
-        /// <summary>
-        /// Called when agent successfully reaches destination.
-        /// </summary>
-        private void CompleteCurrentDestination()
-        {
-            if (logStatusChanges)
-            {
-                Debug.Log($"[NPCAgent] Agent {AgentId} completed destination, queue remaining: {_destinationQueue.Count}");
-            }
-            
-            _hasDestination = false;
-            _unreachableDetected = false;
-            
-            // CRITICAL: Stop AIPath auto-recalculation when destination is reached
-            // Otherwise it will keep recalculating paths to the same spot!
-            if (_aiPath)
-            {
-                _aiPath.canSearch = false;  // Stop auto path recalculation
-                _aiPath.SetPath(null);      // Clear current path
-            }
-            
-            DestinationReached?.Invoke(this);
-            
-            // Check if there are more destinations in queue
-            if (_destinationQueue.Count > 0)
-            {
-                ProcessNextQueuedDestination();
-            }
-            else
-            {
-                // No more destinations - fully idle
-                AllDestinationsCompleted?.Invoke(this);
-            }
-        }
-        
-        /// <summary>
-        /// Process the next destination from the queue.
-        /// Called after current destination is completed.
-        /// </summary>
-        private void ProcessNextQueuedDestination()
-        {
-            if (_destinationQueue.Count == 0)
-            {
-                Debug.LogWarning($"[NPCAgent] ProcessNextQueuedDestination called with empty queue!");
-                return;
-            }
-            
-            Vector3 nextDest = _destinationQueue.Dequeue();
-            
-            if (logQueueChanges)
-            {
-                Debug.Log($"[NPCAgent] Agent {AgentId} starting next queued destination: {nextDest}. Remaining in queue: {_destinationQueue.Count}");
-            }
-            
-            QueueChanged?.Invoke(this, _destinationQueue.Count);
-            SetDestinationInternal(nextDest);
-        }
-        
         #endregion
         
         #region LOD & Culling
@@ -495,10 +372,10 @@ namespace Agents
             
             _lodLevel = level;
             
-            // Adjust AIPath update frequency based on LOD
-            if (_aiPath)
+            // Adjust navigator repath rate based on LOD
+            if (_navigator)
             {
-                _aiPath.repathRate = level switch
+                float repathRate = level switch
                 {
                     AgentLODLevel.High => 0.5f,
                     AgentLODLevel.Medium => 1f,
@@ -506,6 +383,7 @@ namespace Agents
                     AgentLODLevel.Culled => 5f,
                     _ => 0.5f
                 };
+                _navigator.SetRepathRate(repathRate);
             }
             
             bool shouldShowVisuals = level != AgentLODLevel.Culled;
@@ -518,7 +396,7 @@ namespace Agents
         }
         
         /// <summary>
-        /// Enable/disable visual components (renderer).
+        /// Enable/disable visual components.
         /// </summary>
         internal void SetVisualsEnabled(bool enabled)
         {
@@ -544,19 +422,17 @@ namespace Agents
             
             if (AgentMaterial)
             {
-                // Use GetColorForAgent which handles both status color and selection tint
                 Color color = Manager.GetColorForAgent(this);
                 AgentMaterial.color = color;
             }
             
-            // Scale up when selected for visual feedback
             transform.localScale = _isSelected 
                 ? _baseScale * Manager.SelectedScaleMultiplier 
                 : _baseScale;
         }
         
         /// <summary>
-        /// Force visual update (e.g., after LOD change).
+        /// Force visual update.
         /// </summary>
         internal void ForceVisualUpdate()
         {
@@ -566,177 +442,14 @@ namespace Agents
         
         #endregion
         
-        #region Public API - Movement & Queue
+        #region Public API - Movement (Delegated to Navigator)
         
         /// <summary>
         /// Sets the agent's movement destination.
         /// </summary>
-        /// <param name="destination">Target position.</param>
-        /// <param name="immediate">If true, cancels current movement and clears queue. If false, queues the destination.</param>
-        /// <returns>True if destination was accepted (set or queued).</returns>
         public bool SetDestination(Vector3 destination, bool immediate = false)
         {
-            if (!_aiPath)
-            {
-                Debug.LogWarning($"[NPCAgent] Agent {AgentId} has no AIPath.");
-                return false;
-            }
-            
-            if (immediate)
-            {
-                return HandleImmediateDestination(destination);
-            }
-            else
-            {
-                return HandleQueuedDestination(destination);
-            }
-        }
-        
-        private bool HandleImmediateDestination(Vector3 destination)
-        {
-            // Clear the queue
-            if (_destinationQueue.Count > 0)
-            {
-                _destinationQueue.Clear();
-                
-                if (logQueueChanges)
-                {
-                    Debug.Log($"[NPCAgent] Agent {AgentId} queue cleared for immediate destination");
-                }
-                
-                QueueChanged?.Invoke(this, 0);
-            }
-            
-            return SetDestinationInternal(destination);
-        }
-        
-        private bool HandleQueuedDestination(Vector3 destination)
-        {
-            // If no current destination, set it directly
-            if (!_hasDestination)
-            {
-                return SetDestinationInternal(destination);
-            }
-            
-            // Check queue capacity
-            if (maxQueueSize > 0 && _destinationQueue.Count >= maxQueueSize)
-            {
-                if (replaceLastWhenFull)
-                {
-                    // Remove last and add new
-                    var temp = new Vector3[_destinationQueue.Count - 1];
-                    for (int i = 0; i < temp.Length; i++)
-                    {
-                        temp[i] = _destinationQueue.Dequeue();
-                    }
-                    _destinationQueue.Clear();
-                    foreach (var d in temp)
-                    {
-                        _destinationQueue.Enqueue(d);
-                    }
-                    
-                    if (logQueueChanges)
-                    {
-                        Debug.Log($"[NPCAgent] Agent {AgentId} queue full, replacing last destination");
-                    }
-                }
-                else
-                {
-                    Debug.LogWarning($"[NPCAgent] Agent {AgentId} destination queue is full ({maxQueueSize})");
-                    return false;
-                }
-            }
-            
-            _destinationQueue.Enqueue(destination);
-            
-            if (logQueueChanges)
-            {
-                Debug.Log($"[NPCAgent] Agent {AgentId} queued destination. Queue size: {_destinationQueue.Count}");
-            }
-            
-            QueueChanged?.Invoke(this, _destinationQueue.Count);
-            return true;
-        }
-        
-        private bool SetDestinationInternal(Vector3 destination)
-        {
-            if (!_aiPath) return false;
-            
-            // Track target for failure detection
-            _currentTargetDestination = destination;
-            
-            // Reset failure tracking for new destination
-            _unreachableDetected = false;
-            
-            // Re-enable AIPath (might have been disabled by GiveUpOnDestination)
-            _aiPath.canSearch = true;
-            _aiPath.isStopped = false;
-            
-            // Set destination and start pathfinding
-            _aiPath.destination = destination;
-            _aiPath.SearchPath();
-            
-            _hasDestination = true;
-            
-            if (logStatusChanges)
-            {
-                Debug.Log($"[NPCAgent] Agent {AgentId} moving to {destination}");
-            }
-            
-            DestinationStarted?.Invoke(this, destination);
-            return true;
-        }
-        
-        /// <summary>
-        /// Give up on current destination - COMPLETELY stop all pathfinding.
-        /// Does NOT try queued destinations (they may also be unreachable).
-        /// </summary>
-        private void GiveUpOnDestination()
-        {
-            Vector3 unreachableTarget = _currentTargetDestination;
-            
-            if (logStatusChanges)
-            {
-                Debug.LogWarning($"[NPCAgent] Agent {AgentId} GIVING UP on unreachable destination: {unreachableTarget}");
-            }
-            
-            // Clear ALL state
-            _hasDestination = false;
-            
-            // Clear the entire queue - don't try other destinations automatically
-            // (user should manually give new commands after unreachable)
-            if (_destinationQueue.Count > 0)
-            {
-                int clearedCount = _destinationQueue.Count;
-                _destinationQueue.Clear();
-                
-                if (logQueueChanges)
-                {
-                    Debug.Log($"[NPCAgent] Agent {AgentId} cleared {clearedCount} queued destinations due to unreachable");
-                }
-                
-                QueueChanged?.Invoke(this, 0);
-            }
-            
-            // COMPLETELY stop AIPath - use multiple methods to ensure it stops
-            if (_aiPath)
-            {
-                // 1. Stop auto path recalculation
-                _aiPath.canSearch = false;
-                
-                // 2. Stop movement simulation
-                _aiPath.isStopped = true;
-                
-                // 3. Clear the current path
-                _aiPath.SetPath(null);
-                
-                // 4. Set destination to current position (so if anything re-enables, it won't move)
-                _aiPath.destination = transform.position;
-            }
-            
-            // Fire events
-            DestinationUnreachable?.Invoke(this, unreachableTarget);
-            MovementStopped?.Invoke(this);
+            return _navigator && _navigator.SetDestination(destination, immediate);
         }
         
         /// <summary>
@@ -744,31 +457,7 @@ namespace Agents
         /// </summary>
         public void Stop()
         {
-            // Clear queue
-            if (_destinationQueue.Count > 0)
-            {
-                _destinationQueue.Clear();
-                QueueChanged?.Invoke(this, 0);
-            }
-            
-            // Stop AIPath completely
-            if (_aiPath)
-            {
-                _aiPath.canSearch = false;  // Prevent auto-recalculation
-                _aiPath.isStopped = true;   // Stop movement
-                _aiPath.SetPath(null);      // Clear path
-                _aiPath.destination = transform.position;
-            }
-            
-            _hasDestination = false;
-            _unreachableDetected = false;
-            
-            if (logStatusChanges)
-            {
-                Debug.Log($"[NPCAgent] Agent {AgentId} stopped");
-            }
-            
-            MovementStopped?.Invoke(this);
+            _navigator?.Stop();
         }
         
         /// <summary>
@@ -776,17 +465,7 @@ namespace Agents
         /// </summary>
         public void ClearQueue()
         {
-            if (_destinationQueue.Count > 0)
-            {
-                _destinationQueue.Clear();
-                
-                if (logQueueChanges)
-                {
-                    Debug.Log($"[NPCAgent] Agent {AgentId} queue cleared");
-                }
-                
-                QueueChanged?.Invoke(this, 0);
-            }
+            _navigator?.ClearQueue();
         }
         
         /// <summary>
@@ -794,41 +473,36 @@ namespace Agents
         /// </summary>
         public Vector3[] GetQueuedDestinations()
         {
-            return _destinationQueue.ToArray();
+            return _navigator?.GetQueuedDestinations() ?? Array.Empty<Vector3>();
         }
         
         /// <summary>
-        /// Peeks at the next queued destination without removing it.
+        /// Peeks at the next queued destination.
         /// </summary>
         public Vector3? PeekNextDestination()
         {
-            return _destinationQueue.Count > 0 ? _destinationQueue.Peek() : null;
+            return _navigator?.PeekNextDestination();
         }
         
         /// <summary>
-        /// Teleport agent to position. Clears queue.
+        /// Teleport agent to position.
         /// </summary>
-        public bool Teleport(Vector3 worldPosition)
+        public void Teleport(Vector3 worldPosition)
         {
-            // Stop everything
-            Stop();
-            
-            // Teleport using AIPath
-            if (_aiPath)
-            {
-                _aiPath.Teleport(worldPosition);
-            }
-            else
-            {
-                transform.position = worldPosition;
-            }
+            _navigator?.Teleport(worldPosition);
             
             if (logStatusChanges)
             {
                 Debug.Log($"[NPCAgent] Agent {AgentId} teleported to {worldPosition}");
             }
-            
-            return true;
+        }
+        
+        /// <summary>
+        /// Clear the failed destinations list.
+        /// </summary>
+        public void ClearFailedDestinations()
+        {
+            _navigator?.ClearFailedDestinations();
         }
         
         #endregion
@@ -836,7 +510,7 @@ namespace Agents
         #region Public API - Selection
         
         /// <summary>
-        /// Select this agent. Selection is visual-only and doesn't affect status.
+        /// Select this agent.
         /// </summary>
         public void Select()
         {
@@ -883,7 +557,7 @@ namespace Agents
         #region Public API - Status
         
         /// <summary>
-        /// Manually set status (use sparingly - prefer letting the system determine status).
+        /// Manually set status (use sparingly).
         /// </summary>
         public void SetStatus(AgentStatus newStatus)
         {
@@ -899,23 +573,19 @@ namespace Agents
         #region Public API - Configuration
         
         /// <summary>
-        /// Configure AIPath movement settings.
+        /// Configure movement settings.
         /// </summary>
         public void ConfigureMovement(float speed, float rotationSpeed, float acceleration)
         {
-            if (!_aiPath) return;
-            
-            _aiPath.maxSpeed = speed;
-            _aiPath.rotationSpeed = rotationSpeed;
-            _aiPath.maxAcceleration = acceleration;
+            _navigator?.ConfigureMovement(speed, rotationSpeed, acceleration);
         }
         
         /// <summary>
-        /// Sets the maximum queue size. 0 = unlimited.
+        /// Sets the maximum queue size.
         /// </summary>
         public void SetMaxQueueSize(int size)
         {
-            maxQueueSize = Mathf.Max(0, size);
+            _navigator?.SetMaxQueueSize(size);
         }
         
         #endregion
@@ -929,42 +599,6 @@ namespace Agents
             // Draw current position marker
             Gizmos.color = Color.cyan;
             Gizmos.DrawWireSphere(transform.position, 0.2f);
-            
-            // Draw path from Seeker
-            if (_seeker)
-            {
-                var path = _seeker.GetCurrentPath();
-                if (path != null && path.vectorPath != null && path.vectorPath.Count > 0)
-                {
-                    Gizmos.color = Color.yellow;
-                    for (int i = 0; i < path.vectorPath.Count - 1; i++)
-                    {
-                        Gizmos.DrawLine(path.vectorPath[i], path.vectorPath[i + 1]);
-                        Gizmos.DrawWireSphere(path.vectorPath[i], 0.1f);
-                    }
-                }
-            }
-            
-            // Draw current destination
-            if (_hasDestination && _aiPath)
-            {
-                Gizmos.color = Color.green;
-                Gizmos.DrawWireSphere(_aiPath.destination, 0.3f);
-                Gizmos.DrawLine(transform.position, _aiPath.destination);
-            }
-            
-            // Draw queued destinations
-            if (_destinationQueue.Count > 0)
-            {
-                Gizmos.color = Color.blue;
-                Vector3 prev = _hasDestination && _aiPath ? _aiPath.destination : transform.position;
-                foreach (var dest in _destinationQueue)
-                {
-                    Gizmos.DrawWireSphere(dest, 0.2f);
-                    Gizmos.DrawLine(prev, dest);
-                    prev = dest;
-                }
-            }
         }
         
         #endregion

@@ -584,6 +584,12 @@ namespace Agents
                 aiPath = agentGo.AddComponent<AIPath>();
             }
             
+            // Ensure AgentNavigator exists (required by NPCAgent)
+            if (!agentGo.GetComponent<AgentNavigator>())
+            {
+                agentGo.AddComponent<AgentNavigator>();
+            }
+            
             // Add RVOController for local avoidance if enabled
             if (enableLocalAvoidance)
             {
