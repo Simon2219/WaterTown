@@ -48,7 +48,6 @@ namespace Grid
         private Texture2D _colorMap;
         private Vector2Int _cachedSize;
         private Vector3 _cachedOrigin;
-        private int _cachedLevels;
 
         private int _lastGridVersion = -1;
         private int _lastLevel = -1;
@@ -89,7 +88,7 @@ namespace Grid
         {
             EnsureComponents();
             EnsureMaterialAssetOrRuntime();
-            RebuildAll(force:true);
+            RebuildAll();
             SyncRendererMaterial();        // << force renderer slot to our asset
             ApplyParams(true);
             _lastGridVersion = -1;
@@ -104,10 +103,9 @@ namespace Grid
             {
                 needsRebuild |= _cachedSize.x != grid.sizeX || _cachedSize.y != grid.sizeY;
                 needsRebuild |= _cachedOrigin != grid.worldOrigin;
-                needsRebuild |= _cachedLevels != grid.levels;
             }
 
-            if (needsRebuild) RebuildAll(true);
+            if (needsRebuild) RebuildAll();
 
             if (grid && autoSyncColorsFromGrid && (_lastGridVersion != grid.Version || _lastLevel != level))
             {
@@ -122,7 +120,7 @@ namespace Grid
         private void OnValidate()
         {
             EnsureComponents();
-            RebuildAll(false);
+            RebuildAll();
             SyncRendererMaterial();        // keep renderer slot synced in Edit Mode
             ApplyParams(false);
 #if UNITY_EDITOR
@@ -134,7 +132,7 @@ namespace Grid
         {
             EnsureComponents();
             EnsureMaterialAssetOrRuntime();
-            RebuildAll(true);
+            RebuildAll();
             SyncRendererMaterial();
             ApplyParams(true);
             _lastGridVersion = -1;
@@ -203,9 +201,8 @@ namespace Grid
 
                     Color accum = Color.clear;
                     int count = 0;
-                    for (int i = 0; i < fcs.Length; i++)
+                    foreach (var fc in fcs)
                     {
-                        var fc = fcs[i];
                         if (fc.flag == WorldGrid.CellFlag.Empty) continue;
                         if ((flags & fc.flag) != 0) { accum += fc.color; count++; }
                     }
@@ -214,7 +211,7 @@ namespace Grid
             }
 
             var arr = new Color32[w * h];
-            for (int i = 0; i < arr.Length; i++) arr[i] = (Color32)colors[i];
+            for (int i = 0; i < arr.Length; i++) arr[i] = colors[i];
             _colorMap.SetPixels32(arr);
             _colorMap.Apply(false, false);
         }
@@ -247,24 +244,25 @@ namespace Grid
 #endif
                 return;
             }
-            var runtimeMat = new Material(shader) { name = "GridVisualizer_RuntimeMat" };
-            runtimeMat.hideFlags = HideFlags.HideAndDontSave;
+            var runtimeMat = new Material(shader)
+            {
+                name = "GridVisualizer_RuntimeMat",
+                hideFlags = HideFlags.HideAndDontSave
+            };
             material = runtimeMat;
         }
 
-        private void RebuildAll(bool force)
+        private void RebuildAll()
         {
             if (grid)
             {
                 _cachedSize     = new Vector2Int(Mathf.Max(1, grid.sizeX), Mathf.Max(1, grid.sizeY));
                 _cachedOrigin   = grid.worldOrigin;
-                _cachedLevels   = Mathf.Max(1, grid.levels);
             }
             else
             {
                 _cachedSize     = new Vector2Int(1, 1);
                 _cachedOrigin   = transform.position;
-                _cachedLevels   = 1;
             }
 
             BuildQuadMeshLocal(_cachedSize.x * WorldGrid.CellSize, _cachedSize.y * WorldGrid.CellSize);

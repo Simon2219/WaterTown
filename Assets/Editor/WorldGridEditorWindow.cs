@@ -1,9 +1,12 @@
 #if UNITY_EDITOR
+using System.IO;
+using Grid;
 using UnityEditor;
 using UnityEngine;
-using Grid;
-using System.IO;
 
+namespace Editor
+{
+    
 public class WorldGridEditorWindow : EditorWindow
 {
     private const string MenuPath = "Tools/World Grid Editor";
@@ -20,10 +23,7 @@ public class WorldGridEditorWindow : EditorWindow
 
     private Vector2 _scroll;
 
-    private const int MaxCells = 2048;
-    private const int MaxLevels = 64;
-    private const int MaxCellSize = 20;
-    private const int MaxLevelStep = 200;
+    private const int MaxCells = 250000;
 
     [MenuItem(MenuPath)]
     public static void ShowWindow()
@@ -89,25 +89,20 @@ public class WorldGridEditorWindow : EditorWindow
             EditorGUILayout.LabelField("Dimensions (cells)", EditorStyles.boldLabel);
             _sceneGrid.sizeX = EditorGUILayout.IntSlider(new GUIContent("Size X"), _sceneGrid.sizeX, 1, MaxCells);
             _sceneGrid.sizeY = EditorGUILayout.IntSlider(new GUIContent("Size Y"), _sceneGrid.sizeY, 1, MaxCells);
-
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                _sceneGrid.levels = EditorGUILayout.IntSlider(new GUIContent("Levels"), _sceneGrid.levels, 1, MaxLevels);
-                _sceneGrid.levels = EditorGUILayout.IntField(_sceneGrid.levels, GUILayout.Width(70));
-            }
+        
 
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Metrics (meters)", EditorStyles.boldLabel);
 
             EditorGUILayout.Space();
-            
+        
 
             if (GUILayout.Button(new GUIContent("Apply Settings"), GUILayout.Height(24)))
             {
                 Undo.RecordObject(_sceneGrid, "Apply Grid Settings");
                 _sceneGrid.EditorApplySettings();
                 EditorUtility.SetDirty(_sceneGrid);
-                
+            
                 if (_visualizer != null && _visualizer.grid == _sceneGrid)
                 {
                     _visualizer.RebuildNow();
@@ -115,7 +110,7 @@ public class WorldGridEditorWindow : EditorWindow
                     _visualizer.SyncRendererMaterial();
                     EditorUtility.SetDirty(_visualizer);
                 }
-                
+            
                 SceneView.RepaintAll();
                 EditorApplication.QueuePlayerLoopUpdate();
             }
@@ -215,8 +210,8 @@ public class WorldGridEditorWindow : EditorWindow
                 {
                     EditorGUI.BeginChangeCheck();
                     _visualizer.showGrid = EditorGUILayout.Toggle("Show Grid", _visualizer.showGrid);
-                    int maxLevel = _sceneGrid ? Mathf.Max(0, _sceneGrid.levels - 1) : 0;
-                    _visualizer.level = Mathf.Clamp(EditorGUILayout.IntSlider("Level", _visualizer.level, 0, maxLevel), 0, 999);
+
+
                     _visualizer.lineThickness = EditorGUILayout.Slider(new GUIContent("Line Thickness (m)"), _visualizer.lineThickness, 0.001f, 0.5f);
                     _visualizer.lineColor = EditorGUILayout.ColorField("Line Color", _visualizer.lineColor);
                     _visualizer.neighborFade = EditorGUILayout.Slider(new GUIContent("Neighbor Fade"), _visualizer.neighborFade, 0f, 1f);
@@ -380,7 +375,7 @@ public class WorldGridEditorWindow : EditorWindow
 
     private static Material CreateAndAssignGridMaterial(GridVisualizer vis)
     {
-#if UNITY_EDITOR
+    #if UNITY_EDITOR
         if (!vis) return null;
 
         var shader = Shader.Find("WaterCity/Grid/URPGrid");
@@ -397,6 +392,7 @@ public class WorldGridEditorWindow : EditorWindow
 
         var path = AssetDatabase.GenerateUniqueAssetPath(Path.Combine(folder, "GridVisualizer_Mat.mat"));
         var mat = new Material(shader) { name = System.IO.Path.GetFileNameWithoutExtension(path) };
+        
         AssetDatabase.CreateAsset(mat, path);
         AssetDatabase.SaveAssets();
         EditorGUIUtility.PingObject(mat);
@@ -408,9 +404,8 @@ public class WorldGridEditorWindow : EditorWindow
         SceneView.RepaintAll();
         EditorApplication.QueuePlayerLoopUpdate();
         return mat;
-#else
-        return null;
-#endif
+    #endif
     }
+}
 }
 #endif
