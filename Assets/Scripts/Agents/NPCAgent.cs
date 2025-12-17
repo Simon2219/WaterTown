@@ -169,12 +169,6 @@ namespace Agents
         private Vector3 _currentTargetDestination;
         private bool _unreachableDetected;  // Prevents re-checking after giving up
         
-        // Stuck detection - track when agent stops moving
-        private Vector3 _lastPosition;
-        private int _stuckFrameCount;
-        private const int StuckFrameThreshold = 10;  // After 10 frames of no movement, check if stuck
-        private const float StuckMovementThreshold = 0.01f;  // Movement less than this = not moving
-        
         // Frame skip tracking for staggered updates
         private int _frameOffset;
         private static int _globalFrameOffset;
@@ -205,11 +199,6 @@ namespace Agents
                 Debug.LogError($"[NPCAgent] Agent {agentId} missing AIPath or Seeker component!");
                 return;
             }
-            
-            // Subscribe to path callback for immediate path result handling
-            // This should be called for all paths requested through the Seeker
-            _seeker.pathCallback += OnPathComplete;
-            Debug.Log($"[NPCAgent] Agent {agentId} registered pathCallback on Seeker");
             
             // Configure AIPath - start in idle state
             _aiPath.simulateMovement = true;
@@ -255,12 +244,6 @@ namespace Agents
         
         private void OnDestroy()
         {
-            // Unsubscribe from path callback
-            if (_seeker)
-            {
-                _seeker.pathCallback -= OnPathComplete;
-            }
-            
             if (Manager)
             {
                 Manager.UnregisterAgent(this);
@@ -343,21 +326,18 @@ namespace Agents
         
         /// <summary>
         /// Determine agent status based on AIPath state.
-        /// Uses AIPath's built-in properties as per documentation.
+        /// Uses AIPath's built-in properties as per documentation:
+        /// - hasPath: true if agent has a valid path
+        /// - pathPending: true if path is being calculated
+        /// - reachedEndOfPath: true if agent reached end of calculated path
+        /// - reachedDestination: true if agent actually reached the destination
         /// </summary>
         private AgentStatus DetermineStatus()
         {
             if (!_aiPath) return AgentStatus.Error;
             
-            // Check for unreachable/error state
+            // Check for unreachable/error state (set by CheckDestinationReached)
             if (_unreachableDetected)
-            {
-                return AgentStatus.Error;
-            }
-            
-            // Check for path errors from Seeker
-            var currentPath = _seeker?.GetCurrentPath();
-            if (currentPath != null && currentPath.error)
             {
                 return AgentStatus.Error;
             }
@@ -374,19 +354,26 @@ namespace Agents
                 return AgentStatus.Calculating;
             }
             
-            // Has path and moving
+            // Has valid path and actively moving (not yet at end of path)
             if (_aiPath.hasPath && !_aiPath.reachedEndOfPath)
             {
                 return AgentStatus.Moving;
             }
             
-            // Reached destination
+            // Reached the actual destination = success, will transition to Idle
             if (_aiPath.reachedDestination)
             {
                 return AgentStatus.Idle;
             }
             
-            // Waiting for something (has destination but no path yet, or path just finished)
+            // Reached end of path but NOT destination = unreachable (will be caught by CheckDestinationReached)
+            // Show as Calculating until the check runs and sets _unreachableDetected
+            if (_aiPath.reachedEndOfPath && !_aiPath.reachedDestination)
+            {
+                return AgentStatus.Calculating;  // Briefly, before Error is detected
+            }
+            
+            // Fallback: waiting for path
             return AgentStatus.Calculating;
         }
         
@@ -398,137 +385,42 @@ namespace Agents
             if (_unreachableDetected) return;
             
             // SUCCESS: Agent reached the actual destination
+            // reachedDestination = true means both:
+            //   1. reachedEndOfPath is true (reached end of calculated path)
+            //   2. The path endpoint is close to the destination
             if (_aiPath.reachedDestination)
             {
                 if (logStatusChanges)
                 {
                     Debug.Log($"[NPCAgent] Agent {AgentId} reached destination");
                 }
-                _stuckFrameCount = 0;
-                _lastPosition = transform.position;
                 CompleteCurrentDestination();
                 return;
             }
             
-            // STUCK DETECTION: Track if agent is not moving
-            // This is the most reliable way to detect unreachable destinations
-            // since it doesn't depend on pathPending timing
-            float movementSinceLastFrame = Vector3.Distance(transform.position, _lastPosition);
-            
-            if (movementSinceLastFrame < StuckMovementThreshold)
+            // UNREACHABLE CHECK: Using AIPath's built-in properties
+            // reachedEndOfPath = true means agent reached the END of the calculated path
+            // reachedDestination = false means that endpoint is NOT the actual destination
+            // Combined: Agent is at the closest reachable point, but destination is elsewhere
+            if (_aiPath.reachedEndOfPath && !_aiPath.reachedDestination)
             {
-                _stuckFrameCount++;
+                // Double-check: Compare endOfPath with destination
+                // If they're far apart, the destination is definitely unreachable
+                float endToDestDist = Vector3.Distance(_aiPath.endOfPath, _aiPath.destination);
                 
-                // After enough stuck frames, check if unreachable
-                if (_stuckFrameCount >= StuckFrameThreshold)
+                if (endToDestDist > unreachableDistanceThreshold)
                 {
-                    float distanceToTarget = Vector3.Distance(transform.position, _currentTargetDestination);
+                    if (logStatusChanges)
+                    {
+                        Debug.LogWarning($"[NPCAgent] Agent {AgentId} UNREACHABLE - reached end of path but not destination. " +
+                            $"EndOfPath: {_aiPath.endOfPath}, Destination: {_aiPath.destination}, " +
+                            $"Gap: {endToDestDist:F2}m");
+                    }
                     
-                    // If we're stuck AND far from target, it's unreachable
-                    if (distanceToTarget > unreachableDistanceThreshold)
-                    {
-                        // Double-check with path state if available
-                        var currentPath = _seeker?.GetCurrentPath();
-                        bool isPartialPath = currentPath != null && currentPath.CompleteState == PathCompleteState.Partial;
-                        bool isPathError = currentPath != null && currentPath.error;
-                        
-                        if (logStatusChanges)
-                        {
-                            Debug.LogWarning($"[NPCAgent] Agent {AgentId} UNREACHABLE (stuck for {_stuckFrameCount} frames). " +
-                                $"Position: {transform.position}, Target: {_currentTargetDestination}, " +
-                                $"Distance: {distanceToTarget:F2}m, PartialPath: {isPartialPath}, PathError: {isPathError}");
-                        }
-                        
-                        _unreachableDetected = true;
-                        _stuckFrameCount = 0;
-                        GiveUpOnDestination();
-                        return;
-                    }
-                    else
-                    {
-                        // We're close to target but not technically "reached"
-                        // This might just be floating point precision or tight spaces
-                        // Let's give it more time
-                        _stuckFrameCount = 0;
-                    }
-                }
-            }
-            else
-            {
-                // Agent is moving - reset stuck counter
-                _stuckFrameCount = 0;
-            }
-            
-            _lastPosition = transform.position;
-            
-            // IMMEDIATE PATH CHECK: If path is clearly partial/error, fail fast
-            // This catches cases where the path calculation already determined it's unreachable
-            var path = _seeker?.GetCurrentPath();
-            if (path != null && !_aiPath.pathPending)
-            {
-                if (path.CompleteState == PathCompleteState.Partial)
-                {
-                    if (logStatusChanges)
-                    {
-                        Debug.LogWarning($"[NPCAgent] Agent {AgentId} UNREACHABLE (PathCompleteState.Partial). " +
-                            $"Target: {_currentTargetDestination}");
-                    }
                     _unreachableDetected = true;
-                    _stuckFrameCount = 0;
                     GiveUpOnDestination();
                     return;
                 }
-                
-                if (path.error)
-                {
-                    if (logStatusChanges)
-                    {
-                        Debug.LogWarning($"[NPCAgent] Agent {AgentId} PATH ERROR: {path.errorLog}");
-                    }
-                    _unreachableDetected = true;
-                    _stuckFrameCount = 0;
-                    GiveUpOnDestination();
-                    return;
-                }
-            }
-        }
-        
-        /// <summary>
-        /// Called when a path calculation completes through the Seeker.
-        /// Note: This may not be called for paths managed internally by AIPath.
-        /// Primary unreachable detection is done in CheckDestinationReached() via polling.
-        /// This callback is a secondary fast-path for immediate error detection.
-        /// </summary>
-        private void OnPathComplete(Path path)
-        {
-            // Only process if we have an active destination and haven't already detected failure
-            if (!_hasDestination || _unreachableDetected) return;
-            
-            // Fast-path: Immediately detect path errors
-            if (path.error)
-            {
-                if (logStatusChanges)
-                {
-                    Debug.LogWarning($"[NPCAgent] Agent {AgentId} PATH ERROR (callback): {path.errorLog}");
-                }
-                _unreachableDetected = true;
-                _stuckFrameCount = 0;
-                GiveUpOnDestination();
-                return;
-            }
-            
-            // Fast-path: Immediately detect partial paths (unreachable destination)
-            if (path.CompleteState == PathCompleteState.Partial)
-            {
-                if (logStatusChanges)
-                {
-                    Debug.LogWarning($"[NPCAgent] Agent {AgentId} UNREACHABLE (callback: Partial). " +
-                        $"Target: {_currentTargetDestination}");
-                }
-                _unreachableDetected = true;
-                _stuckFrameCount = 0;
-                GiveUpOnDestination();
-                return;
             }
         }
         
@@ -773,10 +665,8 @@ namespace Agents
             // Track target for failure detection
             _currentTargetDestination = destination;
             
-            // Reset failure/stuck tracking for new destination
+            // Reset failure tracking for new destination
             _unreachableDetected = false;
-            _stuckFrameCount = 0;
-            _lastPosition = transform.position;
             
             // Re-enable AIPath (might have been disabled by GiveUpOnDestination)
             _aiPath.canSearch = true;
