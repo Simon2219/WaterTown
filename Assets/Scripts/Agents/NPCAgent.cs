@@ -200,6 +200,9 @@ namespace Agents
                 return;
             }
             
+            // Subscribe to path callback for immediate path result handling
+            _seeker.pathCallback += OnPathComplete;
+            
             // Configure AIPath - start in idle state
             _aiPath.simulateMovement = true;
             _aiPath.canSearch = false;  // Don't auto-search until destination is set
@@ -244,6 +247,12 @@ namespace Agents
         
         private void OnDestroy()
         {
+            // Unsubscribe from path callback
+            if (_seeker)
+            {
+                _seeker.pathCallback -= OnPathComplete;
+            }
+            
             if (Manager)
             {
                 Manager.UnregisterAgent(this);
@@ -412,6 +421,68 @@ namespace Agents
                     // Mark as unreachable to prevent re-checking
                     _unreachableDetected = true;
                     GiveUpOnDestination();
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Called immediately when a path calculation completes.
+        /// This is the PRIMARY check for unreachable destinations - fires before AIPath auto-recalculates.
+        /// </summary>
+        private void OnPathComplete(Path path)
+        {
+            // Only process if we have an active destination
+            if (!_hasDestination || _unreachableDetected) return;
+            
+            // Check for path errors
+            if (path.error)
+            {
+                if (logStatusChanges)
+                {
+                    Debug.LogWarning($"[NPCAgent] Agent {AgentId} path ERROR: {path.errorLog}");
+                }
+                _unreachableDetected = true;
+                GiveUpOnDestination();
+                return;
+            }
+            
+            // Check for trivial paths (length 1 = only start node, can't reach destination)
+            // This is the key check for unreachable areas on disconnected navmeshes
+            if (path.vectorPath == null || path.vectorPath.Count <= 1)
+            {
+                // Path has only start node - destination is unreachable
+                // Verify this isn't just a very close destination
+                float distToTarget = Vector3.Distance(transform.position, _currentTargetDestination);
+                
+                if (distToTarget > unreachableDistanceThreshold)
+                {
+                    if (logStatusChanges)
+                    {
+                        Debug.LogWarning($"[NPCAgent] Agent {AgentId} UNREACHABLE (path length {path.vectorPath?.Count ?? 0}). " +
+                            $"Target: {_currentTargetDestination}, Distance: {distToTarget:F2}m");
+                    }
+                    _unreachableDetected = true;
+                    GiveUpOnDestination();
+                    return;
+                }
+            }
+            
+            // Check if path endpoint is far from target (partial path to unreachable area)
+            if (path.vectorPath != null && path.vectorPath.Count > 0)
+            {
+                Vector3 pathEnd = path.vectorPath[path.vectorPath.Count - 1];
+                float endToTargetDist = Vector3.Distance(pathEnd, _currentTargetDestination);
+                
+                if (endToTargetDist > unreachableDistanceThreshold)
+                {
+                    if (logStatusChanges)
+                    {
+                        Debug.LogWarning($"[NPCAgent] Agent {AgentId} UNREACHABLE (partial path). " +
+                            $"PathEnd: {pathEnd}, Target: {_currentTargetDestination}, Gap: {endToTargetDist:F2}m");
+                    }
+                    _unreachableDetected = true;
+                    GiveUpOnDestination();
+                    return;
                 }
             }
         }
