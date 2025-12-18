@@ -194,7 +194,7 @@ namespace Grid
                     var cell = new Vector2Int(x, y);
                     grid.TryGetCell(cell, out var cd);
 
-                    var flags = cd.flags;
+                    var flags = cd.Flags;
                     if (flags == WorldGrid.CellFlag.Empty)
                     {
                         colors[row + x] = defaultCellColor;

@@ -44,13 +44,146 @@ public class WorldGrid : MonoBehaviour
 
     
     
+    /// <summary>
+    /// Cell data container with controlled flag manipulation.
+    /// All flag changes route through methods that enforce exclusivity rules.
+    /// Now a class (reference type) to avoid struct copy issues.
+    /// </summary>
     [Serializable]
-    public struct CellData
+    public class CellData
     {
-        public CellFlag flags;   // bit-mask tags (Empty = none)
+        [SerializeField] private CellFlag flags;
 
+        // --- Read-only accessors ---
+        public CellFlag Flags => flags;
         public bool IsEmpty => flags == CellFlag.Empty;
         public bool HasFlag(CellFlag f) => (flags & f) != 0;
+        public bool HasAllFlags(CellFlag f) => (flags & f) == f;
+
+        // Exclusive states - only one of these should be active at a time
+        // Priority order: Locked > Occupied > OccupyPreview
+        private const CellFlag ExclusiveStateMask =
+            CellFlag.Locked | CellFlag.Occupied | CellFlag.OccupyPreview;
+
+        /// <summary>
+        /// Primary method to modify flags with optional priority enforcement.
+        /// Priority: Locked > Occupied > OccupyPreview > Buildable > Empty
+        /// </summary>
+        /// <param name="toSet">Flags to set (bitwise OR)</param>
+        /// <param name="toClear">Flags to clear before setting</param>
+        /// <param name="enforcePriority">Apply exclusivity and priority rules</param>
+        /// <returns>True if modification succeeded, false if blocked by priority rules</returns>
+        public bool TryModify(CellFlag toSet, CellFlag toClear = CellFlag.Empty, bool enforcePriority = true)
+        {
+            // Fast path: explicit full clear
+            if (toSet == CellFlag.Empty && toClear == CellFlag.Empty)
+            {
+                flags = CellFlag.Empty;
+                return true;
+            }
+
+            if (!enforcePriority)
+            {
+                flags = (flags & ~toClear) | toSet;
+                return true;
+            }
+
+            CellFlag current = flags;
+            CellFlag proposed = (current & ~toClear) | toSet;
+
+            // --- Priority enforcement ---
+
+            // 1. Locked blocks all changes unless explicitly unlocking
+            bool isLocked = (current & CellFlag.Locked) != 0;
+            bool clearingLocked = (toClear & CellFlag.Locked) != 0;
+            bool settingLocked = (toSet & CellFlag.Locked) != 0;
+
+            if (isLocked && !clearingLocked && !settingLocked)
+                return false;
+
+            // 2. Setting Locked clears all other exclusive states and Buildable
+            if (settingLocked)
+            {
+                // Keep non-exclusive, non-buildable flags, set Locked
+                flags = (proposed & ~(ExclusiveStateMask | CellFlag.Buildable)) | CellFlag.Locked;
+                return true;
+            }
+
+            // 3. Preview cannot overwrite Occupied unless Occupied is cleared in same call
+            bool hasOccupied = (current & CellFlag.Occupied) != 0;
+            bool wantsPreview = (toSet & CellFlag.OccupyPreview) != 0;
+            bool clearingOccupied = (toClear & CellFlag.Occupied) != 0;
+
+            if (hasOccupied && wantsPreview && !clearingOccupied)
+                return false;
+
+            // 4. Buildable cannot be added while Occupied/Preview unless they are cleared
+            bool wantsBuildable = (toSet & CellFlag.Buildable) != 0;
+            bool hasOccOrPreview = (current & (CellFlag.Occupied | CellFlag.OccupyPreview)) != 0;
+            bool clearingOccOrPreview = (toClear & (CellFlag.Occupied | CellFlag.OccupyPreview)) != 0;
+
+            if (wantsBuildable && hasOccOrPreview && !clearingOccOrPreview)
+                return false;
+
+            // 5. Normalize: keep only highest priority exclusive state
+            CellFlag exclusiveState = GetHighestPriorityState(proposed);
+            proposed = (proposed & ~ExclusiveStateMask) | exclusiveState;
+
+            // 6. If any exclusive state is set, Buildable must be cleared
+            if ((proposed & ExclusiveStateMask) != 0)
+                proposed &= ~CellFlag.Buildable;
+
+            flags = proposed;
+            return true;
+        }
+
+        /// <summary>
+        /// Sets flags to exactly the provided value (clears all others).
+        /// </summary>
+        public bool SetExact(CellFlag exactFlags, bool enforcePriority = true)
+        {
+            if (!enforcePriority)
+            {
+                flags = exactFlags;
+                return true;
+            }
+
+            // Clear all, then set
+            return TryModify(toSet: exactFlags, toClear: ~CellFlag.Empty, enforcePriority: true);
+        }
+
+        /// <summary>
+        /// Adds flags (bitwise OR) with priority enforcement.
+        /// </summary>
+        public bool AddFlags(CellFlag toAdd, bool enforcePriority = true)
+        {
+            return TryModify(toSet: toAdd, toClear: CellFlag.Empty, enforcePriority: enforcePriority);
+        }
+
+        /// <summary>
+        /// Removes specified flags (bitwise AND NOT). Removal doesn't require priority checks.
+        /// </summary>
+        public void RemoveFlags(CellFlag toRemove)
+        {
+            flags &= ~toRemove;
+        }
+
+        /// <summary>
+        /// Clears all flags (sets to Empty).
+        /// </summary>
+        public void Clear()
+        {
+            flags = CellFlag.Empty;
+        }
+
+        // --- Internal helper ---
+        private static CellFlag GetHighestPriorityState(CellFlag f)
+        {
+            if ((f & CellFlag.Locked) != 0) return CellFlag.Locked;
+            if ((f & CellFlag.Occupied) != 0) return CellFlag.Occupied;
+            if ((f & CellFlag.OccupyPreview) != 0) return CellFlag.OccupyPreview;
+            return CellFlag.Empty;
+        }
     }
 
     
@@ -126,6 +259,7 @@ public class WorldGrid : MonoBehaviour
         if (_cells == null)
         {
             _cells = new CellData[sizeX, sizeY];
+            InitializeCellInstances();
             return;
         }
         
@@ -135,8 +269,22 @@ public class WorldGrid : MonoBehaviour
 
         if (sizeChanged)
         {
-            _cells = new CellData[sizeX, sizeY]; // default = cleared
+            _cells = new CellData[sizeX, sizeY];
+            InitializeCellInstances();
             Version++; 
+        }
+    }
+    
+    /// <summary>
+    /// Initializes all cell instances in the array.
+    /// Required because CellData is a class (reference type).
+    /// </summary>
+    private void InitializeCellInstances()
+    {
+        for (int y = 0; y < sizeY; y++)
+        for (int x = 0; x < sizeX; x++)
+        {
+            _cells[x, y] = new CellData();
         }
     }
     
@@ -439,92 +587,50 @@ public class WorldGrid : MonoBehaviour
     
     
     
-    ///
-    /// Primary method to set cell flags with priority enforcement
+    /// <summary>
+    /// Primary method to set cell flags with priority enforcement.
     /// Priority: Locked > Occupied > OccupyPreview > Buildable > Empty
-    /// Returns false if operation is blocked by higher priority flag
-    ///
+    /// </summary>
+    /// <returns>False if operation is blocked by higher priority flag</returns>
     public bool TrySetCellFlag(Vector2Int cell, CellFlag newFlag, bool enforcePriority = true)
     {
         if (!CellInBounds(cell)) return false;
         
         var cd = _cells[cell.x, cell.y];
         
-        if (enforcePriority)
+        bool success;
+        if (newFlag == CellFlag.Empty)
         {
-            // Locked cells cannot change (highest priority)
-            if (cd.HasFlag(CellFlag.Locked) && newFlag != CellFlag.Locked)
-                return false;
-
-            switch (newFlag)
-            {
-                // Enforce mutual exclusivity based on priority
-                case CellFlag.Locked:
-                    cd.flags = CellFlag.Locked;
-                    break;
-                
-                case CellFlag.Occupied:
-                    cd.flags &= ~(CellFlag.OccupyPreview | CellFlag.Buildable);
-                    cd.flags |= CellFlag.Occupied;
-                    break;
-                
-                // Preview cannot overwrite Occupied
-                case CellFlag.OccupyPreview when cd.HasFlag(CellFlag.Occupied):
-                    return false;
-                
-                case CellFlag.OccupyPreview:
-                    cd.flags &= ~CellFlag.Buildable;
-                    cd.flags |= CellFlag.OccupyPreview;
-                    break;
-                
-                // Buildable cannot overwrite Occupied or Preview
-                case CellFlag.Buildable when cd.HasFlag(CellFlag.Occupied) || cd.HasFlag(CellFlag.OccupyPreview):
-                    return false;
-                
-                case CellFlag.Buildable:
-                    cd.flags |= CellFlag.Buildable;
-                    break;
-                
-                case CellFlag.Empty:
-                    cd.flags = CellFlag.Empty;
-                    break;
-                
-                case CellFlag.ModuleBlocked:
-                    break;
-                
-                default:
-                    throw ErrorHandler.ArgumentOutOfRange(nameof(newFlag), newFlag, null);
-            }
+            cd.Clear();
+            success = true;
         }
         else
         {
-            // Direct flag manipulation without priority enforcement
-            if (newFlag == CellFlag.Empty)
-                cd.flags = CellFlag.Empty;
-            else
-                cd.flags |= newFlag;
+            // Delegate to CellData's methods which handle all priority logic
+            success = cd.AddFlags(newFlag, enforcePriority);
         }
         
-        _cells[cell.x, cell.y] = cd;
-        Version++;
-        CellChanged?.Invoke(cell);
+        if (success)
+        {
+            Version++;
+            CellChanged?.Invoke(cell);
+        }
         
-        return true;
+        return success;
     }
 
 
 
-    /// Remove specific flags from a cell
-    /// Returns false if cell is out of bounds
-    ///
+    /// <summary>
+    /// Remove specific flags from a cell.
+    /// </summary>
+    /// <returns>False if cell is out of bounds</returns>
     public bool TryClearCellFlags(Vector2Int cell, CellFlag flagsToClear)
     {
         if (!CellInBounds(cell)) return false;
         
-        var cd = _cells[cell.x, cell.y];
-        cd.flags &= ~flagsToClear;
+        _cells[cell.x, cell.y].RemoveFlags(flagsToClear);
         
-        _cells[cell.x, cell.y] = cd;
         Version++;
         CellChanged?.Invoke(cell);
         
@@ -535,22 +641,24 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// True if the cell has ALL bits in flags (in-bounds only)
-    /// 
+    /// <summary>
+    /// True if the cell has ALL bits in flags (in-bounds only).
+    /// </summary>
     public bool CellHasAllFlags(Vector2Int cell, CellFlag flags)
     {
         if (!CellInBounds(cell)) return false;
         
-        return (_cells[cell.x, cell.y].flags & flags) == flags;
+        return _cells[cell.x, cell.y].HasAllFlags(flags);
     }
 
-    /// True if the cell has ANY bit in flags (in-bounds only)
-    /// 
+    /// <summary>
+    /// True if the cell has ANY bit in flags (in-bounds only).
+    /// </summary>
     public bool CellHasAnyFlag(Vector2Int cell, CellFlag flags)
     {
         if (!CellInBounds(cell)) return false;
         
-        return (_cells[cell.x, cell.y].flags & flags) != 0;
+        return _cells[cell.x, cell.y].HasFlag(flags);
     }
     
     #endregion
@@ -586,19 +694,18 @@ public class WorldGrid : MonoBehaviour
     
     // ---------- Area operations (flags & queries) ----------
 
-    /// Add (OR) flag to every cell in area
-    /// 
-    public void AddFlagInArea(Vector2Int a, Vector2Int b, CellFlag flag)
+    /// <summary>
+    /// Add (OR) flag to every cell in area.
+    /// Uses priority enforcement by default.
+    /// </summary>
+    public void AddFlagInArea(Vector2Int a, Vector2Int b, CellFlag flag, bool enforcePriority = true)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
         
         for (int y = min.y; y <= max.y; y++)
         for (int x = min.x; x <= max.x; x++)
         {
-            var cd = _cells[x, y];
-            cd.flags |= flag;
-
-            _cells[x, y] = cd;
+            _cells[x, y].AddFlags(flag, enforcePriority);
         }
         
         Version++;
@@ -607,19 +714,18 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// Replace flags in area with exactFlags (overwrites existing flags)
-    /// 
-    public void SetFlagsInAreaExact(Vector2Int a, Vector2Int b, CellFlag exactFlags)
+    /// <summary>
+    /// Replace flags in area with exactFlags (overwrites existing flags).
+    /// Does NOT enforce priority by default for exact replacements.
+    /// </summary>
+    public void SetFlagsInAreaExact(Vector2Int a, Vector2Int b, CellFlag exactFlags, bool enforcePriority = false)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
         
         for (int y = min.y; y <= max.y; y++)
         for (int x = min.x; x <= max.x; x++)
         {
-            var cd = _cells[x, y];
-            cd.flags = exactFlags;
-
-            _cells[x, y] = cd;
+            _cells[x, y].SetExact(exactFlags, enforcePriority);
         }
         
         Version++;
@@ -628,8 +734,9 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// Remove (AND NOT) flag from every cell in area
-    /// 
+    /// <summary>
+    /// Remove (AND NOT) flag from every cell in area.
+    /// </summary>
     public void RemoveFlagInArea(Vector2Int a, Vector2Int b, CellFlag flag)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
@@ -637,10 +744,7 @@ public class WorldGrid : MonoBehaviour
         for (int y = min.y; y <= max.y; y++)
         for (int x = min.x; x <= max.x; x++)
         {
-            var cd = _cells[x, y];
-            cd.flags &= ~flag;
-            
-            _cells[x, y] = cd;
+            _cells[x, y].RemoveFlags(flag);
         }
         
         Version++;
@@ -649,8 +753,9 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// Clear cells (set default) within area
-    /// 
+    /// <summary>
+    /// Clear cells (set to Empty) within area.
+    /// </summary>
     public void ClearArea(Vector2Int a, Vector2Int b)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
@@ -658,7 +763,7 @@ public class WorldGrid : MonoBehaviour
         for (int y = min.y; y <= max.y; y++)
         for (int x = min.x; x <= max.x; x++)
         {
-            _cells[x, y] = default;
+            _cells[x, y].Clear();
         }
 
         Version++;
@@ -667,8 +772,9 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// True if every cell in area has ALL bits in flags
-    /// 
+    /// <summary>
+    /// True if every cell in area has ALL bits in flags.
+    /// </summary>
     public bool AreaHasAllFlags(Vector2Int a, Vector2Int b, CellFlag flags)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
@@ -676,7 +782,7 @@ public class WorldGrid : MonoBehaviour
         for (int y = min.y; y <= max.y; y++)
         for (int x = min.x; x <= max.x; x++)
         {
-            if ((_cells[x, y].flags & flags) != flags) return false;
+            if (!_cells[x, y].HasAllFlags(flags)) return false;
         }
 
         return true;
@@ -684,8 +790,9 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// True if any cell in area has ANY bit in flags
-    /// 
+    /// <summary>
+    /// True if any cell in area has ANY bit in flags.
+    /// </summary>
     public bool AreaHasAnyFlag(Vector2Int a, Vector2Int b, CellFlag flags)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
@@ -693,7 +800,7 @@ public class WorldGrid : MonoBehaviour
         for (int y = min.y; y <= max.y; y++)
         for (int x = min.x; x <= max.x; x++)
         {
-            if ((_cells[x, y].flags & flags) != 0) return true;
+            if (_cells[x, y].HasFlag(flags)) return true;
         }
 
         return false;
@@ -701,8 +808,9 @@ public class WorldGrid : MonoBehaviour
 
 
     
-    /// True if area is completely free (no Occupied flags)
-    /// 
+    /// <summary>
+    /// True if area is completely free (no Occupied flags).
+    /// </summary>
     public bool AreaIsEmpty(Vector2Int a, Vector2Int b)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
@@ -710,7 +818,7 @@ public class WorldGrid : MonoBehaviour
         for (int y = min.y; y <= max.y; y++)
         for (int x = min.x; x <= max.x; x++)
         {
-            if ((_cells[x, y].flags & CellFlag.Occupied) != 0) return false;
+            if (_cells[x, y].HasFlag(CellFlag.Occupied)) return false;
         }
 
         return true;
@@ -737,8 +845,9 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// Count cells in area with ALL bits in flags
-    /// 
+    /// <summary>
+    /// Get cells in area with exactly the specified flags.
+    /// </summary>
     public List<CellData> GetCellsWithAllFlags(Vector2Int a, Vector2Int b, CellFlag flags)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
@@ -749,7 +858,7 @@ public class WorldGrid : MonoBehaviour
         for (int x = min.x; x <= max.x; x++)
         {
             var cell = _cells[x, y];
-            if (cell.flags == flags) cells.Add(cell);
+            if (cell.Flags == flags) cells.Add(cell);
         }
 
         return cells;
@@ -757,8 +866,9 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// Get cells in area with ANY bit in flags
-    /// 
+    /// <summary>
+    /// Get cells in area with ANY bit in flags.
+    /// </summary>
     public List<CellData> GetCellsWithAnyFlag(Vector2Int a, Vector2Int b, CellFlag flags)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
@@ -769,7 +879,7 @@ public class WorldGrid : MonoBehaviour
         for (int x = min.x; x <= max.x; x++)
         {
             var cell = _cells[x, y];
-            if ((cell.flags & flags) != 0) cells.Add(cell);
+            if (cell.HasFlag(flags)) cells.Add(cell);
         }
 
         return cells;
