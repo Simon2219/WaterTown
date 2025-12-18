@@ -182,7 +182,7 @@ namespace Platforms
         
         private void DisableColliders()
         {
-            foreach (Collider col in _platform.CachedColliders)
+            foreach (Collider col in _platform.PlatformColliders)
             {
                 col.enabled = false;
             }
@@ -191,7 +191,7 @@ namespace Platforms
         
         private void EnableColliders()
         {
-            foreach (Collider col in _platform.CachedColliders)
+            foreach (Collider col in _platform.PlatformColliders)
             {
                 col.enabled = true;
             }

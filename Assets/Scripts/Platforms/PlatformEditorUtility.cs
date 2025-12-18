@@ -91,20 +91,7 @@ namespace Platforms
             if (!_platform || !_socketSystem) return;
             
             _socketSystem.ResetConnections();
-
-            // Destroy all NavMeshLink GameObjects under "Links" in the editor with Undo
-            var linksParent = _platform.LinksParentTransform ?? transform.Find("Links");
-            if (linksParent)
-            {
-                for (int i = linksParent.childCount - 1; i >= 0; i--)
-                    UnityEditor.Undo.DestroyObjectImmediate(linksParent.GetChild(i).gameObject);
-            }
-            
-            // NOTE: NavMesh rebuild removed - A* Pathfinding will handle graph updates
-            // if (gameObject.activeInHierarchy)
-            //     _platform.QueueRebuild();
         }
-        
         
         
         #endregion

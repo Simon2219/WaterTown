@@ -69,4 +69,12 @@ public static class ErrorHandler
             innerException
         );
     }
+
+
+    /// 
+    ///
+    public static ArgumentOutOfRangeException ArgumentOutOfRange(string parameterName, object actualValue, string message)
+    {
+        return new ArgumentOutOfRangeException(parameterName, actualValue, message);
+    }
 }

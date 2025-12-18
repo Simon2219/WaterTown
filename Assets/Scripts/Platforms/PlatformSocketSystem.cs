@@ -150,27 +150,10 @@ public class PlatformSocketSystem : MonoBehaviour
 
     private bool SocketsBuilt { get; set; }
 
-    public IReadOnlyList<SocketData> PlatformSockets
-    {
-        get 
-        { 
-            if (!SocketsBuilt) BuildSockets(); 
-            return _platformSockets; 
-        }
-    }
+    public IReadOnlyList<SocketData> PlatformSockets => _platformSockets;
     
-    
+    public int SocketCount => _platformSockets.Count;
 
-    public int SocketCount
-    {
-        get 
-        { 
-            if (!SocketsBuilt) BuildSockets();
-            return _platformSockets.Count;
-        }
-    }
-    
-    
     #endregion
     
     
@@ -189,6 +172,15 @@ public class PlatformSocketSystem : MonoBehaviour
     
     
     #region Initialization
+
+
+    public void Initialize()
+    {
+        BuildSockets();
+        EnsureChildrenModulesRegistered();
+        RefreshAllSocketStatuses();
+    }
+    
     
     
     /// Called by GamePlatform to inject dependencies
@@ -338,7 +330,6 @@ public class PlatformSocketSystem : MonoBehaviour
     
     public SocketData GetSocket(int index)
     {
-        if (!SocketsBuilt) BuildSockets();
         if (index < 0 || index >= _platformSockets.Count)
         {
             Debug.LogWarning($"[PlatformSocketSystem] GetSocket: index {index} out of range (0..{_platformSockets.Count - 1}).", this);
@@ -350,8 +341,6 @@ public class PlatformSocketSystem : MonoBehaviour
 
     public Vector3 GetSocketWorldPosition(int index)
     {
-        if (!SocketsBuilt) BuildSockets();
-        
         if (index < 0 || index >= _platformSockets.Count)
             return transform.position;
         
@@ -361,7 +350,6 @@ public class PlatformSocketSystem : MonoBehaviour
 
     public void SetSocketStatus(int index, SocketStatus status)
     {
-        if (!SocketsBuilt) BuildSockets();
         if (index < 0 || index >= _platformSockets.Count)
         {
             Debug.LogWarning($"[PlatformSocketSystem] SetSocketStatus: index {index} out of range (0..{_platformSockets.Count - 1}).", this);
@@ -376,8 +364,6 @@ public class PlatformSocketSystem : MonoBehaviour
     /// Updates world positions for all sockets based on current transform
     public void UpdateSocketWorldPositions()
     {
-        if (!SocketsBuilt) return;
-        
         for (int i = 0; i < _platformSockets.Count; i++)
         {
             var socket = _platformSockets[i];
@@ -415,8 +401,6 @@ public class PlatformSocketSystem : MonoBehaviour
     /// Gets the socket index range (start, end inclusive) for a given edge
     public void GetSocketIndexRangeForEdge(Edge edge, out int startIndex, out int endIndex)
     {
-        if (!SocketsBuilt) BuildSockets();
-
         var footprintSize = GetFootprint();
         int footprintWidth = Mathf.Max(1, footprintSize.x);
         int footprintLength = Mathf.Max(1, footprintSize.y);
@@ -447,8 +431,6 @@ public class PlatformSocketSystem : MonoBehaviour
     /// Compatibility helper for code that thinks in Edge+mark (PlatformModule, old tools)
     public int GetSocketIndexByEdgeMark(Edge edge, int mark)
     {
-        if (!SocketsBuilt) BuildSockets();
-
         var footprintSize = GetFootprint();
         int width = Mathf.Max(1, footprintSize.x);
         int length = Mathf.Max(1, footprintSize.y);
@@ -475,7 +457,6 @@ public class PlatformSocketSystem : MonoBehaviour
     /// Return the single nearest socket index to a local position
     public int FindNearestSocketIndexLocal(Vector3 localPos)
     {
-        if (!SocketsBuilt) BuildSockets();
         int best = -1;
         float bestD = float.MaxValue;
 
@@ -496,7 +477,6 @@ public class PlatformSocketSystem : MonoBehaviour
     public void FindNearestSocketIndicesLocal(Vector3 localPos, int maxCount, float maxDistance, List<int> result)
     {
         result.Clear();
-        if (!SocketsBuilt) BuildSockets();
         if (maxCount <= 0 || _platformSockets.Count == 0) return;
 
         float maxSqr = maxDistance * maxDistance;
@@ -534,7 +514,6 @@ public class PlatformSocketSystem : MonoBehaviour
     /// Gets the world-space outward direction for a socket (accounts for platform rotation)
     public Vector3 GetSocketWorldOutwardDirection(int socketIndex)
     {
-        if (!SocketsBuilt) BuildSockets();
         if (socketIndex < 0 || socketIndex >= _platformSockets.Count)
             return Vector3.zero;
 
@@ -547,7 +526,6 @@ public class PlatformSocketSystem : MonoBehaviour
     /// Gets the grid cell adjacent to a socket (the cell the socket faces toward)
     public Vector2Int GetAdjacentCellForSocket(int socketIndex)
     {
-        if (!SocketsBuilt) BuildSockets();
         if (socketIndex < 0 || socketIndex >= _platformSockets.Count)
             return Vector2Int.zero;
 
@@ -563,7 +541,6 @@ public class PlatformSocketSystem : MonoBehaviour
     /// This is the cell on the platform's side of the socket edge
     private Vector2Int GetCellBehindSocket(int socketIndex)
     {
-        if (!SocketsBuilt) BuildSockets();
         if (socketIndex < 0 || socketIndex >= _platformSockets.Count)
             return Vector2Int.zero;
 
@@ -612,13 +589,10 @@ public class PlatformSocketSystem : MonoBehaviour
     #region Connection Management
     
     
-    /// <summary>
+    // ReSharper disable Unity.PerformanceAnalysis
     /// Refreshes all socket statuses by querying the grid.
-    /// </summary>
     public void RefreshAllSocketStatuses()
     {
-        if (!SocketsBuilt) BuildSockets();
-        
         bool anyChanged = false;
         
         for (int i = 0; i < _platformSockets.Count; i++)
@@ -704,7 +678,7 @@ public class PlatformSocketSystem : MonoBehaviour
         // Show all modules
         if (_platform)
         {
-            foreach (var m in _platform.CachedModules)
+            foreach (var m in _platform.PlatformModules)
             {
                 if (m) m.SetHidden(false);
             }
@@ -749,9 +723,6 @@ public class PlatformSocketSystem : MonoBehaviour
     
     public void RegisterModuleOnSockets(PlatformModule module, bool occupiesSockets, IEnumerable<int> socketIndices)
     {
-        if (!module) return;
-        if (!SocketsBuilt) BuildSockets();
-
         var list = new List<int>(socketIndices);
         bool blocks = module.blocksLink;
 
@@ -816,7 +787,7 @@ public class PlatformSocketSystem : MonoBehaviour
     {
         if (!_platform) return;
         
-        foreach (var m in _platform.CachedModules)
+        foreach (var m in _platform.PlatformModules)
         {
             if (m) m.EnsureRegistered();
         }

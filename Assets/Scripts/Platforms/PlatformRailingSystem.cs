@@ -134,14 +134,14 @@ namespace Platforms
             if (!_platform) return;
             
             // First pass: update all Rails (they update the visibility counters via SetHidden)
-            foreach (var r in _platform.CachedRailings)
+            foreach (var r in _platform.PlatformRailings)
             {
                 if (r && r.type == PlatformRailing.RailingType.Rail)
                     r.UpdateVisibility();
             }
             
             // Second pass: update all Posts (they use HasVisibleRailOnSockets which reads counters)
-            foreach (var r in _platform.CachedRailings)
+            foreach (var r in _platform.PlatformRailings)
             {
                 if (r && r.type == PlatformRailing.RailingType.Post)
                     r.UpdateVisibility();
@@ -153,7 +153,7 @@ namespace Platforms
         {
             if (!_platform) return;
             
-            foreach (var r in _platform.CachedRailings)
+            foreach (var r in _platform.PlatformRailings)
             {
                 if (r) r.EnsureRegistered();
             }

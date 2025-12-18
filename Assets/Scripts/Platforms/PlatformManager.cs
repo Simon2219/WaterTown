@@ -3,7 +3,6 @@ using System.Linq;
 using Grid;
 using UnityEngine;
 using UnityEngine.Events;
-using UnityEngine.Serialization;
 
 namespace Platforms
 {
@@ -23,15 +22,16 @@ public class PlatformManager : MonoBehaviour
     #region Inspector Fields
 
 
-    [Header("Events")] [Tooltip("Invoked when a platform is successfully placed and registered.")]
+    [Header("Events")] 
+    
+    [Tooltip("Invoked when a platform is successfully placed and registered.")]
     public UnityEvent<GamePlatform> PlatformPlaced;
 
-    [FormerlySerializedAs("OnPlatformRemoved")] [Tooltip("Invoked when a platform is removed/unregistered.")]
+    [Tooltip("Invoked when a platform is removed/unregistered.")]
     public UnityEvent<GamePlatform> PlatformRemoved;
 
 
     #endregion
-
 
 
 
@@ -45,17 +45,17 @@ public class PlatformManager : MonoBehaviour
 
 
     /// All currently registered platforms (uses platform's own occupiedCells field for data)
-    private readonly HashSet<GamePlatform> _registeredPlatforms = new();
+    private readonly HashSet<GamePlatform> _allPlatforms = new();
 
     /// Read-only access to all registered platforms
-    public IReadOnlyCollection<GamePlatform> AllPlatforms => _registeredPlatforms;
+    public IReadOnlyCollection<GamePlatform> AllPlatforms => _allPlatforms;
 
     /// Reverse lookup: which platform occupies a given cell
     private readonly Dictionary<Vector2Int, GamePlatform> _cellToPlatform = new();
 
-    // Adjacency recomputation batching (performance optimization)
-    // Instead of a boolean, track specific platforms that need updates
-    private readonly HashSet<GamePlatform> _platformsNeedingAdjacencyUpdate = new();
+    /// Update batching
+    /// Track each platform in need of an update
+    private readonly HashSet<GamePlatform> _platformsNeedingUpdate = new();
 
     private bool _isRecomputingAdjacency = false;
 
@@ -74,41 +74,11 @@ public class PlatformManager : MonoBehaviour
             ErrorHandler.LogAndDisable(ex, this);
         }
     }
+    
 
-
-
-
-    /// Finds and validates all required dependencies
-    /// Throws InvalidOperationException if any critical dependency is missing
-    /// Note: WorldGrid should be injected via SetWorldGrid before Start
-    ///
-    private void FindDependencies()
-    {
-        // WorldGrid should be injected or found once - prefer dependency injection
-        if (!_worldGrid)
-        {
-            // Fallback: find once at startup if not injected
-            _worldGrid = FindFirstObjectByType<WorldGrid>();
-            if (!_worldGrid)
-            {
-                throw ErrorHandler.MissingDependency(typeof(WorldGrid), this);
-            }
-        }
-    }
-
-
-
-    /// Dependency injection method for WorldGrid (avoids FindFirstObjectByType)
-    public void SetWorldGrid(WorldGrid worldGrid)
-    {
-        _worldGrid = worldGrid;
-    }
-
-
-
+    
     private void OnEnable()
     {
-        // Subscribe to static platform creation/destruction events (for discovery and cleanup)
         GamePlatform.Created += OnPlatformCreated;
         GamePlatform.Destroyed += OnPlatformDestroyed;
     }
@@ -125,7 +95,7 @@ public class PlatformManager : MonoBehaviour
     private void LateUpdate()
     {
         // Batch adjacency recomputation to once per frame for affected platforms only
-        if (_platformsNeedingAdjacencyUpdate.Count > 0 && !_isRecomputingAdjacency)
+        if (_platformsNeedingUpdate.Count > 0 && !_isRecomputingAdjacency)
         {
             RecomputeAdjacencyForAffectedPlatforms();
         }
@@ -135,65 +105,22 @@ public class PlatformManager : MonoBehaviour
 
     private void OnDisable()
     {
-        // Unsubscribe from static platform creation/destruction events
-        GamePlatform.Created -= OnPlatformCreated;
-        GamePlatform.Destroyed -= OnPlatformDestroyed;
-
-        // Best-effort cleanup of instance event subscriptions
-        foreach (GamePlatform platform in _registeredPlatforms)
-        {
-            if (platform)
-            {
-                platform.HasMoved -= OnPlatformHasMoved;
-                platform.Enabled -= OnPlatformEnabled;
-                platform.Disabled -= OnPlatformDisabled;
-                platform.Placed -= OnPlatformPlaced;
-                platform.PickedUp -= OnPlatformPickedUp;
-            }
-        }
+        UnsubscribeAllEvents();
     }
 
     #endregion
 
-    #region Platform Lifecycle Event Handlers
-
-    private void SpawnStartupPlatforms()
-    {
-        // Later implementation for an Asset defining Starting Setups for the Town
-
-        // Ensure all existing platforms in the scene are registered into the grid
-        foreach (GamePlatform platform in _registeredPlatforms)
-        {
-            if (!platform) continue;
-            if (!platform.isActiveAndEnabled) continue;
-
-            List<Vector2Int> tmpCells = GetCellsForPlatform(platform);
-            platform.occupiedCells = tmpCells;
-
-
-            if (tmpCells.Count > 0)
-            {
-                // Registers occupancy AND triggers adjacency for all platforms
-                RegisterPlatform(platform);
-            }
-        }
-    }
-
-
-
-
-    /// Event handler for static Created event
-    /// Subscribes to all instance events for this platform and injects dependencies
+    
+    
+    #region Event Handlers & Functions
+    
+    
+    /// Static GamePlatform Event - Platform Spawned
     ///
     private void OnPlatformCreated(GamePlatform platform)
     {
-        if (!platform) return;
-
-        // Inject dependencies
-        platform.SetPlatformManager(this);
-        platform.SetWorldGrid(_worldGrid);
-
-        // Initialize sub-components AFTER dependencies are set
+        // Inject dependencies & Initialize with Dependencies
+        platform.SetDependencies(this, _worldGrid);
         platform.InitializePlatform();
 
         // Subscribe to all instance events for this platform
@@ -204,18 +131,14 @@ public class PlatformManager : MonoBehaviour
         platform.PickedUp += OnPlatformPickedUp;
 
         // Add to registry immediately
-        _registeredPlatforms.Add(platform);
+        _allPlatforms.Add(platform);
     }
+    
 
-
-
-    /// Event handler for static Destroyed event
-    /// Unsubscribes from all instance events and cleans up
+    /// Static GamePlatform Event - Platform Destroyed
     ///
     private void OnPlatformDestroyed(GamePlatform platform)
     {
-        if (!platform) return;
-
         // Unsubscribe from instance events
         platform.HasMoved -= OnPlatformHasMoved;
         platform.Enabled -= OnPlatformEnabled;
@@ -228,19 +151,17 @@ public class PlatformManager : MonoBehaviour
 
 
 
-    /// Instance event handler when a platform becomes enabled
-    /// No additional action needed (platform already in registry from Created event)
+    /// GamePlatform Event - Platform Enabled
     ///
     private void OnPlatformEnabled(GamePlatform platform)
     {
-        // Platform was already added to registry in OnPlatformCreated
-        // This event can be used for future per-enable logic if needed
+        // Platform already added to registry in OnPlatformCreated
+        // can be used for future enable logic
     }
 
 
 
-    /// Instance event handler when a platform becomes disabled
-    /// Removes the platform from the grid
+    /// GamePlatform Event - Platform Disabled
     ///
     private void OnPlatformDisabled(GamePlatform platform)
     {
@@ -249,7 +170,8 @@ public class PlatformManager : MonoBehaviour
 
 
 
-    /// Event handler called when ANY platform is placed
+    /// GamePlatform Event - Platform Placed
+    /// Either after getting spawned - or moved
     /// Registers platform in grid and triggers adjacency update
     ///
     private void OnPlatformPlaced(GamePlatform platform)
@@ -268,36 +190,17 @@ public class PlatformManager : MonoBehaviour
 
 
 
-    /// Event handler called when ANY platform is picked up
-    /// Clears Occupied flags, cell ownership, and marks adjacency dirty
+    /// GamePlatform Event - Platform Picked Up
+    /// Clears Cell flags, cell ownership, and marks adjacency dirty
     ///
     private void OnPlatformPickedUp(GamePlatform platform)
     {
-        if (!platform) return;
-
-        // Store current cells as previous BEFORE clearing (needed for GetAffectedPlatforms)
-        platform.previousOccupiedCells.Clear();
-        platform.previousOccupiedCells.AddRange(platform.occupiedCells);
-
-        // Clear Occupied flags and cell ownership for cells this platform was occupying
-        if (platform.occupiedCells != null)
-        {
-            foreach (Vector2Int cell in platform.occupiedCells)
-            {
-                if (_cellToPlatform.TryGetValue(cell, out var owner) && owner == platform)
-                {
-                    _worldGrid.TrySetCellFlag(cell, WorldGrid.CellFlag.Empty);
-                    _cellToPlatform.Remove(cell);
-                }
-            }
-
-            platform.occupiedCells.Clear();
-        }
-
+        
+        ClearCellsForPlatform(platform);
+        
         // Mark affected platforms (neighbors at old position) for adjacency update
         MarkAdjacencyDirtyForPlatform(platform);
     }
-
 
 
 
@@ -347,11 +250,79 @@ public class PlatformManager : MonoBehaviour
         // Mark this platform and affected neighbors for adjacency update
         MarkAdjacencyDirtyForPlatform(platform);
     }
+    
+    
+    
+    private void UnsubscribeAllEvents()
+    {
+        // Unsubscribe from static platform creation/destruction events
+        GamePlatform.Created -= OnPlatformCreated;
+        GamePlatform.Destroyed -= OnPlatformDestroyed;
+        
+        
+        // clennup instance event subscriptions
+        foreach (GamePlatform platform in _allPlatforms)
+        {
+            platform.HasMoved -= OnPlatformHasMoved;
+            platform.Enabled -= OnPlatformEnabled;
+            platform.Disabled -= OnPlatformDisabled;
+            platform.Placed -= OnPlatformPlaced;
+            platform.PickedUp -= OnPlatformPickedUp;
+        }
+    }
+    
+    
+    #endregion
+    
+    
+    #region Platform Functions
+
+    
+    /// Validates all required dependencies
+    /// Throws InvalidOperationException if any critical dependency is missing
+    /// Note: WorldGrid should be injected via SetWorldGrid before Start
+    ///
+    private void FindDependencies() 
+    {
+        if (!_worldGrid)
+        {
+            // Fallback: find once at startup if not injected
+            _worldGrid = FindFirstObjectByType<WorldGrid>();
+            if (!_worldGrid)
+            {
+                throw ErrorHandler.MissingDependency(typeof(WorldGrid), this);
+            }
+        }
+    }
+    
+    
+    
+    private void SpawnStartupPlatforms()
+    {
+        // Later implementation for an Asset defining Starting Setups for the Town
+
+        // Ensure all existing platforms in the scene are registered into the grid
+        foreach (GamePlatform platform in _allPlatforms)
+        {
+            if (!platform) continue;
+            if (!platform.isActiveAndEnabled) continue;
+
+            List<Vector2Int> tmpCells = GetCellsForPlatform(platform);
+            platform.occupiedCells = tmpCells;
 
 
+            if (tmpCells.Count > 0)
+            {
+                // Registers occupancy AND triggers adjacency for all platforms
+                RegisterPlatform(platform);
+            }
+        }
+    }
+    
 
     #endregion
 
+    
     #region Public API (Platform Registration & Queries)
 
 
@@ -419,15 +390,13 @@ public class PlatformManager : MonoBehaviour
     /// Only the affected platforms will be updated in LateUpdate
     private void MarkAdjacencyDirtyForPlatform(GamePlatform platform)
     {
-        if (!platform) return;
-
         // Get all affected platforms (the platform + its neighbors at old and new positions)
         var affected = GetAffectedPlatforms(platform);
 
         foreach (var p in affected)
         {
             if (p && p.isActiveAndEnabled)
-                _platformsNeedingAdjacencyUpdate.Add(p);
+                _platformsNeedingUpdate.Add(p);
         }
     }
 
@@ -436,10 +405,10 @@ public class PlatformManager : MonoBehaviour
     /// Use sparingly - for full recalculation scenarios
     private void MarkAllPlatformsAdjacencyDirty()
     {
-        foreach (var platform in _registeredPlatforms)
+        foreach (var platform in _allPlatforms)
         {
             if (platform && platform.isActiveAndEnabled)
-                _platformsNeedingAdjacencyUpdate.Add(platform);
+                _platformsNeedingUpdate.Add(platform);
         }
     }
 
@@ -453,8 +422,9 @@ public class PlatformManager : MonoBehaviour
         else
             MarkAllPlatformsAdjacencyDirty();
     }
-
-
+    
+    
+    
     ///
     /// Register platform and occupy grid cells with Occupied flag
     /// Called when a platform is successfully placed
@@ -482,7 +452,7 @@ public class PlatformManager : MonoBehaviour
     public void UnregisterPlatform(GamePlatform platform)
     {
         if (!platform) return;
-        if (!_registeredPlatforms.Contains(platform)) return;
+        if (!_allPlatforms.Contains(platform)) return;
 
         // Clear cells from WorldGrid and reverse lookup
         if (platform.occupiedCells is { Count: > 0 })
@@ -502,7 +472,7 @@ public class PlatformManager : MonoBehaviour
             }
         }
 
-        _registeredPlatforms.Remove(platform);
+        _allPlatforms.Remove(platform);
 
         // Clear connections on this platform (only if active)
         if (platform.gameObject.activeInHierarchy)
@@ -517,8 +487,35 @@ public class PlatformManager : MonoBehaviour
 
     #endregion
 
+    
     #region Adjacency System (Grid-Based)
 
+    
+    private void ClearCellsForPlatform(GamePlatform platform)
+    {
+        // Store current cells as previous BEFORE clearing (needed for GetAffectedPlatforms)
+        platform.previousOccupiedCells.Clear();
+        platform.previousOccupiedCells.AddRange(platform.occupiedCells);
+        
+        // Clear Occupied flags and cell ownership for cells this platform was occupying
+        if (platform.occupiedCells != null)
+        {
+            foreach (Vector2Int cell in platform.occupiedCells)
+            {
+                if (_cellToPlatform.TryGetValue(cell, out var owner) && owner == platform)
+                {
+                    _worldGrid.TrySetCellFlag(cell, WorldGrid.CellFlag.Empty);
+                    _worldGrid.TryClearCellFlags(cell, WorldGrid.CellFlag.Empty);
+                    _cellToPlatform.Remove(cell);
+                }
+            }
+
+            platform.occupiedCells.Clear();
+        }
+    }
+    
+    
+    
     ///
     /// Gets all platforms affected by the given platform
     /// Returns the platform itself plus all platforms in neighboring cells (8-directional)
@@ -573,7 +570,7 @@ public class PlatformManager : MonoBehaviour
         if (!platformA || !platformB) return;
 
         // Ensure platforms are registered with their grid cells
-        if (!_registeredPlatforms.Contains(platformA))
+        if (!_allPlatforms.Contains(platformA))
         {
             List<Vector2Int> cells = GetCellsForPlatform(platformA);
             if (cells.Count > 0)
@@ -584,7 +581,7 @@ public class PlatformManager : MonoBehaviour
             else return;
         }
 
-        if (!_registeredPlatforms.Contains(platformB))
+        if (!_allPlatforms.Contains(platformB))
         {
             List<Vector2Int> cells = GetCellsForPlatform(platformB);
             if (cells.Count > 0)
@@ -615,14 +612,14 @@ public class PlatformManager : MonoBehaviour
         _isRecomputingAdjacency = true;
 
         // Update socket statuses for all affected platforms (for railing visibility, etc.)
-        foreach (var platform in _platformsNeedingAdjacencyUpdate)
+        foreach (var platform in _platformsNeedingUpdate)
         {
             if (!platform || !platform.isActiveAndEnabled) continue;
             platform.RefreshSocketStatuses();
         }
 
         // Clear the set after processing
-        _platformsNeedingAdjacencyUpdate.Clear();
+        _platformsNeedingUpdate.Clear();
         _isRecomputingAdjacency = false;
     }
 
@@ -630,6 +627,7 @@ public class PlatformManager : MonoBehaviour
 
     #endregion
 
+    
     #region Helper Methods
 
     ///

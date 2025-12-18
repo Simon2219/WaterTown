@@ -7,8 +7,6 @@ using Platforms;
 
 ///
 /// High-level town orchestration manager
-/// Coordinates specialized subsystems (PlatformManager, etc.) and provides
-/// designer-facing events and feedback
 ///
 [DisallowMultipleComponent]
 public class TownManager : MonoBehaviour
@@ -75,9 +73,6 @@ public class TownManager : MonoBehaviour
                 throw ErrorHandler.MissingDependency(typeof(PlatformManager), this);
             }
         }
-        
-        // Inject WorldGrid into PlatformManager to avoid FindFirstObjectByType calls
-        _platformManager.SetWorldGrid(_worldGrid);
     }
 
 

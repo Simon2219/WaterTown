@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using Unity.VisualScripting;
 using UnityEngine;
 
 namespace Grid
@@ -25,7 +26,6 @@ public class WorldGrid : MonoBehaviour
     [Min(1)] public int sizeY = 500;
 
     [Header("Origin")]
-    
     [Tooltip("World-space origin of cell (0,0,0) lower-left corner.")]
     public Vector3 worldOrigin { get; private set; } = Vector3.zero;
 
@@ -89,23 +89,18 @@ public class WorldGrid : MonoBehaviour
     
 
 #if UNITY_EDITOR
+    
     private void OnValidate()
     {
-        sizeX = Mathf.Max(1, sizeX);
-        sizeY = Mathf.Max(1, sizeY);
-
-        if (!Application.isPlaying)
             AllocateIfNeeded();
     }
 
     /// Editor-only method to apply inspector changes and reallocate grid.
     public void EditorApplySettings()
     {
-        sizeX = Mathf.Max(1, sizeX);
-        sizeY = Mathf.Max(1, sizeY);
-        
         AllocateIfNeeded();
     }
+    
 #endif
 
 
@@ -125,6 +120,9 @@ public class WorldGrid : MonoBehaviour
     
     private void AllocateIfNeeded()
     {
+        sizeX = Mathf.Max(1, sizeX);
+        sizeY = Mathf.Max(1, sizeY);
+        
         if (_cells == null)
         {
             _cells = new CellData[sizeX, sizeY];
@@ -149,7 +147,8 @@ public class WorldGrid : MonoBehaviour
     // ---------- Bounds & transforms ----------
 
     
-    /// True if (x,y,level) lies inside the grid.
+    /// True if (x,y) lies inside the grid
+    /// 
     public bool CellInBounds(Vector2Int cell)
     {
         return (uint)cell.x < (uint)sizeX
@@ -157,48 +156,19 @@ public class WorldGrid : MonoBehaviour
     }
 
 
-    ///
+    
+    
     /// Get neighboring cells (4-directional or 8-directional)
     /// For single cell: returns its neighbors
     /// For multiple cells: returns neighbors excluding the input cells (ring around area)
     ///
-    public HashSet<Vector2Int> GetNeighborCells(List<Vector2Int> cells, bool include8Directional = true)
+    public HashSet<Vector2Int> GetNeighborCells(List<Vector2Int> cells, bool include8Directional = false)
     {
         var neighbors = new HashSet<Vector2Int>();
-        var cellSet = new HashSet<Vector2Int>(cells);
         
-        foreach (var cell in cells)
+        foreach (Vector2Int cell in cells)
         {
-            if (include8Directional)
-            {
-                // 8-directional neighbors
-                for (int dx = -1; dx <= 1; dx++)
-                {
-                    for (int dy = -1; dy <= 1; dy++)
-                    {
-                        if (dx == 0 && dy == 0) continue;
-                        
-                        var neighborCell = new Vector2Int(cell.x + dx, cell.y + dy);
-                        if (CellInBounds(neighborCell) && !cellSet.Contains(neighborCell))
-                            neighbors.Add(neighborCell);
-                    }
-                }
-            }
-            else
-            {
-                // 4-directional neighbors (cardinal only)
-                var n = new Vector2Int(cell.x + 1, cell.y);
-                if (CellInBounds(n) && !cellSet.Contains(n)) neighbors.Add(n);
-                
-                n = new Vector2Int(cell.x - 1, cell.y);
-                if (CellInBounds(n) && !cellSet.Contains(n)) neighbors.Add(n);
-                
-                n = new Vector2Int(cell.x, cell.y + 1);
-                if (CellInBounds(n) && !cellSet.Contains(n)) neighbors.Add(n);
-                
-                n = new Vector2Int(cell.x, cell.y - 1);
-                if (CellInBounds(n) && !cellSet.Contains(n)) neighbors.Add(n);
-            }
+            neighbors.AddRange(GetNeighborCells(cell, include8Directional));
         }
         
         return neighbors;
@@ -206,7 +176,47 @@ public class WorldGrid : MonoBehaviour
     
 
     
-    /// Clamps a cell index to the grid extents (useful for safe math on indices).
+    public HashSet<Vector2Int> GetNeighborCells(Vector2Int cell, bool include8Directional = false)
+    {
+        var neighbors = new HashSet<Vector2Int>();
+        
+        if (include8Directional)
+        {
+            // 8-directional neighbors
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                for (int dy = -1; dy <= 1; dy++)
+                {
+                    if (dx == 0 && dy == 0) continue;
+                    
+                    var neighborCell = new Vector2Int(cell.x + dx, cell.y + dy);
+                    if (CellInBounds(neighborCell) && cell != neighborCell)
+                        neighbors.Add(neighborCell);
+                }
+            }
+        }
+        else
+        {
+            // 4-directional neighbors (cardinal only)
+            var n = new Vector2Int(cell.x + 1, cell.y);
+            if (CellInBounds(n) && cell != n) neighbors.Add(n);
+            
+            n = new Vector2Int(cell.x - 1, cell.y);
+            if (CellInBounds(n) && cell != n) neighbors.Add(n);
+            
+            n = new Vector2Int(cell.x, cell.y + 1);
+            if (CellInBounds(n) && cell != n) neighbors.Add(n);
+            
+            n = new Vector2Int(cell.x, cell.y - 1);
+            if (CellInBounds(n) && cell != n) neighbors.Add(n);
+        }
+        return neighbors;
+    }
+    
+    
+    
+    /// Clamps a cell index to the grid extents (useful for safe math on indices)
+    /// 
     public Vector2Int ClampCell(Vector2Int cell)
     {
         return new Vector2Int(
@@ -216,8 +226,10 @@ public class WorldGrid : MonoBehaviour
     }
     
     
+    
     /// Converts world → cell (x,y,level = 0)
-    /// Floors edges so borders map to the lower/left cell.
+    /// Floors edges so borders map to the lower/left cell
+    /// 
     public Vector2Int WorldToCell(Vector3 worldPos)
     {
         var local = worldPos - worldOrigin;
@@ -227,8 +239,10 @@ public class WorldGrid : MonoBehaviour
     }
     
     
-    /// As WorldToCellOnLevel, but clamps to grid and returns whether the original was in bounds.
-    /// Handy for mouse hover that should stay inside grid.
+    
+    /// Clamps to grid and returns whether the original was in bounds
+    /// Handy for mouse hover that should stay inside grid
+    /// 
     public bool WorldToCellClamped(Vector3 worldPos, Vector3Int levelRef, out Vector2Int cell)
     {
         var raw = WorldToCell(worldPos);
@@ -237,7 +251,9 @@ public class WorldGrid : MonoBehaviour
         return inBounds;
     }
 
-    /// World center of a cell (uses levelStep for Y).
+    
+    
+    /// World center of a cell
     public Vector3 GetCellCenter(Vector2Int cell)
     {
         return new Vector3(
@@ -248,19 +264,18 @@ public class WorldGrid : MonoBehaviour
     }
     
     
-    /// Snaps a world position to the nearest grid-aligned position for a platform with given footprint.
+    
+    /// Snaps world position to nearest grid position for platform with given footprint
     /// Handles even vs odd footprints correctly:
     /// - Even footprints (4x4): snap to cell edges (whole meters like 44.0)
     /// - Odd footprints (3x3): snap to cell centers (half meters like 44.5)
+    /// 
     public Vector3 SnapToGridForPlatform(Vector3 worldPosition, Vector2Int footprint)
     {
         bool evenWidth = (footprint.x % 2) == 0;
         bool evenLength = (footprint.y % 2) == 0;
-        
         float level = 0;
         
-        // For even dimensions, snap to cell edges (whole meters)
-        // For odd dimensions, snap to cell centers (half meters)
         float snappedX;
         float snappedZ;
         
@@ -291,7 +306,8 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// Snaps a world position to the nearest grid cell center, inferring level from Y coordinate.
+    /// Snaps world position to nearest grid cell center
+    ///
     public Vector3 SnapWorldPositionToGrid(Vector3 worldPosition)
     {
         Vector2Int cell = WorldToCell(worldPosition);
@@ -300,7 +316,8 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// World-space axis-aligned bounds of a cell (thin in Y).
+    /// World-space axis-aligned bounds of a cell
+    /// 
     public Bounds GetCellBounds(Vector2Int cell)
     {
         Vector3 center = GetCellCenter(cell);
@@ -310,7 +327,9 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// Writes BL, BR, TR, TL corners of a cell to out4. Requires out4.Length ≥ 4.
+    /// Writes BL, BR, TR, TL corners of a cell to out4
+    /// Requires out4.Length ≥ 4
+    /// 
     public void GetCellCorners(Vector3Int cell, out Vector3[] out4)
     {
         out4 = new Vector3[4];
@@ -328,8 +347,10 @@ public class WorldGrid : MonoBehaviour
 
 
     
-    /// Cell-local to world. uv01 is (U,V) in [0..1] from the cell's lower-left corner.
-    public Vector3 LocalToWorldInCell(Vector3Int cell, Vector2 uv01)
+    /// Cell-local to world
+    /// uv01 is (U,V) in [0..1] from cell's lower-left corner
+    /// 
+    public Vector3 CellLocalToWorld(Vector3Int cell, Vector2 uv01)
     {
         return new Vector3(
             worldOrigin.x + (cell.x + uv01.x) * CellSize,
@@ -340,8 +361,10 @@ public class WorldGrid : MonoBehaviour
 
 
     
-    /// World → (cell, uv01). Projects onto levelRef.z, returns the inside-cell UV [0..1].
-    /// Returns false if cell is out of bounds.
+    /// World → (cell, uv01)
+    /// returns the inside-cell UV [0..1]
+    /// Returns false if cell is out of bounds
+    /// 
     public bool WorldToLocalInCell(Vector3 worldPos, out Vector2Int cell, out Vector2 uv01)
     {
         cell = WorldToCell(worldPos);
@@ -369,9 +392,7 @@ public class WorldGrid : MonoBehaviour
     /// Only levelRef.z is used.
     public bool RaycastToCell(Ray worldRay, out Vector2Int cell, out Vector3 hitPoint)
     {
-        float h = 0;
-        
-        var plane = new Plane(Vector3.up, new Vector3(0f, h, 0f));
+        var plane = new Plane(Vector3.up, new Vector3(0f, 0f, 0f));
         
         if (plane.Raycast(worldRay, out float dist))
         {
@@ -392,9 +413,9 @@ public class WorldGrid : MonoBehaviour
 
     #region Cell Data Access & Flags
     
-    // ---------- Single-cell data & flags ----------
 
-    /// Read cell data if in bounds.
+    /// Read cell data if in bounds
+    /// returns if cell is in bounds
     public bool TryGetCell(Vector2Int cell, out CellData data)
     {
         if (!CellInBounds(cell)) { data = default; return false; }
@@ -404,6 +425,20 @@ public class WorldGrid : MonoBehaviour
         return true;
     }
 
+    
+    
+    /// Gets the world position of the edge center between two adjacent cells
+    /// Returns the midpoint between the centers of cellA and cellB
+    /// 
+    public Vector3 GetEdgeCenterBetweenCells(Vector2Int cellA, Vector2Int cellB)
+    {
+        Vector3 centerA = GetCellCenter(cellA);
+        Vector3 centerB = GetCellCenter(cellB);
+        return (centerA + centerB) * ((float)CellSize / 2);
+    }
+    
+    
+    
     ///
     /// Primary method to set cell flags with priority enforcement
     /// Priority: Locked > Occupied > OccupyPreview > Buildable > Empty
@@ -420,37 +455,45 @@ public class WorldGrid : MonoBehaviour
             // Locked cells cannot change (highest priority)
             if (cd.HasFlag(CellFlag.Locked) && newFlag != CellFlag.Locked)
                 return false;
-            
-            // Enforce mutual exclusivity based on priority
-            if (newFlag == CellFlag.Locked)
+
+            switch (newFlag)
             {
-                cd.flags = CellFlag.Locked;
-            }
-            else if (newFlag == CellFlag.Occupied)
-            {
-                cd.flags &= ~(CellFlag.OccupyPreview | CellFlag.Buildable);
-                cd.flags |= CellFlag.Occupied;
-            }
-            else if (newFlag == CellFlag.OccupyPreview)
-            {
+                // Enforce mutual exclusivity based on priority
+                case CellFlag.Locked:
+                    cd.flags = CellFlag.Locked;
+                    break;
+                
+                case CellFlag.Occupied:
+                    cd.flags &= ~(CellFlag.OccupyPreview | CellFlag.Buildable);
+                    cd.flags |= CellFlag.Occupied;
+                    break;
+                
                 // Preview cannot overwrite Occupied
-                if (cd.HasFlag(CellFlag.Occupied))
+                case CellFlag.OccupyPreview when cd.HasFlag(CellFlag.Occupied):
                     return false;
                 
-                cd.flags &= ~CellFlag.Buildable;
-                cd.flags |= CellFlag.OccupyPreview;
-            }
-            else if (newFlag == CellFlag.Buildable)
-            {
+                case CellFlag.OccupyPreview:
+                    cd.flags &= ~CellFlag.Buildable;
+                    cd.flags |= CellFlag.OccupyPreview;
+                    break;
+                
                 // Buildable cannot overwrite Occupied or Preview
-                if (cd.HasFlag(CellFlag.Occupied) || cd.HasFlag(CellFlag.OccupyPreview))
+                case CellFlag.Buildable when cd.HasFlag(CellFlag.Occupied) || cd.HasFlag(CellFlag.OccupyPreview):
                     return false;
                 
-                cd.flags |= CellFlag.Buildable;
-            }
-            else if (newFlag == CellFlag.Empty)
-            {
-                cd.flags = CellFlag.Empty;
+                case CellFlag.Buildable:
+                    cd.flags |= CellFlag.Buildable;
+                    break;
+                
+                case CellFlag.Empty:
+                    cd.flags = CellFlag.Empty;
+                    break;
+                
+                case CellFlag.ModuleBlocked:
+                    break;
+                
+                default:
+                    throw ErrorHandler.ArgumentOutOfRange(nameof(newFlag), newFlag, null);
             }
         }
         else
@@ -470,7 +513,7 @@ public class WorldGrid : MonoBehaviour
     }
 
 
-    ///
+
     /// Remove specific flags from a cell
     /// Returns false if cell is out of bounds
     ///
@@ -492,7 +535,8 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// True if the cell has ALL bits in flags (in-bounds only).
+    /// True if the cell has ALL bits in flags (in-bounds only)
+    /// 
     public bool CellHasAllFlags(Vector2Int cell, CellFlag flags)
     {
         if (!CellInBounds(cell)) return false;
@@ -500,7 +544,8 @@ public class WorldGrid : MonoBehaviour
         return (_cells[cell.x, cell.y].flags & flags) == flags;
     }
 
-    /// True if the cell has ANY bit in flags (in-bounds only).
+    /// True if the cell has ANY bit in flags (in-bounds only)
+    /// 
     public bool CellHasAnyFlag(Vector2Int cell, CellFlag flags)
     {
         if (!CellInBounds(cell)) return false;
@@ -512,7 +557,7 @@ public class WorldGrid : MonoBehaviour
 
     #region Area Operations
     
-    // ---------- Area helpers (two corners, inclusive, level = a.z) ----------
+    // ---------- Area helpers (two corners, inclusive) ----------
 
     private void ClampAreaInclusive(Vector2Int a, Vector2Int b, out Vector2Int min, out Vector2Int max)
     {
@@ -525,7 +570,10 @@ public class WorldGrid : MonoBehaviour
         max.y = Mathf.Clamp(max.y, 0, sizeY - 1);
     }
 
-    /// Iterate each cell (x,y,level) in an inclusive rectangle (level = a.z).
+    
+    
+    /// Iterate each cell (x,y,level) in an inclusive rectangle
+    /// 
     public void ForEachCellInclusive(Vector2Int a, Vector2Int b, Action<Vector2Int> visit)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
@@ -534,11 +582,12 @@ public class WorldGrid : MonoBehaviour
             visit(new Vector2Int(x, y));
     }
 
+    
+    
     // ---------- Area operations (flags & queries) ----------
 
-    /// Add (OR) flag to every cell in area.
-    /// Optional platformId/payload when non-zero.
-    /// Bumps Version & raises AreaChanged.
+    /// Add (OR) flag to every cell in area
+    /// 
     public void AddFlagInArea(Vector2Int a, Vector2Int b, CellFlag flag)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
@@ -558,8 +607,8 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// Replace flags in area with exactFlags (overwrites existing flags).
-    /// Bumps Version & raises AreaChanged.
+    /// Replace flags in area with exactFlags (overwrites existing flags)
+    /// 
     public void SetFlagsInAreaExact(Vector2Int a, Vector2Int b, CellFlag exactFlags)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
@@ -579,7 +628,8 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// Remove (AND NOT) flag from every cell in area. Bumps Version & raises AreaChanged.
+    /// Remove (AND NOT) flag from every cell in area
+    /// 
     public void RemoveFlagInArea(Vector2Int a, Vector2Int b, CellFlag flag)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
@@ -599,7 +649,8 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// Clear cells (set default) within area. Bumps Version & raises AreaChanged.
+    /// Clear cells (set default) within area
+    /// 
     public void ClearArea(Vector2Int a, Vector2Int b)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
@@ -616,7 +667,8 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// True if every cell in area has ALL bits in flags.
+    /// True if every cell in area has ALL bits in flags
+    /// 
     public bool AreaHasAllFlags(Vector2Int a, Vector2Int b, CellFlag flags)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
@@ -632,7 +684,8 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// True if any cell in area has ANY bit in flags.
+    /// True if any cell in area has ANY bit in flags
+    /// 
     public bool AreaHasAnyFlag(Vector2Int a, Vector2Int b, CellFlag flags)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
@@ -649,6 +702,7 @@ public class WorldGrid : MonoBehaviour
 
     
     /// True if area is completely free (no Occupied flags)
+    /// 
     public bool AreaIsEmpty(Vector2Int a, Vector2Int b)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
@@ -664,7 +718,8 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// Returns List with all cells inside area.
+    /// Returns List with all cells inside area
+    /// 
     public List<Vector2Int> GetCellsInArea(Vector2Int a, Vector2Int b)
     {
         var cells = new List<Vector2Int>();
@@ -682,7 +737,8 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// Count cells in area with ALL bits in flags.
+    /// Count cells in area with ALL bits in flags
+    /// 
     public List<CellData> GetCellsWithAllFlags(Vector2Int a, Vector2Int b, CellFlag flags)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
@@ -701,7 +757,8 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// Get cells in area with ANY bit in flags.
+    /// Get cells in area with ANY bit in flags
+    /// 
     public List<CellData> GetCellsWithAnyFlag(Vector2Int a, Vector2Int b, CellFlag flags)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
@@ -716,24 +773,6 @@ public class WorldGrid : MonoBehaviour
         }
 
         return cells;
-    }
-    
-    #endregion
-
-    #region Neighbor Queries
-    
-    // ---------- Neighbors (pathing/adjacency) ----------
-
-
-    
-    
-    /// Gets the world position of the edge center between two adjacent cells.
-    /// Returns the midpoint between the centers of cellA and cellB.
-    public Vector3 GetEdgeCenterBetweenCells(Vector2Int cellA, Vector2Int cellB)
-    {
-        Vector3 centerA = GetCellCenter(cellA);
-        Vector3 centerB = GetCellCenter(cellB);
-        return (centerA + centerB) * 0.5f;
     }
     
     #endregion
