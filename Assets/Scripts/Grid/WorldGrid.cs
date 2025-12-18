@@ -90,47 +90,44 @@ public class WorldGrid : MonoBehaviour
 
             CellFlag current = flags;
             CellFlag proposed = (current & ~toClear) | toSet;
+            
+            // Extract exclusive states using the mask
+            CellFlag currentExclusive = current & ExclusiveStateMask;
+            CellFlag requestedExclusive = toSet & ExclusiveStateMask;
+            CellFlag clearingExclusive = toClear & ExclusiveStateMask;
 
             // --- Priority enforcement ---
 
-            // 1. Locked blocks all changes unless explicitly unlocking
-            bool isLocked = (current & CellFlag.Locked) != 0;
-            bool clearingLocked = (toClear & CellFlag.Locked) != 0;
-            bool settingLocked = (toSet & CellFlag.Locked) != 0;
-
-            if (isLocked && !clearingLocked && !settingLocked)
-                return false;
-
-            // 2. Setting Locked clears all other exclusive states and Buildable
-            if (settingLocked)
+            // 1. Locked blocks all changes unless unlocking or re-locking
+            if (currentExclusive == CellFlag.Locked && 
+                (clearingExclusive & CellFlag.Locked) == 0 && 
+                requestedExclusive != CellFlag.Locked)
             {
-                // Keep non-exclusive, non-buildable flags, set Locked
-                flags = (proposed & ~(ExclusiveStateMask | CellFlag.Buildable)) | CellFlag.Locked;
-                return true;
+                return false;
             }
 
-            // 3. Preview cannot overwrite Occupied unless Occupied is cleared in same call
-            bool hasOccupied = (current & CellFlag.Occupied) != 0;
-            bool wantsPreview = (toSet & CellFlag.OccupyPreview) != 0;
-            bool clearingOccupied = (toClear & CellFlag.Occupied) != 0;
-
-            if (hasOccupied && wantsPreview && !clearingOccupied)
+            // 2. Occupied blocks Preview unless Occupied is being cleared
+            if ((currentExclusive & CellFlag.Occupied) != 0 &&
+                (requestedExclusive & CellFlag.OccupyPreview) != 0 &&
+                (clearingExclusive & CellFlag.Occupied) == 0)
+            {
                 return false;
+            }
 
-            // 4. Buildable cannot be added while Occupied/Preview unless they are cleared
-            bool wantsBuildable = (toSet & CellFlag.Buildable) != 0;
-            bool hasOccOrPreview = (current & (CellFlag.Occupied | CellFlag.OccupyPreview)) != 0;
-            bool clearingOccOrPreview = (toClear & (CellFlag.Occupied | CellFlag.OccupyPreview)) != 0;
-
-            if (wantsBuildable && hasOccOrPreview && !clearingOccOrPreview)
+            // 3. Buildable blocked while any exclusive state exists (unless that state is being cleared)
+            if ((toSet & CellFlag.Buildable) != 0 &&
+                currentExclusive != CellFlag.Empty &&
+                (clearingExclusive & currentExclusive) == 0)
+            {
                 return false;
+            }
 
-            // 5. Normalize: keep only highest priority exclusive state
-            CellFlag exclusiveState = GetHighestPriorityState(proposed);
-            proposed = (proposed & ~ExclusiveStateMask) | exclusiveState;
+            // 4. Normalize: only one exclusive state allowed - pick highest priority
+            CellFlag finalExclusive = GetHighestPriorityState(proposed);
+            proposed = (proposed & ~ExclusiveStateMask) | finalExclusive;
 
-            // 6. If any exclusive state is set, Buildable must be cleared
-            if ((proposed & ExclusiveStateMask) != 0)
+            // 5. Exclusive states and Buildable are mutually exclusive
+            if (finalExclusive != CellFlag.Empty)
                 proposed &= ~CellFlag.Buildable;
 
             flags = proposed;
