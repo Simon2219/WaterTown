@@ -41,12 +41,11 @@ public class WorldGrid : MonoBehaviour
 
     
     
-
     /// Cell data container
-    /// controlled flag manipulation.
-    /// All flag changes route through methods that enforce exclusivity rules.
-    /// Now a class (reference type) with back-reference to grid for automatic notifications.
-    /// </summary>
+    /// Controlled flag manipulation
+    /// All flag changes route through methods that enforce exclusivity rules
+    /// Class (reference type) with back-reference to grid for automatic notifications
+    ///
     [Serializable]
     public class CellData
     {
@@ -68,10 +67,10 @@ public class WorldGrid : MonoBehaviour
         private const CellFlag ExclusiveStateMask =
             CellFlag.Locked | CellFlag.Occupied | CellFlag.OccupyPreview;
 
-        /// <summary>
-        /// Initializes the cell with its grid reference and position.
-        /// Called by WorldGrid during allocation.
-        /// </summary>
+        
+        /// Initializes the cell with its grid reference and position
+        /// Called by WorldGrid during allocation
+        ///
         internal void Initialize(WorldGrid grid, Vector2Int position)
         {
             _grid = grid;
@@ -79,16 +78,16 @@ public class WorldGrid : MonoBehaviour
             flags = CellFlag.Empty;
         }
 
-        /// <summary>
-        /// Notifies the grid that this cell has changed.
-        /// </summary>
+        
+        /// Notifies the grid that this cell has changed
+        ///
         private void NotifyChanged()
         {
             _grid?.NotifyCellChanged(_position);
         }
 
-        /// <summary>
-        /// Primary method to modify flags with optional priority enforcement.
+        
+        /// Primary method to modify flags with optional priority enforcement
         /// Priority: Locked > Occupied > OccupyPreview > Buildable > Empty
         /// 
         /// <param name="toSet"> Flags to set (bitwise OR) </param>
@@ -190,7 +189,7 @@ public class WorldGrid : MonoBehaviour
 
         
         /// Removes Flags (bitwise AND NOT)
-        /// Removal doesn't require priority checks.
+        /// Removal doesn't require priority checks
         ///
         public void RemoveFlags(CellFlag toRemove)
         {
@@ -235,7 +234,7 @@ public class WorldGrid : MonoBehaviour
         Occupied      = 1 << 2,
         OccupyPreview = 1 << 3,
         ModuleBlocked = 1 << 4,  // Cell has a blocking module on its edge (prevents socket connection)
-        // Extend as needed: ServiceZone = 1<<5, etc.
+        // Extend as needed: ServiceZone = 1<<5, etc
     }
     
     #endregion
@@ -266,7 +265,9 @@ public class WorldGrid : MonoBehaviour
             AllocateIfNeeded();
     }
 
-    /// Editor-only method to apply inspector changes and reallocate grid.
+    
+    /// Editor-only method to apply inspector changes and reallocate grid
+    ///
     public void EditorApplySettings()
     {
         AllocateIfNeeded();
@@ -275,8 +276,9 @@ public class WorldGrid : MonoBehaviour
 #endif
 
 
-    /// Validates grid configuration values.
-    /// Throws InvalidOperationException if configuration is invalid.
+    /// Validates grid configuration values
+    /// Throws InvalidOperationException if configuration is invalid
+    ///
     [SuppressMessage("ReSharper", "ConditionIsAlwaysTrueOrFalse")]
     private void ValidateConfiguration()
     {
@@ -288,6 +290,7 @@ public class WorldGrid : MonoBehaviour
             );
         }
     }
+    
     
     private void AllocateIfNeeded()
     {
@@ -313,10 +316,10 @@ public class WorldGrid : MonoBehaviour
         }
     }
     
-    /// <summary>
-    /// Initializes all cell instances in the array.
-    /// Required because CellData is a class (reference type).
-    /// </summary>
+    
+    /// Initializes all cell instances in the array
+    /// Required because CellData is a class (reference type)
+    ///
     private void InitializeCellInstances()
     {
         for (int y = 0; y < sizeY; y++)
@@ -331,19 +334,19 @@ public class WorldGrid : MonoBehaviour
 
     #region Internal Notification
     
-    /// <summary>
-    /// Called by CellData when its flags are modified.
-    /// Increments version and fires change event.
-    /// </summary>
+    
+    /// Called by CellData when its flags are modified
+    /// Increments version and fires change event
+    ///
     internal void NotifyCellChanged(Vector2Int cell)
     {
         Version++;
         CellChanged?.Invoke(cell);
     }
     
-    /// <summary>
-    /// Called internally for area operations to batch notifications.
-    /// </summary>
+    
+    /// Called internally for area operations to batch notifications
+    ///
     private void NotifyAreaChanged(Vector2Int min, Vector2Int max)
     {
         Version++;
@@ -437,7 +440,7 @@ public class WorldGrid : MonoBehaviour
     
     
     
-    /// Converts world → cell (x,y,level = 0)
+    /// Converts world → cell (x,y)
     /// Floors edges so borders map to the lower/left cell
     /// 
     public Vector2Int WorldToCell(Vector3 worldPos)
@@ -464,6 +467,7 @@ public class WorldGrid : MonoBehaviour
     
     
     /// World center of a cell
+    ///
     public Vector3 GetCellCenter(Vector2Int cell)
     {
         return new Vector3(
@@ -572,7 +576,7 @@ public class WorldGrid : MonoBehaviour
 
     
     /// World → (cell, uv01)
-    /// returns the inside-cell UV [0..1]
+    /// Returns the inside-cell UV [0..1]
     /// Returns false if cell is out of bounds
     /// 
     public bool WorldToLocalInCell(Vector3 worldPos, out Vector2Int cell, out Vector2 uv01)
@@ -598,8 +602,9 @@ public class WorldGrid : MonoBehaviour
     
     // ---------- Raycast helper ----------
     
-    /// Raycast to plane(y = GetLevelWorldY(levelRef.z)), return hit world point + cell if inside.
-    /// Only levelRef.z is used.
+    
+    /// Raycast to plane (y = 0), return hit world point + cell if inside
+    ///
     public bool RaycastToCell(Ray worldRay, out Vector2Int cell, out Vector3 hitPoint)
     {
         var plane = new Plane(Vector3.up, new Vector3(0f, 0f, 0f));
@@ -624,16 +629,33 @@ public class WorldGrid : MonoBehaviour
     #region Cell Data Access & Flags
     
 
-    /// Gets the CellData at the specified position.
-    /// Returns null if out of bounds - caller should null-check.
-    /// This is the primary way to access and manipulate cell flags.
+    /// Gets the CellData at the specified position
+    /// Returns false if out of bounds
+    /// Primary way to access and manipulate cell flags
     /// 
     public bool TryGetCell(Vector2Int cell, out CellData data)
+    {
+        if (!CellInBounds(cell))
+        {
+            data = null;
+            return false;
+        }
+        
+        data = _cells[cell.x, cell.y];
+        return true;
+    }
+    
+    
+    /// Gets the CellData at the specified position
+    /// Returns null if out of bounds
+    /// 
+    public CellData GetCell(Vector2Int cell)
     {
         if (!CellInBounds(cell)) return null;
         return _cells[cell.x, cell.y];
     }
 
+    
     
     /// Gets the world position of the edge center between two adjacent cells
     /// Returns the midpoint between the centers of cellA and cellB
@@ -664,7 +686,7 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// Iterate each cell (x,y,level) in an inclusive rectangle
+    /// Iterate each cell in an inclusive rectangle
     /// 
     public void ForEachCellInclusive(Vector2Int a, Vector2Int b, Action<Vector2Int> visit)
     {
@@ -678,11 +700,11 @@ public class WorldGrid : MonoBehaviour
     
     // ---------- Area operations (flags & queries) ----------
 
-    /// <summary>
-    /// Add (OR) flag to every cell in area.
-    /// Uses priority enforcement by default.
-    /// Note: Uses batched notification (single AreaChanged event).
-    /// </summary>
+    
+    /// Add (OR) flag to every cell in area
+    /// Uses priority enforcement by default
+    /// Uses batched notification (single AreaChanged event)
+    ///
     public void AddFlagInArea(Vector2Int a, Vector2Int b, CellFlag flag, bool enforcePriority = true)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
@@ -690,22 +712,17 @@ public class WorldGrid : MonoBehaviour
         for (int y = min.y; y <= max.y; y++)
         for (int x = min.x; x <= max.x; x++)
         {
-            // Direct flag modification without per-cell notification
             _cells[x, y].AddFlags(flag, enforcePriority);
         }
         
-        // Note: Individual CellData.AddFlags will fire notifications.
-        // For true batching, we'd need a different approach.
-        // For now, AreaChanged provides the summary.
         AreaChanged?.Invoke(min, max);
     }
 
     
     
-    /// <summary>
-    /// Replace flags in area with exactFlags (overwrites existing flags).
-    /// Does NOT enforce priority by default for exact replacements.
-    /// </summary>
+    /// Replace flags in area with exactFlags (overwrites existing flags)
+    /// Does NOT enforce priority by default for exact replacements
+    ///
     public void SetFlagsInAreaExact(Vector2Int a, Vector2Int b, CellFlag exactFlags, bool enforcePriority = false)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
@@ -721,9 +738,8 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// <summary>
-    /// Remove (AND NOT) flag from every cell in area.
-    /// </summary>
+    /// Remove (AND NOT) flag from every cell in area
+    ///
     public void RemoveFlagInArea(Vector2Int a, Vector2Int b, CellFlag flag)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
@@ -739,9 +755,8 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// <summary>
-    /// Clear cells (set to Empty) within area.
-    /// </summary>
+    /// Clear cells (set to Empty) within area
+    ///
     public void ClearArea(Vector2Int a, Vector2Int b)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
@@ -757,9 +772,8 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// <summary>
-    /// True if every cell in area has ALL bits in flags.
-    /// </summary>
+    /// True if every cell in area has ALL bits in flags
+    ///
     public bool AreaHasAllFlags(Vector2Int a, Vector2Int b, CellFlag flags)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
@@ -775,9 +789,8 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// <summary>
-    /// True if any cell in area has ANY bit in flags.
-    /// </summary>
+    /// True if any cell in area has ANY bit in flags
+    ///
     public bool AreaHasAnyFlag(Vector2Int a, Vector2Int b, CellFlag flags)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
@@ -793,9 +806,8 @@ public class WorldGrid : MonoBehaviour
 
 
     
-    /// <summary>
-    /// True if area is completely free (no Occupied flags).
-    /// </summary>
+    /// True if area is completely free (no Occupied flags)
+    ///
     public bool AreaIsEmpty(Vector2Int a, Vector2Int b)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
@@ -830,9 +842,8 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// <summary>
-    /// Get cells in area with exactly the specified flags.
-    /// </summary>
+    /// Get cells in area with exactly the specified flags
+    ///
     public List<CellData> GetCellsWithAllFlags(Vector2Int a, Vector2Int b, CellFlag flags)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
@@ -851,9 +862,8 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// <summary>
-    /// Get cells in area with ANY bit in flags.
-    /// </summary>
+    /// Get cells in area with ANY bit in flags
+    ///
     public List<CellData> GetCellsWithAnyFlag(Vector2Int a, Vector2Int b, CellFlag flags)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
