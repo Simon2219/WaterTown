@@ -224,7 +224,7 @@ public class PlatformManager : MonoBehaviour
             // Only clear if this platform owns the cell
             if (_cellToPlatform.TryGetValue(cell, out var owner) && owner == platform)
             {
-                _worldGrid.TrySetCellFlag(cell, WorldGrid.CellFlag.Empty);
+                _worldGrid.GetCell(cell)?.Clear();
                 _cellToPlatform.Remove(cell);
             }
         }
@@ -240,8 +240,9 @@ public class PlatformManager : MonoBehaviour
         // Update grid occupancy with proper flags
         foreach (Vector2Int cell in platform.occupiedCells)
         {
-            // TrySetCellFlag enforces priority (won't overwrite Occupied with OccupyPreview)
-            if (_worldGrid.TrySetCellFlag(cell, flagToUse))
+            // AddFlags enforces priority (won't overwrite Occupied with OccupyPreview)
+            var cellData = _worldGrid.GetCell(cell);
+            if (cellData != null && cellData.AddFlags(flagToUse))
             {
                 _cellToPlatform[cell] = platform;
             }
@@ -355,10 +356,12 @@ public class PlatformManager : MonoBehaviour
     ///
     public bool IsCellOccupied(Vector2Int cell, bool includeAllOccupation = true)
     {
-        return
-            includeAllOccupation
-                ? _worldGrid.CellHasAnyFlag(cell, WorldGrid.CellFlag.Occupied | WorldGrid.CellFlag.OccupyPreview)
-                : _worldGrid.CellHasAnyFlag(cell, WorldGrid.CellFlag.Occupied);
+        var cellData = _worldGrid.GetCell(cell);
+        if (cellData == null) return false;
+        
+        return includeAllOccupation
+            ? cellData.HasFlag(WorldGrid.CellFlag.Occupied | WorldGrid.CellFlag.OccupyPreview)
+            : cellData.HasFlag(WorldGrid.CellFlag.Occupied);
     }
 
 
@@ -436,7 +439,7 @@ public class PlatformManager : MonoBehaviour
         // Mark cells as Occupied (placed platform)
         foreach (Vector2Int cell in platform.occupiedCells)
         {
-            _worldGrid.TrySetCellFlag(cell, WorldGrid.CellFlag.Occupied);
+            _worldGrid.GetCell(cell)?.AddFlags(WorldGrid.CellFlag.Occupied);
             _cellToPlatform[cell] = platform;
         }
 
@@ -504,8 +507,7 @@ public class PlatformManager : MonoBehaviour
             {
                 if (_cellToPlatform.TryGetValue(cell, out var owner) && owner == platform)
                 {
-                    _worldGrid.TrySetCellFlag(cell, WorldGrid.CellFlag.Empty);
-                    _worldGrid.TryClearCellFlags(cell, WorldGrid.CellFlag.Empty);
+                    _worldGrid.GetCell(cell)?.Clear();
                     _cellToPlatform.Remove(cell);
                 }
             }
