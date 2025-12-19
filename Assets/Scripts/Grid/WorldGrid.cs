@@ -25,13 +25,10 @@ public class WorldGrid : MonoBehaviour
     [Min(1)] public int sizeX = 500;
     [Min(1)] public int sizeY = 500;
 
-    [Header("Origin")]
-    [Tooltip("World-space origin of cell (0,0,0) lower-left corner.")]
-    public Vector3 worldOrigin { get; private set; } = Vector3.zero;
-
+    public readonly Vector3 worldOrigin = Vector3.zero;
     public const int CellSize = 1;
 
-    // Storage [x, y, level]
+    // Storage [x, y]
     private CellData[,] _cells;
 
     /// Monotonic version stamp bumped on any mutating API call
@@ -44,11 +41,11 @@ public class WorldGrid : MonoBehaviour
 
     
     
-    /// <summary>
-    /// Cell data container with controlled flag manipulation.
+
+    /// Cell data container
+    /// controlled flag manipulation.
     /// All flag changes route through methods that enforce exclusivity rules.
-    /// Now a class (reference type) to avoid struct copy issues.
-    /// </summary>
+    ///
     [Serializable]
     public class CellData
     {
@@ -65,15 +62,16 @@ public class WorldGrid : MonoBehaviour
         private const CellFlag ExclusiveStateMask =
             CellFlag.Locked | CellFlag.Occupied | CellFlag.OccupyPreview;
 
-        /// <summary>
-        /// Primary method to modify flags with optional priority enforcement.
+
+        /// Primary method to modify flags with priority enforcement.
         /// Priority: Locked > Occupied > OccupyPreview > Buildable > Empty
-        /// </summary>
-        /// <param name="toSet">Flags to set (bitwise OR)</param>
-        /// <param name="toClear">Flags to clear before setting</param>
-        /// <param name="enforcePriority">Apply exclusivity and priority rules</param>
-        /// <returns>True if modification succeeded, false if blocked by priority rules</returns>
-        public bool TryModify(CellFlag toSet, CellFlag toClear = CellFlag.Empty, bool enforcePriority = true)
+        /// 
+        /// <param name="toSet"> Flags to set (bitwise OR) </param>
+        /// <param name="toClear"> Flags to clear before setting </param>
+        /// <param name="enforcePriority"> Apply exclusivity and priority rules </param>
+        /// <returns> True if modification succeeded - False if blocked by priority rules </returns>
+        /// 
+        private bool TryModify(CellFlag toSet, CellFlag toClear = CellFlag.Empty, bool enforcePriority = true)
         {
             // Fast path: explicit full clear
             if (toSet == CellFlag.Empty && toClear == CellFlag.Empty)
@@ -134,9 +132,11 @@ public class WorldGrid : MonoBehaviour
             return true;
         }
 
-        /// <summary>
-        /// Sets flags to exactly the provided value (clears all others).
-        /// </summary>
+
+        
+        /// Sets flags to exactly the provided value
+        /// Clears all other Flags
+        /// 
         public bool SetExact(CellFlag exactFlags, bool enforcePriority = true)
         {
             if (!enforcePriority)
@@ -149,43 +149,53 @@ public class WorldGrid : MonoBehaviour
             return TryModify(toSet: exactFlags, toClear: ~CellFlag.Empty, enforcePriority: true);
         }
 
-        /// <summary>
-        /// Adds flags (bitwise OR) with priority enforcement.
-        /// </summary>
+
+        
+        /// Adds Flags
+        ///
         public bool AddFlags(CellFlag toAdd, bool enforcePriority = true)
         {
             return TryModify(toSet: toAdd, toClear: CellFlag.Empty, enforcePriority: enforcePriority);
         }
 
-        /// <summary>
-        /// Removes specified flags (bitwise AND NOT). Removal doesn't require priority checks.
-        /// </summary>
+
+        
+        /// Removes Flags (bitwise AND NOT)
+        /// Removal doesn't require priority checks.
+        ///
         public void RemoveFlags(CellFlag toRemove)
         {
             flags &= ~toRemove;
         }
 
-        /// <summary>
-        /// Clears all flags (sets to Empty).
-        /// </summary>
+
+        
+        /// Clears all flags
+        /// Sets to Empty
+        ///
         public void Clear()
         {
             flags = CellFlag.Empty;
         }
 
+        
+        
         // --- Internal helper ---
         private static CellFlag GetHighestPriorityState(CellFlag f)
         {
             if ((f & CellFlag.Locked) != 0) return CellFlag.Locked;
             if ((f & CellFlag.Occupied) != 0) return CellFlag.Occupied;
             if ((f & CellFlag.OccupyPreview) != 0) return CellFlag.OccupyPreview;
+            
             return CellFlag.Empty;
         }
     }
-
     
-    /// Bit flags: powers of two so they combine cleanly (Buildable | Locked).
-    /// Keep mutually-exclusive concepts in separate fields.
+    
+    
+    /// Bit flags
+    /// Powers of 2 - so they combine cleanly
+    /// 
     [Flags]
     public enum CellFlag
     {
@@ -200,6 +210,7 @@ public class WorldGrid : MonoBehaviour
     
     #endregion
 
+    
     #region Lifecycle & Initialization
     
     // ---------- Lifecycle ----------
@@ -560,7 +571,8 @@ public class WorldGrid : MonoBehaviour
     
 
     /// Read cell data if in bounds
-    /// returns if cell is in bounds
+    /// returns true if cell is in bounds
+    ///
     public bool TryGetCell(Vector2Int cell, out CellData data)
     {
         if (!CellInBounds(cell)) { data = default; return false; }
