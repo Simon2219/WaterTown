@@ -235,7 +235,7 @@ public class PlatformManager : MonoBehaviour
         platform.occupiedCells.AddRange(newCells);
 
         // Different Flag based on if Preview or Placed
-        WorldGrid.CellFlag flagToUse = platform.IsPickedUp ? WorldGrid.CellFlag.OccupyPreview : WorldGrid.CellFlag.Occupied;
+        CellFlag flagToUse = platform.IsPickedUp ? CellFlag.OccupyPreview : CellFlag.Occupied;
 
         // Update grid occupancy with proper flags
         foreach (Vector2Int cell in platform.occupiedCells)
@@ -360,8 +360,8 @@ public class PlatformManager : MonoBehaviour
         if (cellData == null) return false;
         
         return includeAllOccupation
-            ? cellData.HasFlag(WorldGrid.CellFlag.Occupied | WorldGrid.CellFlag.OccupyPreview)
-            : cellData.HasFlag(WorldGrid.CellFlag.Occupied);
+            ? cellData.HasFlag(CellFlag.Occupied | CellFlag.OccupyPreview)
+            : cellData.HasFlag(CellFlag.Occupied);
     }
 
 
@@ -439,7 +439,7 @@ public class PlatformManager : MonoBehaviour
         // Mark cells as Occupied (placed platform)
         foreach (Vector2Int cell in platform.occupiedCells)
         {
-            _worldGrid.GetCell(cell)?.AddFlags(WorldGrid.CellFlag.Occupied);
+            _worldGrid.GetCell(cell)?.AddFlags(CellFlag.Occupied);
             _cellToPlatform[cell] = platform;
         }
 
@@ -463,7 +463,7 @@ public class PlatformManager : MonoBehaviour
             // Use area method for WorldGrid (cells are sorted: first = min, last = max)
             Vector2Int min = platform.occupiedCells.First();
             Vector2Int max = platform.occupiedCells.Last();
-            _worldGrid.SetFlagsInAreaExact(min, max, WorldGrid.CellFlag.Empty);
+            _worldGrid.SetFlagsInAreaExact(min, max, CellFlag.Empty);
 
             // Remove from reverse lookup using GetPlatformAtCell for ownership check
             foreach (Vector2Int cell in platform.occupiedCells)

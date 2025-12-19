@@ -656,7 +656,7 @@ public class PlatformSocketSystem : MonoBehaviour
         var cellData = _worldGrid.GetCell(adjacentCell);
         
         // Check if adjacent cell is occupied by a platform (including preview/moving platforms)
-        if (cellData == null || !cellData.HasFlag(WorldGrid.CellFlag.Occupied | WorldGrid.CellFlag.OccupyPreview))
+        if (cellData == null || !cellData.HasFlag(CellFlag.Occupied | CellFlag.OccupyPreview))
             return SocketStatus.Linkable;
         
         // Verify it's actually a neighbor platform (not self or non-platform)
@@ -666,7 +666,7 @@ public class PlatformSocketSystem : MonoBehaviour
             return SocketStatus.Linkable;
         
         // Check if neighbor has a blocking module facing us
-        if (cellData.HasFlag(WorldGrid.CellFlag.ModuleBlocked))
+        if (cellData.HasFlag(CellFlag.ModuleBlocked))
             return SocketStatus.Occupied;
         
         return SocketStatus.Connected;
@@ -743,7 +743,7 @@ public class PlatformSocketSystem : MonoBehaviour
             foreach (var sIdx in list)
             {
                 Vector2Int cellBehindSocket = GetCellBehindSocket(sIdx);
-                _worldGrid.GetCell(cellBehindSocket)?.AddFlags(WorldGrid.CellFlag.ModuleBlocked, enforcePriority: false);
+                _worldGrid.GetCell(cellBehindSocket)?.AddFlags(CellFlag.ModuleBlocked, enforcePriority: false);
             }
         }
     }
@@ -760,7 +760,7 @@ public class PlatformSocketSystem : MonoBehaviour
             foreach (var sIdx in reg.socketIndices)
             {
                 Vector2Int cellBehindSocket = GetCellBehindSocket(sIdx);
-                _worldGrid.GetCell(cellBehindSocket)?.RemoveFlags(WorldGrid.CellFlag.ModuleBlocked);
+                _worldGrid.GetCell(cellBehindSocket)?.RemoveFlags(CellFlag.ModuleBlocked);
             }
         }
 

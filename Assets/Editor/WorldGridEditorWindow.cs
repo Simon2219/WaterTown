@@ -311,7 +311,7 @@ public class WorldGridEditorWindow : EditorWindow
                             var fc = _visualizer.flagColors[i];
                             using (new EditorGUILayout.HorizontalScope())
                             {
-                                fc.flag  = (WorldGrid.CellFlag)EditorGUILayout.EnumPopup(GUIContent.none, fc.flag, GUILayout.Width(120));
+                                fc.flag  = (CellFlag)EditorGUILayout.EnumPopup(GUIContent.none, fc.flag, GUILayout.Width(120));
                                 fc.color = EditorGUILayout.ColorField(fc.color);
                                 if (GUILayout.Button("×", GUILayout.Width(22)))
                                     removeIndex = i;
@@ -341,7 +341,7 @@ public class WorldGridEditorWindow : EditorWindow
                                 : new System.Collections.Generic.List<GridVisualizer.FlagColor>();
                             list.Add(new GridVisualizer.FlagColor 
                             { 
-                                flag = WorldGrid.CellFlag.Empty, 
+                                flag = CellFlag.Empty, 
                                 color = new Color(0.5f, 0.5f, 0.5f, 0.35f) 
                             });
                             _visualizer.flagColors = list.ToArray();

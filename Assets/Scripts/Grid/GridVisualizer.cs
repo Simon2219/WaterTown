@@ -25,14 +25,14 @@ namespace Grid
         public Color highlightColor   = new(1f, 1f, 0f, 0.65f);
 
         [Serializable]
-        public struct FlagColor { public WorldGrid.CellFlag flag; public Color color; }
+        public struct FlagColor { public CellFlag flag; public Color color; }
         public FlagColor[] flagColors = new[]
         {
-            new FlagColor{ flag = WorldGrid.CellFlag.Locked,        color = new Color(0.80f, 0.25f, 0.25f, 0.35f) }, // Red - cannot change
-            new FlagColor{ flag = WorldGrid.CellFlag.Buildable,     color = new Color(0.25f, 0.80f, 0.35f, 0.35f) }, // Green - can build here
-            new FlagColor{ flag = WorldGrid.CellFlag.Occupied,      color = new Color(0.25f, 0.50f, 0.90f, 0.35f) }, // Blue - placed platform
-            new FlagColor{ flag = WorldGrid.CellFlag.OccupyPreview, color = new Color(0.95f, 0.75f, 0.20f, 0.35f) }, // Yellow/Orange - preview platform
-            new FlagColor{ flag = WorldGrid.CellFlag.ModuleBlocked, color = new Color(0.60f, 0.20f, 0.60f, 0.35f) }, // Purple - module blocking socket
+            new FlagColor{ flag = CellFlag.Locked,        color = new Color(0.80f, 0.25f, 0.25f, 0.35f) }, // Red - cannot change
+            new FlagColor{ flag = CellFlag.Buildable,     color = new Color(0.25f, 0.80f, 0.35f, 0.35f) }, // Green - can build here
+            new FlagColor{ flag = CellFlag.Occupied,      color = new Color(0.25f, 0.50f, 0.90f, 0.35f) }, // Blue - placed platform
+            new FlagColor{ flag = CellFlag.OccupyPreview, color = new Color(0.95f, 0.75f, 0.20f, 0.35f) }, // Yellow/Orange - preview platform
+            new FlagColor{ flag = CellFlag.ModuleBlocked, color = new Color(0.60f, 0.20f, 0.60f, 0.35f) }, // Purple - module blocking socket
         };
 
         [Header("Tube Look")]
@@ -200,7 +200,7 @@ namespace Grid
                     }
 
                     var flags = cd.Flags;
-                    if (flags == WorldGrid.CellFlag.Empty)
+                    if (flags == CellFlag.Empty)
                     {
                         colors[row + x] = defaultCellColor;
                         continue;
@@ -210,7 +210,7 @@ namespace Grid
                     int count = 0;
                     foreach (var fc in fcs)
                     {
-                        if (fc.flag == WorldGrid.CellFlag.Empty) continue;
+                        if (fc.flag == CellFlag.Empty) continue;
                         if ((flags & fc.flag) != 0) { accum += fc.color; count++; }
                     }
                     colors[row + x] = (count == 0) ? defaultCellColor : (accum / count);
