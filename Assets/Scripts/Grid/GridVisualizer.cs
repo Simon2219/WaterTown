@@ -51,7 +51,7 @@ namespace Grid
         private Vector2Int _cachedSize;
         private Vector3 _cachedOrigin;
 
-        private int _lastGridVersion = -1;
+        private bool _gridDirty = true;
         private int _lastLevel = -1;
 
         private MeshFilter _mf;
@@ -90,11 +90,38 @@ namespace Grid
         {
             EnsureComponents();
             EnsureMaterialAssetOrRuntime();
+            SubscribeToGridEvents();
             RebuildAll();
             SyncRendererMaterial();        // << force renderer slot to our asset
             ApplyParams(true);
-            _lastGridVersion = -1;
+            _gridDirty = true;
             _lastLevel = -1;
+        }
+        
+        
+        private void OnDisable()
+        {
+            UnsubscribeFromGridEvents();
+        }
+        
+        
+        private void SubscribeToGridEvents()
+        {
+            if (grid == null) return;
+            grid.GridChanged += OnGridChanged;
+        }
+        
+        
+        private void UnsubscribeFromGridEvents()
+        {
+            if (grid == null) return;
+            grid.GridChanged -= OnGridChanged;
+        }
+        
+        
+        private void OnGridChanged()
+        {
+            _gridDirty = true;
         }
 
         private void Update()
@@ -109,10 +136,10 @@ namespace Grid
 
             if (needsRebuild) RebuildAll();
 
-            if (grid && autoSyncColorsFromGrid && (_lastGridVersion != grid.Version || _lastLevel != level))
+            if (grid && autoSyncColorsFromGrid && (_gridDirty || _lastLevel != level))
             {
                 RecomputeAndApplyColorsForLevel();
-                _lastGridVersion = grid.Version;
+                _gridDirty = false;
                 _lastLevel = level;
             }
 
@@ -137,12 +164,12 @@ namespace Grid
             RebuildAll();
             SyncRendererMaterial();
             ApplyParams(true);
-            _lastGridVersion = -1;
+            _gridDirty = true;
         }
 
-        /// <summary>
-        /// Force MeshRenderer to use 'material' asset (clears any prior per-renderer instance Unity may have created).
-        /// </summary>
+        /// Force MeshRenderer to use 'material' asset
+        /// Clears any prior per-renderer instance Unity may have created
+        ///
         public void SyncRendererMaterial()
         {
             if (_mr == null) return;
@@ -277,7 +304,7 @@ namespace Grid
             if (grid) transform.position = new Vector3(_cachedOrigin.x, 0f, _cachedOrigin.z);
 
             EnsureColorMap(initialFill:true);
-            _lastGridVersion = -1;
+            _gridDirty = true;
         }
 
         private void BuildQuadMeshLocal(float widthMeters, float heightMeters)

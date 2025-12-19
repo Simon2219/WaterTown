@@ -31,13 +31,10 @@ public class WorldGrid : MonoBehaviour
     // Storage [x, y]
     private CellData[,] _cells;
 
-    /// Monotonic version stamp bumped on any mutating API call
-    public int Version { get; private set; }
-
-    // Change events (optional visuals can also poll Version)
-
+    // Change events
     public event Action<Vector2Int> CellChanged;             // single cell modified
     public event Action<Vector2Int, Vector2Int> AreaChanged; // inclusive [min..max] area modified
+    public event Action GridChanged;                          // any change occurred
 
     
     
@@ -120,7 +117,7 @@ public class WorldGrid : MonoBehaviour
         {
             _cells = new CellData[sizeX, sizeY];
             InitializeCellInstances();
-            Version++; 
+            GridChanged?.Invoke();
         }
     }
     
@@ -146,12 +143,11 @@ public class WorldGrid : MonoBehaviour
     
     
     /// Called by CellData when its flags are modified
-    /// Increments version and fires change event
     ///
     internal void NotifyCellChanged(Vector2Int cell)
     {
-        Version++;
         CellChanged?.Invoke(cell);
+        GridChanged?.Invoke();
     }
     
     
@@ -159,8 +155,8 @@ public class WorldGrid : MonoBehaviour
     ///
     internal void NotifyAreaChanged(Vector2Int min, Vector2Int max)
     {
-        Version++;
         AreaChanged?.Invoke(min, max);
+        GridChanged?.Invoke();
     }
     
     #endregion
