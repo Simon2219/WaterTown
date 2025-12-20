@@ -97,6 +97,7 @@ public class GridVisualizer : MonoBehaviour
     private static readonly int PID_LineWidth = Shader.PropertyToID("_LineWidth");
     private static readonly int PID_CellMap = Shader.PropertyToID("_CellMap");
     private static readonly int PID_EnableFill = Shader.PropertyToID("_EnableFill");
+    private static readonly int PID_CellOpacity = Shader.PropertyToID("_CellOpacity");
     private static readonly int PID_Fade = Shader.PropertyToID("_NeighborFade");
     private static readonly int PID_CornerRadius = Shader.PropertyToID("_CornerRadius");
     private static readonly int PID_YBias = Shader.PropertyToID("_YBias");
@@ -275,8 +276,6 @@ public class GridVisualizer : MonoBehaviour
                 var cd = grid.GetCell(cell);
 
                 Color cellColor = GetColorForFlags(cd?.Flags ?? CellFlag.Empty);
-                cellColor.a *= cellOpacity;
-                
                 colors[row + x] = cellColor;
             }
         }
@@ -487,7 +486,6 @@ public class GridVisualizer : MonoBehaviour
         {
             var arr = new Color32[w * h];
             Color emptyColor = GetFlagColor(CellFlag.Empty);
-            emptyColor.a *= cellOpacity;
             var c32 = (Color32)emptyColor;
             
             for (int i = 0; i < arr.Length; i++) 
@@ -530,6 +528,7 @@ public class GridVisualizer : MonoBehaviour
         _mpb.SetColor(PID_LineColor, GetEffectiveLineColor());
         _mpb.SetFloat(PID_LineWidth, Mathf.Max(0.001f, lineThickness));
         _mpb.SetFloat(PID_EnableFill, enableCellColors ? 1f : 0f);
+        _mpb.SetFloat(PID_CellOpacity, Mathf.Clamp01(cellOpacity));
         _mpb.SetFloat(PID_Fade, Mathf.Clamp01(neighborFade));
         _mpb.SetFloat(PID_CornerRadius, Mathf.Max(0f, cornerRadius));
 

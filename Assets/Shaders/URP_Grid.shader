@@ -6,6 +6,7 @@ Shader "WaterCity/Grid/URPGrid"
         _LineWidth("Line Width (m)", Float) = 0.05
         _CellSize("Cell Size (m)", Float) = 1.0
         _EnableFill("Enable Cell Fill", Float) = 1.0
+        _CellOpacity("Cell Opacity", Range(0,1)) = 0.35
         _NeighborFade("Neighbor Fade", Range(0,1)) = 0.0
         _CellMap("Cell Map (sizeX x sizeY)", 2D) = "white" {}
         _GridOrigin("World Origin", Vector) = (0,0,0,0)
@@ -64,6 +65,7 @@ Shader "WaterCity/Grid/URPGrid"
             float4 _SizeXY;
             float  _LevelY;
             float  _EnableFill;
+            float  _CellOpacity;
             float  _NeighborFade;
 
             float  _CornerRadius;
@@ -132,8 +134,8 @@ Shader "WaterCity/Grid/URPGrid"
                 float4 fillCol = cellCol;
                 float4 lineCol = _LineColor;
 
-                // Fill alpha (0 if cell fill disabled)
-                float fillA = fillCol.a * (_EnableFill > 0.5 ? 1.0 : 0.0);
+                // Fill alpha: base alpha * cell opacity (0 if fill disabled)
+                float fillA = _CellOpacity * (_EnableFill > 0.5 ? 1.0 : 0.0);
 
                 // Blend colors and alphas based on line mask
                 float3 rgb = lerp(fillCol.rgb, lineCol.rgb, lineMask);
