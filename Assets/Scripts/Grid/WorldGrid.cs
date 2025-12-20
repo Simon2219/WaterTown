@@ -32,9 +32,11 @@ public class WorldGrid : MonoBehaviour
     private GridCellData[,] _cells;
 
     // Change events
-    public event Action<Vector2Int> CellChanged;             // single cell modified
-    public event Action<Vector2Int, Vector2Int> AreaChanged; // inclusive [min..max] area modified
-    public event Action GridChanged;                          // any change occurred
+    public event Action<Vector2Int> GridCellChanged;              // single cell modified
+    public event Action<Vector2Int, Vector2Int> GridAreaChanged;  // inclusive [min..max] area modified
+    
+    // Suppresses per-cell notifications during area operations
+    private bool _suppressCellNotifications;
 
     
     
@@ -114,7 +116,7 @@ public class WorldGrid : MonoBehaviour
         if (sizeChanged)
         {
             InitializeGridCells();
-            GridChanged?.Invoke();
+            GridAreaChanged?.Invoke(Vector2Int.zero, new Vector2Int(sizeX - 1, sizeY - 1));
         }
     }
     
@@ -136,21 +138,30 @@ public class WorldGrid : MonoBehaviour
     
     
     
-    /// Called by CellData when its flags are modified
+    /// Called by GridCellData when its flags are modified
+    /// Suppressed during area operations to avoid N events
     ///
     internal void NotifyCellChanged(Vector2Int cell)
     {
-        CellChanged?.Invoke(cell);
-        GridChanged?.Invoke();
+        if (_suppressCellNotifications) return;
+        GridCellChanged?.Invoke(cell);
     }
     
     
-    /// Called internally for area operations to batch notifications
+    /// Begins an area operation - suppresses per-cell notifications
     ///
-    internal void NotifyAreaChanged(Vector2Int min, Vector2Int max)
+    private void BeginAreaOperation()
     {
-        AreaChanged?.Invoke(min, max);
-        GridChanged?.Invoke();
+        _suppressCellNotifications = true;
+    }
+    
+    
+    /// Ends an area operation - fires single GridAreaChanged event
+    ///
+    private void EndAreaOperation(Vector2Int min, Vector2Int max)
+    {
+        _suppressCellNotifications = false;
+        GridAreaChanged?.Invoke(min, max);
     }
     
     #endregion
@@ -461,19 +472,19 @@ public class WorldGrid : MonoBehaviour
     
     /// Add (OR) flag to every cell in area
     /// Uses priority enforcement by default
-    /// Uses batched notification (single AreaChanged event)
+    /// Uses batched notification (single GridAreaChanged event)
     ///
     public void AddFlagInArea(Vector2Int a, Vector2Int b, CellFlag flag, bool enforcePriority = true)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
         
+        BeginAreaOperation();
         for (int y = min.y; y <= max.y; y++)
         for (int x = min.x; x <= max.x; x++)
         {
             _cells[x, y].AddFlags(flag, enforcePriority);
         }
-        
-        AreaChanged?.Invoke(min, max);
+        EndAreaOperation(min, max);
     }
 
     
@@ -485,13 +496,13 @@ public class WorldGrid : MonoBehaviour
     {
         ClampAreaInclusive(a, b, out var min, out var max);
         
+        BeginAreaOperation();
         for (int y = min.y; y <= max.y; y++)
         for (int x = min.x; x <= max.x; x++)
         {
             _cells[x, y].SetExact(exactFlags, enforcePriority);
         }
-        
-        AreaChanged?.Invoke(min, max);
+        EndAreaOperation(min, max);
     }
 
     
@@ -502,13 +513,13 @@ public class WorldGrid : MonoBehaviour
     {
         ClampAreaInclusive(a, b, out var min, out var max);
         
+        BeginAreaOperation();
         for (int y = min.y; y <= max.y; y++)
         for (int x = min.x; x <= max.x; x++)
         {
             _cells[x, y].RemoveFlags(flag);
         }
-        
-        AreaChanged?.Invoke(min, max);
+        EndAreaOperation(min, max);
     }
 
     
@@ -519,13 +530,13 @@ public class WorldGrid : MonoBehaviour
     {
         ClampAreaInclusive(a, b, out var min, out var max);
         
+        BeginAreaOperation();
         for (int y = min.y; y <= max.y; y++)
         for (int x = min.x; x <= max.x; x++)
         {
             _cells[x, y].Clear();
         }
-
-        AreaChanged?.Invoke(min, max);
+        EndAreaOperation(min, max);
     }
 
     

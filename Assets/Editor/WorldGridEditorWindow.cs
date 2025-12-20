@@ -6,7 +6,7 @@ using UnityEngine;
 
 namespace Editor
 {
-    
+
 public class WorldGridEditorWindow : EditorWindow
 {
     private const string MenuPath = "Tools/World Grid Editor";
@@ -17,14 +17,16 @@ public class WorldGridEditorWindow : EditorWindow
     private bool _showSettings = true;
     private bool _showVisualizer = false;
     private bool _showVizDisplay = false;
+    private bool _showVizLines = false;
     private bool _showVizColors = false;
-    private bool _showVizTube   = false;
-    private bool _showVizDepth  = false;
+    private bool _showVizTube = false;
+    private bool _showVizDepth = false;
 
     private Vector2 _scroll;
 
     private const int MaxCells = 250000;
 
+    
     [MenuItem(MenuPath)]
     public static void ShowWindow()
     {
@@ -33,12 +35,14 @@ public class WorldGridEditorWindow : EditorWindow
         win.Show();
     }
 
+    
     private void OnEnable()
     {
         if (_sceneGrid == null) _sceneGrid = FindWorldGrid();
         if (_visualizer == null) _visualizer = FindVisualizer();
     }
 
+    
     private void OnGUI()
     {
         _scroll = EditorGUILayout.BeginScrollView(_scroll);
@@ -74,11 +78,12 @@ public class WorldGridEditorWindow : EditorWindow
         EditorGUILayout.EndScrollView();
     }
 
+    
     private void DrawSettingsGUI()
     {
         if (!_sceneGrid)
         {
-            EditorGUILayout.HelpBox("Assign a WorldGrid from the scene to edit its configuration.", MessageType.Info);
+            EditorGUILayout.HelpBox("Assign a WorldGrid from the scene to edit its configuration", MessageType.Info);
             return;
         }
 
@@ -89,28 +94,22 @@ public class WorldGridEditorWindow : EditorWindow
             EditorGUILayout.LabelField("Dimensions (cells)", EditorStyles.boldLabel);
             _sceneGrid.sizeX = EditorGUILayout.IntSlider(new GUIContent("Size X"), _sceneGrid.sizeX, 1, MaxCells);
             _sceneGrid.sizeY = EditorGUILayout.IntSlider(new GUIContent("Size Y"), _sceneGrid.sizeY, 1, MaxCells);
-        
 
             EditorGUILayout.Space();
-            EditorGUILayout.LabelField("Metrics (meters)", EditorStyles.boldLabel);
-
-            EditorGUILayout.Space();
-        
 
             if (GUILayout.Button(new GUIContent("Apply Settings"), GUILayout.Height(24)))
             {
                 Undo.RecordObject(_sceneGrid, "Apply Grid Settings");
                 _sceneGrid.EditorApplySettings();
                 EditorUtility.SetDirty(_sceneGrid);
-            
+
                 if (_visualizer != null && _visualizer.grid == _sceneGrid)
                 {
                     _visualizer.RebuildNow();
-                    _visualizer.RecomputeAndApplyColorsForLevel();
                     _visualizer.SyncRendererMaterial();
                     EditorUtility.SetDirty(_visualizer);
                 }
-            
+
                 SceneView.RepaintAll();
                 EditorApplication.QueuePlayerLoopUpdate();
             }
@@ -124,6 +123,7 @@ public class WorldGridEditorWindow : EditorWindow
         }
     }
 
+    
     private void DrawVisualizerGUI()
     {
         using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
@@ -162,11 +162,11 @@ public class WorldGridEditorWindow : EditorWindow
 
             if (!_visualizer)
             {
-                EditorGUILayout.HelpBox("Add or create a GridVisualizer to control how the grid is rendered.", MessageType.Info);
+                EditorGUILayout.HelpBox("Add or create a GridVisualizer to control how the grid is rendered", MessageType.Info);
                 return;
             }
 
-            // Material asset, with hard sync to renderer on change
+            // Material
             EditorGUILayout.Space(5);
             EditorGUI.BeginChangeCheck();
             var newMat = (Material)EditorGUILayout.ObjectField(
@@ -176,7 +176,7 @@ public class WorldGridEditorWindow : EditorWindow
             {
                 Undo.RecordObject(_visualizer, "Assign Grid Material");
                 _visualizer.material = newMat;
-                _visualizer.SyncRendererMaterial();  // << key line
+                _visualizer.SyncRendererMaterial();
                 _visualizer.RebuildNow();
                 EditorUtility.SetDirty(_visualizer);
                 SceneView.RepaintAll();
@@ -209,12 +209,66 @@ public class WorldGridEditorWindow : EditorWindow
                 using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
                 {
                     EditorGUI.BeginChangeCheck();
+                    
                     _visualizer.showGrid = EditorGUILayout.Toggle("Show Grid", _visualizer.showGrid);
+                    _visualizer.enableCellColors = EditorGUILayout.Toggle("Enable Cell Colors", _visualizer.enableCellColors);
+                    
+                    EditorGUILayout.Space(3);
+                    
+                    _visualizer.cellOpacity = EditorGUILayout.Slider(
+                        new GUIContent("Cell Opacity"), 
+                        _visualizer.cellOpacity, 0f, 1f);
+                    
+                    _visualizer.neighborFade = EditorGUILayout.Slider(
+                        new GUIContent("Neighbor Fade"), 
+                        _visualizer.neighborFade, 0f, 1f);
+                    
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        EditorUtility.SetDirty(_visualizer);
+                        SceneView.RepaintAll();
+                        EditorApplication.QueuePlayerLoopUpdate();
+                    }
+                }
+            }
 
-
-                    _visualizer.lineThickness = EditorGUILayout.Slider(new GUIContent("Line Thickness (m)"), _visualizer.lineThickness, 0.001f, 0.5f);
-                    _visualizer.lineColor = EditorGUILayout.ColorField("Line Color", _visualizer.lineColor);
-                    _visualizer.neighborFade = EditorGUILayout.Slider(new GUIContent("Neighbor Fade"), _visualizer.neighborFade, 0f, 1f);
+            // Lines
+            _showVizLines = EditorGUILayout.Foldout(_showVizLines, "Lines", true);
+            if (_showVizLines)
+            {
+                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+                {
+                    EditorGUI.BeginChangeCheck();
+                    
+                    _visualizer.lineThickness = EditorGUILayout.Slider(
+                        new GUIContent("Line Thickness (m)"), 
+                        _visualizer.lineThickness, 0.001f, 0.5f);
+                    
+                    _visualizer.lineOpacity = EditorGUILayout.Slider(
+                        new GUIContent("Line Opacity"), 
+                        _visualizer.lineOpacity, 0f, 1f);
+                    
+                    EditorGUILayout.Space(3);
+                    
+                    _visualizer.lineColorMode = (GridVisualizer.LineColorMode)EditorGUILayout.EnumPopup(
+                        new GUIContent("Line Color Mode"), 
+                        _visualizer.lineColorMode);
+                    
+                    if (_visualizer.lineColorMode == GridVisualizer.LineColorMode.Solid)
+                    {
+                        _visualizer.solidLineColor = EditorGUILayout.ColorField(
+                            "Solid Line Color", 
+                            _visualizer.solidLineColor);
+                    }
+                    else
+                    {
+                        EditorGUILayout.HelpBox(
+                            _visualizer.lineColorMode == GridVisualizer.LineColorMode.Blend
+                                ? "Lines blend colors from adjacent cells"
+                                : "Lines use the higher priority cell's color",
+                            MessageType.Info);
+                    }
+                    
                     if (EditorGUI.EndChangeCheck())
                     {
                         EditorUtility.SetDirty(_visualizer);
@@ -231,13 +285,26 @@ public class WorldGridEditorWindow : EditorWindow
                 using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
                 {
                     EditorGUI.BeginChangeCheck();
-                    _visualizer.tubeLook = EditorGUILayout.Toggle(new GUIContent("Enable Tube Look"), _visualizer.tubeLook);
+                    
+                    _visualizer.tubeLook = EditorGUILayout.Toggle(
+                        new GUIContent("Enable Tube Look"), 
+                        _visualizer.tubeLook);
+                    
                     using (new EditorGUI.DisabledScope(!_visualizer.tubeLook))
                     {
-                        _visualizer.tubeJoinSmooth   = EditorGUILayout.Slider(new GUIContent("Join Smooth (m)"), _visualizer.tubeJoinSmooth, 0f, 0.25f);
-                        _visualizer.tubeLightStrength = EditorGUILayout.Slider(new GUIContent("Light Strength"), _visualizer.tubeLightStrength, 0f, 1f);
-                        _visualizer.tubeRimStrength   = EditorGUILayout.Slider(new GUIContent("Rim Strength"),   _visualizer.tubeRimStrength, 0f, 1f);
+                        _visualizer.tubeJoinSmooth = EditorGUILayout.Slider(
+                            new GUIContent("Join Smooth (m)"), 
+                            _visualizer.tubeJoinSmooth, 0f, 0.25f);
+                        
+                        _visualizer.tubeLightStrength = EditorGUILayout.Slider(
+                            new GUIContent("Light Strength"), 
+                            _visualizer.tubeLightStrength, 0f, 1f);
+                        
+                        _visualizer.tubeRimStrength = EditorGUILayout.Slider(
+                            new GUIContent("Rim Strength"), 
+                            _visualizer.tubeRimStrength, 0f, 1f);
                     }
+                    
                     if (EditorGUI.EndChangeCheck())
                     {
                         EditorUtility.SetDirty(_visualizer);
@@ -254,8 +321,15 @@ public class WorldGridEditorWindow : EditorWindow
                 using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
                 {
                     EditorGUI.BeginChangeCheck();
-                    _visualizer.yBias = EditorGUILayout.Slider(new GUIContent("Y Bias (m)"), _visualizer.yBias, 0f, 0.05f);
-                    _visualizer.zTestAlways = EditorGUILayout.Toggle(new GUIContent("ZTest Always (draw on top)"), _visualizer.zTestAlways);
+                    
+                    _visualizer.yBias = EditorGUILayout.Slider(
+                        new GUIContent("Y Bias (m)"), 
+                        _visualizer.yBias, 0f, 0.05f);
+                    
+                    _visualizer.zTestAlways = EditorGUILayout.Toggle(
+                        new GUIContent("ZTest Always (draw on top)"), 
+                        _visualizer.zTestAlways);
+                    
                     if (EditorGUI.EndChangeCheck())
                     {
                         EditorUtility.SetDirty(_visualizer);
@@ -266,42 +340,17 @@ public class WorldGridEditorWindow : EditorWindow
             }
 
             // Colors
-            _showVizColors = EditorGUILayout.Foldout(_showVizColors, "Colors", true);
+            _showVizColors = EditorGUILayout.Foldout(_showVizColors, "Flag Colors", true);
             if (_showVizColors)
             {
                 using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
                 {
                     EditorGUI.BeginChangeCheck();
 
-                    _visualizer.enableCellColors = EditorGUILayout.Toggle("Enable Cell Colors", _visualizer.enableCellColors);
-                    _visualizer.defaultCellColor = EditorGUILayout.ColorField("Default Cell Color", _visualizer.defaultCellColor);
-                    _visualizer.highlightColor   = EditorGUILayout.ColorField("Highlight Color", _visualizer.highlightColor);
-
-                    EditorGUILayout.Space(5);
-
-                    using (new EditorGUILayout.HorizontalScope())
-                    {
-                        if (GUILayout.Button("Recompute Grid Colors", GUILayout.Width(220)))
-                        {
-                            _visualizer.RecomputeAndApplyColorsForLevel();
-                            EditorUtility.SetDirty(_visualizer);
-                            SceneView.RepaintAll();
-                            EditorApplication.QueuePlayerLoopUpdate();
-                        }
-
-                        if (GUILayout.Button("Fill With Default"))
-                        {
-                            _visualizer.FillAllCells(_visualizer.defaultCellColor);
-                            _visualizer.ApplyColorMap();
-                            EditorUtility.SetDirty(_visualizer);
-                            SceneView.RepaintAll();
-                            EditorApplication.QueuePlayerLoopUpdate();
-                        }
-                    }
-
-                    EditorGUILayout.Space(5);
-
                     EditorGUILayout.LabelField("Per-Flag Colors", EditorStyles.boldLabel);
+                    EditorGUILayout.HelpBox("Each cell displays the color of its highest priority flag", MessageType.None);
+
+                    EditorGUILayout.Space(3);
 
                     if (_visualizer.flagColors != null)
                     {
@@ -311,15 +360,14 @@ public class WorldGridEditorWindow : EditorWindow
                             var fc = _visualizer.flagColors[i];
                             using (new EditorGUILayout.HorizontalScope())
                             {
-                                fc.flag  = (CellFlag)EditorGUILayout.EnumPopup(GUIContent.none, fc.flag, GUILayout.Width(120));
+                                fc.flag = (CellFlag)EditorGUILayout.EnumPopup(GUIContent.none, fc.flag, GUILayout.Width(120));
                                 fc.color = EditorGUILayout.ColorField(fc.color);
                                 if (GUILayout.Button("×", GUILayout.Width(22)))
                                     removeIndex = i;
                             }
                             _visualizer.flagColors[i] = fc;
                         }
-                        
-                        // Handle removal after iteration
+
                         if (removeIndex >= 0)
                         {
                             Undo.RecordObject(_visualizer, "Remove Flag Color");
@@ -328,21 +376,20 @@ public class WorldGridEditorWindow : EditorWindow
                             _visualizer.flagColors = list.ToArray();
                         }
                     }
-                    
-                    // Add new flag color button
+
                     using (new EditorGUILayout.HorizontalScope())
                     {
                         GUILayout.FlexibleSpace();
                         if (GUILayout.Button("+ Add Flag Color", GUILayout.Width(120)))
                         {
                             Undo.RecordObject(_visualizer, "Add Flag Color");
-                            var list = _visualizer.flagColors != null 
-                                ? new System.Collections.Generic.List<GridVisualizer.FlagColor>(_visualizer.flagColors) 
+                            var list = _visualizer.flagColors != null
+                                ? new System.Collections.Generic.List<GridVisualizer.FlagColor>(_visualizer.flagColors)
                                 : new System.Collections.Generic.List<GridVisualizer.FlagColor>();
-                            list.Add(new GridVisualizer.FlagColor 
-                            { 
-                                flag = CellFlag.Empty, 
-                                color = new Color(0.5f, 0.5f, 0.5f, 0.35f) 
+                            list.Add(new GridVisualizer.FlagColor
+                            {
+                                flag = CellFlag.Empty,
+                                color = new Color(0.5f, 0.5f, 0.5f, 1f)
                             });
                             _visualizer.flagColors = list.ToArray();
                         }
@@ -350,7 +397,6 @@ public class WorldGridEditorWindow : EditorWindow
 
                     if (EditorGUI.EndChangeCheck())
                     {
-                        _visualizer.RecomputeAndApplyColorsForLevel();
                         EditorUtility.SetDirty(_visualizer);
                         SceneView.RepaintAll();
                         EditorApplication.QueuePlayerLoopUpdate();
@@ -360,11 +406,12 @@ public class WorldGridEditorWindow : EditorWindow
         }
     }
 
-    // ---------- Helpers ----------
-
+    
+    #region Helpers
+    
+    
     private static void FrameGridBounds(WorldGrid grid)
     {
-#if UNITY_EDITOR
         if (grid == null) return;
 
         float w = Mathf.Max(1f, grid.sizeX * WorldGrid.CellSize);
@@ -383,19 +430,21 @@ public class WorldGridEditorWindow : EditorWindow
         sv.size = Mathf.Max(w, h) * 0.6f;
         sv.rotation = Quaternion.Euler(90f, 0f, 0f);
         sv.Repaint();
-#endif
     }
 
+    
     private static WorldGrid FindWorldGrid()
     {
         return FindFirstObjectByType<WorldGrid>(FindObjectsInactive.Exclude);
     }
 
+    
     private static GridVisualizer FindVisualizer()
     {
         return FindFirstObjectByType<GridVisualizer>(FindObjectsInactive.Exclude);
     }
 
+    
     private static GridVisualizer CreateVisualizer()
     {
         var go = new GameObject("Grid Visualizer");
@@ -404,16 +453,16 @@ public class WorldGridEditorWindow : EditorWindow
         return vis;
     }
 
+    
     private static Material CreateAndAssignGridMaterial(GridVisualizer vis)
     {
-    #if UNITY_EDITOR
         if (!vis) return null;
 
         var shader = Shader.Find("WaterCity/Grid/URPGrid");
         if (!shader)
         {
             EditorUtility.DisplayDialog("Shader Missing",
-                "Shader 'WaterCity/Grid/URPGrid' not found.\n\nMake sure it exists at Assets/Shaders/URP_Grid.shader.", "OK");
+                "Shader 'WaterCity/Grid/URPGrid' not found\n\nMake sure it exists at Assets/Shaders/URP_Grid.shader", "OK");
             return null;
         }
 
@@ -422,21 +471,23 @@ public class WorldGridEditorWindow : EditorWindow
             AssetDatabase.CreateFolder("Assets", "Materials");
 
         var path = AssetDatabase.GenerateUniqueAssetPath(Path.Combine(folder, "GridVisualizer_Mat.mat"));
-        var mat = new Material(shader) { name = System.IO.Path.GetFileNameWithoutExtension(path) };
-        
+        var mat = new Material(shader) { name = Path.GetFileNameWithoutExtension(path) };
+
         AssetDatabase.CreateAsset(mat, path);
         AssetDatabase.SaveAssets();
         EditorGUIUtility.PingObject(mat);
 
         Undo.RecordObject(vis, "Assign Grid Material");
         vis.material = mat;
-        vis.SyncRendererMaterial(); // make renderer use it immediately
+        vis.SyncRendererMaterial();
         vis.RebuildNow();
         SceneView.RepaintAll();
         EditorApplication.QueuePlayerLoopUpdate();
         return mat;
-    #endif
     }
+    
+    
+    #endregion
 }
 }
 #endif
