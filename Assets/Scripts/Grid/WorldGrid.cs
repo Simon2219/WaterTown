@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
-using Unity.VisualScripting;
+using System.Linq;
 using UnityEngine;
 
 namespace Grid
@@ -18,7 +18,7 @@ namespace Grid
 public class WorldGrid : MonoBehaviour
 {
     
-    #region Configuration & Data Structures
+    #region Configuration
 
     [Header("Grid Dimensions (cells)")]
     
@@ -29,7 +29,7 @@ public class WorldGrid : MonoBehaviour
     public const int CellSize = 1;
 
     // Storage [x, y]
-    private CellData[,] _cells;
+    private GridCellData[,] _cells;
 
     // Change events
     public event Action<Vector2Int> CellChanged;             // single cell modified
@@ -43,7 +43,7 @@ public class WorldGrid : MonoBehaviour
     #endregion
  
     
-    #region Lifecycle & Initialization
+    #region Lifecycle
     
     // ---------- Lifecycle ----------
 
@@ -59,8 +59,6 @@ public class WorldGrid : MonoBehaviour
             ErrorHandler.LogAndDisable(ex, this);
         }
     }
-    
-
     
 #if UNITY_EDITOR
     
@@ -97,6 +95,7 @@ public class WorldGrid : MonoBehaviour
     }
     
     
+
     private void AllocateIfNeeded()
     {
         sizeX = Mathf.Max(1, sizeX);
@@ -104,8 +103,7 @@ public class WorldGrid : MonoBehaviour
         
         if (_cells == null)
         {
-            _cells = new CellData[sizeX, sizeY];
-            InitializeCellInstances();
+            InitializeGridCells();
             return;
         }
         
@@ -115,8 +113,7 @@ public class WorldGrid : MonoBehaviour
 
         if (sizeChanged)
         {
-            _cells = new CellData[sizeX, sizeY];
-            InitializeCellInstances();
+            InitializeGridCells();
             GridChanged?.Invoke();
         }
     }
@@ -126,20 +123,17 @@ public class WorldGrid : MonoBehaviour
     /// Initializes all cell instances in the array
     /// Required because CellData is a class (reference type)
     ///
-    private void InitializeCellInstances()
+    private void InitializeGridCells()
     {
+        _cells = new GridCellData[sizeX, sizeY];
+        
         for (int y = 0; y < sizeY; y++)
         for (int x = 0; x < sizeX; x++)
         {
-            _cells[x, y] = new CellData();
-            _cells[x, y].Initialize(this, new Vector2Int(x, y));
+            _cells[x, y] = new GridCellData(this, new Vector2Int(x, y));
         }
     }
     
-    #endregion
-
-    
-    #region Internal Notification
     
     
     /// Called by CellData when its flags are modified
@@ -161,7 +155,33 @@ public class WorldGrid : MonoBehaviour
     
     #endregion
 
-    #region Coordinate Transforms & Bounds
+    
+    #region Cell Functions & Area Operations
+    
+    
+    
+    /// Raycast to plane (y = 0), return hit world point + cell if inside
+    ///
+    public bool RaycastToCell(Ray worldRay, out Vector2Int cell, out Vector3 hitPoint)
+    {
+        var plane = new Plane(Vector3.up, new Vector3(0f, 0f, 0f));
+        
+        if (plane.Raycast(worldRay, out float dist))
+        {
+            hitPoint = worldRay.origin + worldRay.direction * dist;
+            
+            cell = WorldToCell(hitPoint);
+            
+            return CellInBounds(cell);
+        }
+        
+        cell = default; 
+        hitPoint = default;
+        
+        return false;
+    }
+    
+    
     
     // ---------- Bounds & transforms ----------
 
@@ -185,9 +205,14 @@ public class WorldGrid : MonoBehaviour
     {
         var neighbors = new HashSet<Vector2Int>();
         
-        foreach (Vector2Int cell in cells)
+        IEnumerable<Vector2Int> localneighbors = 
+            cells
+                .Select(cell => GetNeighborCells(cell, include8Directional))
+                .SelectMany(cellNeighbors => cellNeighbors);
+        
+        foreach (var neighbor in localneighbors)
         {
-            neighbors.AddRange(GetNeighborCells(cell, include8Directional));
+            neighbors.Add(neighbor);
         }
         
         return neighbors;
@@ -402,80 +427,7 @@ public class WorldGrid : MonoBehaviour
         return true;
     }
     
-    #endregion
-
-    #region Raycast Helpers
     
-    // ---------- Raycast helper ----------
-    
-    
-    /// Raycast to plane (y = 0), return hit world point + cell if inside
-    ///
-    public bool RaycastToCell(Ray worldRay, out Vector2Int cell, out Vector3 hitPoint)
-    {
-        var plane = new Plane(Vector3.up, new Vector3(0f, 0f, 0f));
-        
-        if (plane.Raycast(worldRay, out float dist))
-        {
-            hitPoint = worldRay.origin + worldRay.direction * dist;
-            
-            cell = WorldToCell(hitPoint);
-            
-            return CellInBounds(cell);
-        }
-        
-        cell = default; 
-        hitPoint = default;
-        
-        return false;
-    }
-    
-    #endregion
-
-    #region Cell Data Access & Flags
-    
-
-    /// Gets the CellData at the specified position
-    /// Returns false if out of bounds
-    /// Primary way to access and manipulate cell flags
-    /// 
-    public bool TryGetCell(Vector2Int cell, out CellData data)
-    {
-        if (!CellInBounds(cell))
-        {
-            data = null;
-            return false;
-        }
-        
-        data = _cells[cell.x, cell.y];
-        return true;
-    }
-    
-    
-    /// Gets the CellData at the specified position
-    /// Returns null if out of bounds
-    /// 
-    public CellData GetCell(Vector2Int cell)
-    {
-        if (!CellInBounds(cell)) return null;
-        return _cells[cell.x, cell.y];
-    }
-
-    
-    
-    /// Gets the world position of the edge center between two adjacent cells
-    /// Returns the midpoint between the centers of cellA and cellB
-    /// 
-    public Vector3 GetEdgeCenterBetweenCells(Vector2Int cellA, Vector2Int cellB)
-    {
-        Vector3 centerA = GetCellCenter(cellA);
-        Vector3 centerB = GetCellCenter(cellB);
-        return (centerA + centerB) * ((float)CellSize / 2);
-    }
-    
-    #endregion
-
-    #region Area Operations
     
     // ---------- Area helpers (two corners, inclusive) ----------
 
@@ -650,11 +602,11 @@ public class WorldGrid : MonoBehaviour
     
     /// Get cells in area with exactly the specified flags
     ///
-    public List<CellData> GetCellsWithAllFlags(Vector2Int a, Vector2Int b, CellFlag flags)
+    public List<GridCellData> GetCellsWithAllFlags(Vector2Int a, Vector2Int b, CellFlag flags)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
         
-        var cells = new List<CellData>();
+        var cells = new List<GridCellData>();
         
         for (int y = min.y; y <= max.y; y++)
         for (int x = min.x; x <= max.x; x++)
@@ -670,11 +622,11 @@ public class WorldGrid : MonoBehaviour
     
     /// Get cells in area with ANY bit in flags
     ///
-    public List<CellData> GetCellsWithAnyFlag(Vector2Int a, Vector2Int b, CellFlag flags)
+    public List<GridCellData> GetCellsWithAnyFlag(Vector2Int a, Vector2Int b, CellFlag flags)
     {
         ClampAreaInclusive(a, b, out var min, out var max);
         
-        var cells = new List<CellData>();
+        var cells = new List<GridCellData>();
         
         for (int y = min.y; y <= max.y; y++)
         for (int x = min.x; x <= max.x; x++)
@@ -686,6 +638,53 @@ public class WorldGrid : MonoBehaviour
         return cells;
     }
     
+    
     #endregion
+    
+
+    #region Cell Data Access & Flags
+    
+
+    /// Gets the CellData at the specified position
+    /// Returns false if out of bounds
+    /// Primary way to access and manipulate cell flags
+    /// 
+    public bool TryGetCell(Vector2Int cell, out GridCellData data)
+    {
+        if (!CellInBounds(cell))
+        {
+            data = null;
+            return false;
+        }
+        
+        data = _cells[cell.x, cell.y];
+        return true;
+    }
+    
+    
+    /// Gets the CellData at the specified position
+    /// Returns null if out of bounds
+    /// 
+    public GridCellData GetCell(Vector2Int cell)
+    {
+        if (!CellInBounds(cell)) return null;
+        return _cells[cell.x, cell.y];
+    }
+
+    
+    
+    /// Gets the world position of the edge center between two adjacent cells
+    /// Returns the midpoint between the centers of cellA and cellB
+    /// 
+    public Vector3 GetEdgeCenterBetweenCells(Vector2Int cellA, Vector2Int cellB)
+    {
+        Vector3 centerA = GetCellCenter(cellA);
+        Vector3 centerB = GetCellCenter(cellB);
+        return (centerA + centerB) * ((float)CellSize / 2);
+    }
+    
+    #endregion
+    
+    
 }
 }

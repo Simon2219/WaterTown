@@ -26,7 +26,7 @@ public enum CellFlag
 /// Class (reference type) with back-reference to grid for automatic notifications
 ///
 [Serializable]
-public class CellData
+public class GridCellData
 {
     [SerializeField] private CellFlag flags;
 
@@ -48,10 +48,7 @@ public class CellData
 
 
 
-    /// Initializes the cell with its grid reference and position
-    /// Called by WorldGrid during allocation
-    ///
-    internal void Initialize(WorldGrid grid, Vector2Int position)
+    public GridCellData(WorldGrid grid, Vector2Int position)
     {
         _grid = grid;
         _position = position;

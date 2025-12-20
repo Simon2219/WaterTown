@@ -19,7 +19,7 @@ namespace Platforms
 [DefaultExecutionOrder(10)] // Run after GamePlatform (which is at -10)
 public class PlatformManager : MonoBehaviour
 {
-    #region Inspector Fields
+    #region Configuration
 
 
     [Header("Events")] 
@@ -29,13 +29,7 @@ public class PlatformManager : MonoBehaviour
 
     [Tooltip("Invoked when a platform is removed/unregistered.")]
     public UnityEvent<GamePlatform> PlatformRemoved;
-
-
-    #endregion
-
-
-
-    #region Configuration & Constants
+    
 
 
     private WorldGrid _worldGrid;
@@ -61,7 +55,8 @@ public class PlatformManager : MonoBehaviour
 
     #endregion
 
-    #region Unity Lifecycle
+    
+    #region Lifecycle
 
     private void Awake()
     {
@@ -109,10 +104,9 @@ public class PlatformManager : MonoBehaviour
     }
 
     #endregion
-
     
     
-    #region Event Handlers & Functions
+    #region Event Handlers
     
     
     /// Static GamePlatform Event - Platform Spawned
@@ -176,15 +170,11 @@ public class PlatformManager : MonoBehaviour
     ///
     private void OnPlatformPlaced(GamePlatform platform)
     {
-        if (!platform) return;
-
         // Register platform in grid
         RegisterPlatform(platform);
 
-        // Mark this platform and its neighbors for adjacency update
-        MarkAdjacencyDirtyForPlatform(platform);
-
         // Force immediate adjacency computation so connections are known
+        MarkAdjacencyDirtyForPlatform(platform);
         RecomputeAdjacencyForAffectedPlatforms();
     }
 
@@ -195,7 +185,6 @@ public class PlatformManager : MonoBehaviour
     ///
     private void OnPlatformPickedUp(GamePlatform platform)
     {
-        
         ClearCellsForPlatform(platform);
         
         // Mark affected platforms (neighbors at old position) for adjacency update
@@ -320,11 +309,6 @@ public class PlatformManager : MonoBehaviour
         }
     }
     
-
-    #endregion
-
-    
-    #region Public API (Platform Registration & Queries)
 
 
     /// Get the platform occupying a specific cell, if any

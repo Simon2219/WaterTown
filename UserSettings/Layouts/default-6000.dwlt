@@ -19,7 +19,7 @@ MonoBehaviour:
     width: 2048
     height: 1085.6
   m_ShowMode: 4
-  m_Title: Scene
+  m_Title: Game
   m_RootView: {fileID: 11}
   m_MinSize: {x: 875, y: 300}
   m_MaxSize: {x: 10000, y: 10000}
@@ -1032,7 +1032,7 @@ MonoBehaviour:
       m_LastClickedID:
         m_Data: 0
       m_ExpandedIDs:
-      - m_Data: -1336
+      - m_Data: -1340
       m_RenameOverlay:
         m_UserAcceptedRename: 0
         m_Name: 
@@ -2001,7 +2001,7 @@ MonoBehaviour:
     m_SkipHidden: 0
     m_SearchArea: 1
     m_Folders:
-    - Assets/Prefabs/Agents
+    - Assets
     m_Globs: []
     m_ProductIds: 
     m_AnyWithAssetOrigin: 0
@@ -2011,7 +2011,7 @@ MonoBehaviour:
   m_ViewMode: 1
   m_StartGridSize: 96
   m_LastFolders:
-  - Assets/Prefabs/Agents
+  - Assets
   m_LastFoldersGridSize: 96
   m_LastProjectPath: S:\Unity Projects\WaterTown
   m_LockTracker:
@@ -2020,19 +2020,19 @@ MonoBehaviour:
   m_FolderTreeState:
     scrollPos: {x: 0, y: 0}
     m_SelectedIDs:
-    - m_Data: 61156
+    - m_Data: 61944
     m_LastClickedID:
-      m_Data: 61156
+      m_Data: 61944
     m_ExpandedIDs:
     - m_Data: 0
-    - m_Data: 61944
-    - m_Data: 61946
-    - m_Data: 61948
-    - m_Data: 61950
-    - m_Data: 61952
-    - m_Data: 61954
-    - m_Data: 61956
-    - m_Data: 61958
+    - m_Data: 60948
+    - m_Data: 60950
+    - m_Data: 60952
+    - m_Data: 60954
+    - m_Data: 60956
+    - m_Data: 60958
+    - m_Data: 60960
+    - m_Data: 60962
     m_RenameOverlay:
       m_UserAcceptedRename: 0
       m_Name: 
@@ -2065,14 +2065,14 @@ MonoBehaviour:
       m_Data: 0
     m_ExpandedIDs:
     - m_Data: 0
-    - m_Data: 61944
-    - m_Data: 61946
-    - m_Data: 61948
-    - m_Data: 61950
-    - m_Data: 61952
-    - m_Data: 61954
-    - m_Data: 61956
-    - m_Data: 61958
+    - m_Data: 60948
+    - m_Data: 60950
+    - m_Data: 60952
+    - m_Data: 60954
+    - m_Data: 60956
+    - m_Data: 60958
+    - m_Data: 60960
+    - m_Data: 60962
     m_RenameOverlay:
       m_UserAcceptedRename: 0
       m_Name: 
@@ -2121,7 +2121,7 @@ MonoBehaviour:
       m_OriginalEventType: 11
       m_IsRenamingFilename: 1
       m_TrimLeadingAndTrailingWhitespace: 0
-      m_ClientGUIView: {fileID: 5}
+      m_ClientGUIView: {fileID: 7}
     m_CreateAssetUtility:
       m_EndAction: {fileID: 0}
       m_InstanceID: 0

@@ -24,33 +24,7 @@ namespace Platforms
 
 public class GamePlatform : MonoBehaviour, IPickupable
 {
-    #region Events
-    
-    
-    public event Action<GamePlatform> ConnectionsChanged; // connection/railing state changes
-    
-    public event Action<GamePlatform> HasMoved; // (position/rotation/scale changes)
-    
-    public static event Action<GamePlatform> Created; // When ANY platform is created (for initial discovery)
-    
-    public static event Action<GamePlatform> Destroyed; // When ANY platform is destroyed (for cleanup)
-    
-    public event Action<GamePlatform> Enabled; // OnEnable
-    
-    public event Action<GamePlatform> Disabled; // OnDisable
-    
-    public event Action<GamePlatform> Placed; // When this platform is placed ( successful )
-    
-    public event Action<GamePlatform> PickedUp; // When this platform is picked up (before being moved)
-    
-    public event Action<GamePlatform> PlacementCancelled; // When placement is cancelled
-    
-    
-    #endregion
-    
-    
-    
-    #region Dependencies | Sub-Components | Declarations
+    #region Configuration
     
     
     [Header("Footprint (cells @ 1m)")]
@@ -98,6 +72,30 @@ public class GamePlatform : MonoBehaviour, IPickupable
     
     #endregion
     
+    
+    #region Events
+    
+    
+    public event Action<GamePlatform> ConnectionsChanged; // connection/railing state changes
+    
+    public event Action<GamePlatform> HasMoved; // (position/rotation/scale changes)
+    
+    public static event Action<GamePlatform> Created; // When ANY platform is created (for initial discovery)
+    
+    public static event Action<GamePlatform> Destroyed; // When ANY platform is destroyed (for cleanup)
+    
+    public event Action<GamePlatform> Enabled; // OnEnable
+    
+    public event Action<GamePlatform> Disabled; // OnDisable
+    
+    public event Action<GamePlatform> Placed; // When this platform is placed ( successful )
+    
+    public event Action<GamePlatform> PickedUp; // When this platform is picked up (before being moved)
+    
+    public event Action<GamePlatform> PlacementCancelled; // When placement is cancelled
+    
+    
+    #endregion
     
     
     #region Initialization
@@ -319,7 +317,6 @@ public class GamePlatform : MonoBehaviour, IPickupable
     #endregion
     
     
-    
     #region Socket Interface Methods & Type Aliases
     
     
@@ -409,7 +406,6 @@ public class GamePlatform : MonoBehaviour, IPickupable
     #endregion
     
     
-    
     #region Module Interface Methods
     
     
@@ -430,7 +426,6 @@ public class GamePlatform : MonoBehaviour, IPickupable
     
     
     #endregion
-    
     
     
     #region Railing Interface Methods
