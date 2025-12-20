@@ -130,14 +130,15 @@ Shader "WaterCity/Grid/URPGrid"
                 }
 
                 float4 fillCol = cellCol;
-                fillCol.a *= (_EnableFill > 0.5) ? 1.0 : 0.0;
-
                 float4 lineCol = _LineColor;
 
-                float aFill = fillCol.a * (1.0 - lineMask);
-                float aLine = lineCol.a * lineMask;
-                float3 rgb  = fillCol.rgb * aFill + lineCol.rgb * aLine;
-                float  a    = saturate(aFill + aLine);
+                // Fill alpha (0 if cell fill disabled)
+                float fillA = fillCol.a * (_EnableFill > 0.5 ? 1.0 : 0.0);
+
+                // Blend colors and alphas based on line mask
+                float3 rgb = lerp(fillCol.rgb, lineCol.rgb, lineMask);
+                float  a   = lerp(fillA, lineCol.a, lineMask);
+                
                 return float4(rgb, a);
             }
             ENDHLSL
