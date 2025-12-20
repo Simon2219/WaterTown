@@ -269,12 +269,8 @@ public class WorldGridEditorWindow : EditorWindow
                             _visualizer.lineNeighborFade, 0f, 1f);
                         
                         _visualizer.lineBlendFalloff = EditorGUILayout.Slider(
-                            new GUIContent("Blend Falloff", "How aggressively the color fades (lower = more gradual, higher = sharper)"), 
+                            new GUIContent("Blend Falloff", "Color retention strength (higher = color stays stronger longer)"), 
                             _visualizer.lineBlendFalloff, 0.1f, 3f);
-                        
-                        _visualizer.linePriorityOverride = EditorGUILayout.Toggle(
-                            new GUIContent("Priority Override", "On: highest priority wins. Off: blend colors together"), 
-                            _visualizer.linePriorityOverride);
                     }
                     
                     EditorGUILayout.Space(3);

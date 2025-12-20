@@ -7,7 +7,6 @@ Shader "WaterCity/Grid/URPGrid"
         _LineColorMode("Line Color Mode", Float) = 0.0
         _LineNeighborFade("Line Neighbor Fade", Range(0,1)) = 0.0
         _LineBlendFalloff("Line Blend Falloff", Range(0.1,3)) = 1.0
-        _LinePriorityOverride("Line Priority Override", Float) = 1.0
         _LineWidth("Line Width (m)", Float) = 0.05
         _CellSize("Cell Size (m)", Float) = 1.0
         _EnableFill("Enable Cell Fill", Float) = 1.0
@@ -68,7 +67,6 @@ Shader "WaterCity/Grid/URPGrid"
             float  _LineColorMode;
             float  _LineNeighborFade;
             float  _LineBlendFalloff;
-            float  _LinePriorityOverride;
             float  _LineWidth;
             float  _CellSize;
             float4 _GridOrigin;
@@ -170,133 +168,73 @@ Shader "WaterCity/Grid/URPGrid"
                     cells[7] = SampleCellData(cell + int2(-1, 1), size);    offsets[7] = float2(-1, 1);
                     cells[8] = SampleCellData(cell + int2( 1, 1), size);    offsets[8] = float2( 1, 1);
                     
-                    // Find closest status cell and check if we're in "solid zone" (within 0.5 of any status cell)
+                    // Find closest status cell
                     float minDistToStatus = 999.0;
-                    float3 closestColor = _LineColor.rgb;
-                    float closestPriority = 0;
-                    
                     for (int k = 0; k < 9; k++)
                     {
                         if (cells[k].a < 0.01) continue;
                         float dist = length(relPos - offsets[k]);
-                        if (dist < minDistToStatus)
-                        {
-                            minDistToStatus = dist;
-                            closestColor = cells[k].rgb;
-                            closestPriority = cells[k].a;
-                        }
+                        minDistToStatus = min(minDistToStatus, dist);
                     }
                     
-                    // If within 0.5 of a status cell, use solid color (no blend to default)
+                    // Solid zone: within 0.5 of any status cell (lines directly beside status cells)
                     bool inSolidZone = (minDistToStatus <= 0.5);
+                    
+                    // Bleed extends from 0.5 to (0.5 + 1.5 * fade) so fade=1 reaches full next cell
+                    float bleedStart = 0.5;
+                    float bleedEnd = bleedStart + _LineNeighborFade * 1.5;
                     
                     if (inSolidZone)
                     {
-                        // Check if multiple status cells overlap in solid zone
-                        if (_LinePriorityOverride > 0.5)
-                        {
-                            // Use highest priority cell's color
-                            float bestPriority = 0;
-                            float3 bestColor = _LineColor.rgb;
-                            
-                            for (int i = 0; i < 9; i++)
-                            {
-                                if (cells[i].a < 0.01) continue;
-                                float dist = length(relPos - offsets[i]);
-                                if (dist <= 0.5 && cells[i].a > bestPriority)
-                                {
-                                    bestPriority = cells[i].a;
-                                    bestColor = cells[i].rgb;
-                                }
-                            }
-                            lineRgb = bestColor;
-                        }
-                        else
-                        {
-                            // Blend colors of all cells within solid zone by inverse distance
-                            float3 colorSum = float3(0, 0, 0);
-                            float weightSum = 0;
-                            
-                            for (int i = 0; i < 9; i++)
-                            {
-                                if (cells[i].a < 0.01) continue;
-                                float dist = length(relPos - offsets[i]);
-                                if (dist <= 0.5)
-                                {
-                                    float weight = 1.0 / max(dist, 0.01);
-                                    colorSum += cells[i].rgb * weight;
-                                    weightSum += weight;
-                                }
-                            }
-                            lineRgb = (weightSum > 0.001) ? (colorSum / weightSum) : _LineColor.rgb;
-                        }
-                    }
-                    else if (_LineNeighborFade > 0.001)
-                    {
-                        // Beyond solid zone: blend toward default with distance
-                        // Bleed starts at 0.5, extends by neighborFade amount
-                        float bleedStart = 0.5;
-                        float bleedEnd = bleedStart + _LineNeighborFade;
+                        // Blend colors of all cells within solid zone by inverse distance
+                        float3 colorSum = float3(0, 0, 0);
+                        float weightSum = 0;
                         
-                        if (_LinePriorityOverride > 0.5)
+                        for (int i = 0; i < 9; i++)
                         {
-                            // Highest priority wins, fade to default
-                            float bestPriority = 0;
-                            float3 bestColor = _LineColor.rgb;
-                            float bestDist = 999.0;
-                            
-                            for (int i = 0; i < 9; i++)
+                            if (cells[i].a < 0.01) continue;
+                            float dist = length(relPos - offsets[i]);
+                            if (dist <= 0.5)
                             {
-                                if (cells[i].a < 0.01) continue;
-                                float dist = length(relPos - offsets[i]);
-                                if (dist < bleedEnd && cells[i].a > bestPriority)
-                                {
-                                    bestPriority = cells[i].a;
-                                    bestColor = cells[i].rgb;
-                                    bestDist = dist;
-                                }
-                            }
-                            
-                            if (bestPriority > 0)
-                            {
-                                // Fade: 1 at bleedStart, 0 at bleedEnd
-                                float fadeRange = bleedEnd - bleedStart;
-                                float t = saturate((bestDist - bleedStart) / fadeRange);
-                                t = pow(t, _LineBlendFalloff); // Apply falloff curve
-                                lineRgb = lerp(bestColor, _LineColor.rgb, t);
+                                float weight = 1.0 / max(dist, 0.01);
+                                colorSum += cells[i].rgb * weight;
+                                weightSum += weight;
                             }
                         }
-                        else
+                        lineRgb = (weightSum > 0.001) ? (colorSum / weightSum) : _LineColor.rgb;
+                    }
+                    else if (_LineNeighborFade > 0.001 && minDistToStatus < bleedEnd)
+                    {
+                        // Beyond solid zone: blend colors together, then fade to default
+                        float3 colorSum = float3(0, 0, 0);
+                        float weightSum = 0;
+                        
+                        for (int i = 0; i < 9; i++)
                         {
-                            // Blend all in-range colors by distance, then fade to default
-                            float3 colorSum = float3(0, 0, 0);
-                            float weightSum = 0;
-                            float closestDist = 999.0;
-                            
-                            for (int i = 0; i < 9; i++)
+                            if (cells[i].a < 0.01) continue;
+                            float dist = length(relPos - offsets[i]);
+                            if (dist < bleedEnd)
                             {
-                                if (cells[i].a < 0.01) continue;
-                                float dist = length(relPos - offsets[i]);
-                                if (dist < bleedEnd)
-                                {
-                                    float weight = 1.0 / max(dist - bleedStart + 0.1, 0.01);
-                                    colorSum += cells[i].rgb * weight;
-                                    weightSum += weight;
-                                    closestDist = min(closestDist, dist);
-                                }
+                                // Weight by inverse distance (closer = stronger)
+                                float weight = 1.0 / max(dist, 0.01);
+                                colorSum += cells[i].rgb * weight;
+                                weightSum += weight;
                             }
+                        }
+                        
+                        if (weightSum > 0.001)
+                        {
+                            float3 blendedColor = colorSum / weightSum;
                             
-                            if (weightSum > 0.001)
-                            {
-                                float3 blendedColor = colorSum / weightSum;
-                                float fadeRange = bleedEnd - bleedStart;
-                                float t = saturate((closestDist - bleedStart) / fadeRange);
-                                t = pow(t, _LineBlendFalloff);
-                                lineRgb = lerp(blendedColor, _LineColor.rgb, t);
-                            }
+                            // Fade to default based on distance from nearest status cell
+                            float fadeRange = bleedEnd - bleedStart;
+                            float t = saturate((minDistToStatus - bleedStart) / fadeRange);
+                            // Invert falloff: higher value = color stays stronger longer
+                            t = pow(t, 1.0 / _LineBlendFalloff);
+                            lineRgb = lerp(blendedColor, _LineColor.rgb, t);
                         }
                     }
-                    // else: no status cells nearby or no fade, use default
+                    // else: no status cells nearby or beyond fade range, use default
                 }
 
                 // Fill alpha (0 if fill disabled)

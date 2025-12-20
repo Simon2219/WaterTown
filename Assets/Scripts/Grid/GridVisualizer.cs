@@ -32,7 +32,6 @@ public class GridVisualizer : MonoBehaviour
     public Color solidLineColor = new(0f, 0f, 0f, 1f);
     [Range(0f, 1f)] public float lineNeighborFade = 0f;
     [Range(0.1f, 3f)] public float lineBlendFalloff = 1f;
-    public bool linePriorityOverride = true;
 
     public enum LineColorMode
     {
@@ -100,7 +99,6 @@ public class GridVisualizer : MonoBehaviour
     private static readonly int PID_LineColorMode = Shader.PropertyToID("_LineColorMode");
     private static readonly int PID_LineNeighborFade = Shader.PropertyToID("_LineNeighborFade");
     private static readonly int PID_LineBlendFalloff = Shader.PropertyToID("_LineBlendFalloff");
-    private static readonly int PID_LinePriorityOverride = Shader.PropertyToID("_LinePriorityOverride");
     private static readonly int PID_LineWidth = Shader.PropertyToID("_LineWidth");
     private static readonly int PID_CellMap = Shader.PropertyToID("_CellMap");
     private static readonly int PID_EnableFill = Shader.PropertyToID("_EnableFill");
@@ -552,7 +550,6 @@ public class GridVisualizer : MonoBehaviour
         _mpb.SetFloat(PID_LineColorMode, (float)lineColorMode);
         _mpb.SetFloat(PID_LineNeighborFade, Mathf.Clamp01(lineNeighborFade));
         _mpb.SetFloat(PID_LineBlendFalloff, Mathf.Clamp(lineBlendFalloff, 0.1f, 3f));
-        _mpb.SetFloat(PID_LinePriorityOverride, linePriorityOverride ? 1f : 0f);
         _mpb.SetFloat(PID_LineWidth, Mathf.Max(0.001f, lineThickness));
         _mpb.SetFloat(PID_EnableFill, enableCellColors ? 1f : 0f);
         _mpb.SetFloat(PID_CellOpacity, Mathf.Clamp01(cellOpacity));
