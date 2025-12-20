@@ -101,16 +101,11 @@ public class GamePlatform : MonoBehaviour, IPickupable
     #region Initialization
 
 
-
-    public void SetDependencies(PlatformManager platformManager, WorldGrid worldGrid)
+    public void InitializePlatform(PlatformManager platformManager, WorldGrid worldGrid)
     {
         _platformManager = platformManager;
         _worldGrid = worldGrid;
-    }
-
-
-    public void InitializePlatform()
-    {
+        
         // Cache all child components at initialization
         CacheChildComponents();
         

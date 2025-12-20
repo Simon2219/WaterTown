@@ -648,7 +648,7 @@ Camera:
     height: 1
   near clip plane: 0.3
   far clip plane: 1000
-  field of view: 60.000004
+  field of view: 70
   orthographic: 0
   orthographic size: 5
   m_Depth: -1
@@ -674,8 +674,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330585543}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.25881904, y: 0.000000014066074, z: -0.000000003768993, w: 0.9659259}
-  m_LocalPosition: {x: 50, y: 15, z: 24.019238}
+  m_LocalRotation: {x: 0.35567483, y: 0.20777917, z: -0.08142776, w: 0.90757525}
+  m_LocalPosition: {x: 49.211597, y: 10.19162, z: 47.0903}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -1040,26 +1040,26 @@ MonoBehaviour:
   m_EditorClassIdentifier: '::'
   grid: {fileID: 479294916}
   material: {fileID: 2100000, guid: 6c2a1f2d2d106ed4e8007fe41dc2a19d, type: 2}
-  level: 0
   showGrid: 1
-  lineThickness: 0.036
-  lineColor: {r: 0.78113204, g: 0.78113204, b: 0.78113204, a: 0.7}
-  neighborFade: 0.145
-  enableCellColors: 0
-  autoSyncColorsFromGrid: 1
-  defaultCellColor: {r: 1, g: 0.5943396, b: 0.5943396, a: 1}
-  highlightColor: {r: 1, g: 1, b: 0, a: 0.65}
+  lineThickness: 0.04
+  cellOpacity: 0.3
+  lineOpacity: 0.6
+  lineColorMode: 1
+  solidLineColor: {r: 0.7207546, g: 0.7207546, b: 0.7207546, a: 1}
+  lineNeighborFade: 0.5
+  lineBlendFalloff: 0.3
+  enableCellColors: 1
+  neighborFade: 0
   flagColors:
   - flag: 1
     color: {r: 0.8, g: 0.25, b: 0.25, a: 0.35}
-  - flag: 2
+  - flag: 0
     color: {r: 0.25, g: 0.8, b: 0.35, a: 0.35}
   - flag: 4
     color: {r: 0.25, g: 0.5, b: 0.9, a: 0.35}
-  tubeLook: 0
-  tubeJoinSmooth: 0.05
-  tubeLightStrength: 0.35
-  tubeRimStrength: 0.15
+  - flag: 8
+    color: {r: 1, g: 0.5527824, b: 0, a: 0.35}
+  cornerRadius: 0.1187
   yBias: 0
   zTestAlways: 0
 --- !u!114 &479294921
@@ -1382,7 +1382,7 @@ Transform:
   m_GameObject: {fileID: 792026395}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 50, y: 0, z: 50}
+  m_LocalPosition: {x: 54, y: 0, z: 57}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -1490,8 +1490,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 886180230}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.258819, y: 0.000000014066073, z: -0.0000000037689922, w: 0.9659259}
-  m_LocalPosition: {x: 50, y: 15, z: 24.019238}
+  m_LocalRotation: {x: 0.3556748, y: 0.20777912, z: -0.08142773, w: 0.9075753}
+  m_LocalPosition: {x: 49.211597, y: 10.19162, z: 47.0903}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -1521,7 +1521,7 @@ MonoBehaviour:
     LookAtTarget: {fileID: 0}
     CustomLookAtTarget: 0
   Lens:
-    FieldOfView: 60.000004
+    FieldOfView: 70
     OrthographicSize: 5
     NearClipPlane: 0.3
     FarClipPlane: 1000
@@ -1564,7 +1564,7 @@ MonoBehaviour:
         InputAction: {fileID: -8478411696161337995, guid: 052faaac586de48259a63d0c4782560b, type: 3}
         Gain: 20
         CancelDeltaTime: 0
-      InputValue: 0
+      InputValue: 17.59
       Driver:
         AccelTime: 0.5
         DecelTime: 0.5
@@ -1575,7 +1575,7 @@ MonoBehaviour:
         InputAction: {fileID: -8478411696161337995, guid: 052faaac586de48259a63d0c4782560b, type: 3}
         Gain: -20
         CancelDeltaTime: 0
-      InputValue: 0
+      InputValue: 89.9
       Driver:
         AccelTime: 0.5
         DecelTime: 0.5
@@ -1586,7 +1586,7 @@ MonoBehaviour:
         InputAction: {fileID: -1957212800866479168, guid: 052faaac586de48259a63d0c4782560b, type: 3}
         Gain: -60
         CancelDeltaTime: 0
-      InputValue: 0
+      InputValue: 5.38
       Driver:
         AccelTime: 0.5
         DecelTime: 0.5
@@ -1685,7 +1685,7 @@ MonoBehaviour:
     SplineCurvature: 0.5
   RecenteringTarget: 2
   HorizontalAxis:
-    Value: 0
+    Value: 25.79
     Center: 0
     Range: {x: 0, y: 360}
     Wrap: 1
@@ -1695,7 +1695,7 @@ MonoBehaviour:
       Time: 2
     Restrictions: 0
   VerticalAxis:
-    Value: 30
+    Value: 42.8
     Center: 30
     Range: {x: -20, y: 60}
     Wrap: 0
@@ -1705,7 +1705,7 @@ MonoBehaviour:
       Time: 2
     Restrictions: 0
   RadialAxis:
-    Value: 10
+    Value: 5
     Center: 10
     Range: {x: 1, y: 20}
     Wrap: 0

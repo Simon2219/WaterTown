@@ -1,7 +1,5 @@
-using System.Collections.Generic;
 using Grid;
 using UnityEngine;
-using UnityEngine.Events;
 using Platforms;
 
 
@@ -13,14 +11,11 @@ public class TownManager : MonoBehaviour
 {
     #region Configuration
 
-    [Header("Core Systems")] private WorldGrid _worldGrid;
+    [Header("Core Systems")] 
+    private WorldGrid _worldGrid;
     private PlatformManager _platformManager;
 
-    [Header("Town-Level Events")] [Tooltip("Invoked when a platform is successfully placed (designer-facing).")]
-    public UnityEvent OnPlatformPlaced;
-
-    [Tooltip("Invoked when a platform is removed (designer-facing).")]
-    public UnityEvent OnPlatformRemoved;
+    [Header("Town-Level Events")] 
 
     // Cached reference to last placed/removed platform for event handlers/UI
     public GamePlatform LastPlacedPlatform { get; private set; }
@@ -96,14 +91,12 @@ public class TownManager : MonoBehaviour
     private void HandlePlatformPlaced(GamePlatform platform)
     {
         LastPlacedPlatform = platform;
-        OnPlatformPlaced?.Invoke();
     }
 
 
     private void HandlePlatformRemoved(GamePlatform platform)
     {
         LastRemovedPlatform = platform;
-        OnPlatformRemoved?.Invoke();
     }
 
     #endregion

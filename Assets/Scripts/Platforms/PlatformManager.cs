@@ -113,9 +113,8 @@ public class PlatformManager : MonoBehaviour
     ///
     private void OnPlatformCreated(GamePlatform platform)
     {
-        // Inject dependencies & Initialize with Dependencies
-        platform.SetDependencies(this, _worldGrid);
-        platform.InitializePlatform();
+        // Initialize & Inject Dependencies
+        platform.InitializePlatform(this, _worldGrid);
 
         // Subscribe to all instance events for this platform
         platform.HasMoved += OnPlatformHasMoved;
