@@ -30,12 +30,13 @@ public class GridVisualizer : MonoBehaviour
     [Header("Line Coloring")]
     public LineColorMode lineColorMode = LineColorMode.Solid;
     public Color solidLineColor = new(0f, 0f, 0f, 1f);
+    [Range(0f, 1f)] public float lineNeighborFade = 0f;
+    public bool linePriorityOverride = true;
 
     public enum LineColorMode
     {
-        Solid,    // Use solidLineColor for all lines
-        Blend,    // Blend colors from adjacent cells
-        Priority  // Use higher priority cell's color
+        Solid,   // Use solidLineColor for all lines
+        Priority // Use cell colors with neighbor bleeding
     }
 
     
@@ -96,6 +97,8 @@ public class GridVisualizer : MonoBehaviour
     private static readonly int PID_LineColor = Shader.PropertyToID("_LineColor");
     private static readonly int PID_LineOpacity = Shader.PropertyToID("_LineOpacity");
     private static readonly int PID_LineColorMode = Shader.PropertyToID("_LineColorMode");
+    private static readonly int PID_LineNeighborFade = Shader.PropertyToID("_LineNeighborFade");
+    private static readonly int PID_LinePriorityOverride = Shader.PropertyToID("_LinePriorityOverride");
     private static readonly int PID_LineWidth = Shader.PropertyToID("_LineWidth");
     private static readonly int PID_CellMap = Shader.PropertyToID("_CellMap");
     private static readonly int PID_EnableFill = Shader.PropertyToID("_EnableFill");
@@ -545,6 +548,8 @@ public class GridVisualizer : MonoBehaviour
         _mpb.SetColor(PID_LineColor, GetBaseLineColor());
         _mpb.SetFloat(PID_LineOpacity, Mathf.Clamp01(lineOpacity));
         _mpb.SetFloat(PID_LineColorMode, (float)lineColorMode);
+        _mpb.SetFloat(PID_LineNeighborFade, Mathf.Clamp01(lineNeighborFade));
+        _mpb.SetFloat(PID_LinePriorityOverride, linePriorityOverride ? 1f : 0f);
         _mpb.SetFloat(PID_LineWidth, Mathf.Max(0.001f, lineThickness));
         _mpb.SetFloat(PID_EnableFill, enableCellColors ? 1f : 0f);
         _mpb.SetFloat(PID_CellOpacity, Mathf.Clamp01(cellOpacity));

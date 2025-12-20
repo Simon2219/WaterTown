@@ -44,10 +44,6 @@ public class WorldGridEditorWindow : EditorWindow
     
     private void OnGUI()
     {
-        // Auto-find references as fallback
-        if (_sceneGrid == null) _sceneGrid = FindWorldGrid();
-        if (_visualizer == null) _visualizer = FindVisualizer();
-
         _scroll = EditorGUILayout.BeginScrollView(_scroll);
 
         EditorGUILayout.Space();
@@ -262,6 +258,20 @@ public class WorldGridEditorWindow : EditorWindow
                     _visualizer.solidLineColor = EditorGUILayout.ColorField(
                         new GUIContent("Line Default Color", "Used for Empty cells and Solid mode"), 
                         _visualizer.solidLineColor);
+                    
+                    // Priority mode options
+                    if (_visualizer.lineColorMode == GridVisualizer.LineColorMode.Priority)
+                    {
+                        EditorGUILayout.Space(3);
+                        
+                        _visualizer.lineNeighborFade = EditorGUILayout.Slider(
+                            new GUIContent("Neighbor Fade", "How far cell colors bleed into adjacent lines (0 = none, 1 = full cell)"), 
+                            _visualizer.lineNeighborFade, 0f, 1f);
+                        
+                        _visualizer.linePriorityOverride = EditorGUILayout.Toggle(
+                            new GUIContent("Priority Override", "On: highest priority wins entirely. Off: distance-weighted blend with priority tiebreaker"), 
+                            _visualizer.linePriorityOverride);
+                    }
                     
                     EditorGUILayout.Space(3);
                     
