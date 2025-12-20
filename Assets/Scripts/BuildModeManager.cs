@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using Grid;
 using Interfaces;
+using Platforms;
 using UnityEngine;
 using UnityEngine.InputSystem;
-using Platforms;
 
 namespace Building
 {
@@ -15,6 +15,19 @@ namespace Building
     [DisallowMultipleComponent]
     public class BuildModeManager : MonoBehaviour
     {
+        #region Events
+        
+        
+        /// Fired when build mode is entered (started holding a pickup)
+        public event Action OnBuildModeEntered;
+        
+        /// Fired when build mode is exited (placed or cancelled)
+        public event Action OnBuildModeExited;
+        
+        
+        #endregion
+        
+        
         #region Configuration & Dependencies
 
         [Header("References")]
@@ -23,6 +36,10 @@ namespace Building
         [SerializeField] private WorldGrid grid;
         [SerializeField] private GameUIController gameUI;
         [SerializeField] private Camera mainCamera;
+        
+        [Header("Grid Visualization")]
+        [Tooltip("Optional - if assigned, cell colors will be enabled during build mode")]
+        [SerializeField] private GridVisualizer gridVisualizer;
 
         [Header("Input Actions")]
         [SerializeField] private InputActionReference placeAction;
@@ -39,6 +56,7 @@ namespace Building
         private PlatformBlueprint _selectedBlueprint;
         private IPickupable _currentPickup;
         private float _currentRotation = 0f;
+        private bool _wasInBuildMode;
         
         // Reusable lists (avoid allocations)
         private readonly List<Vector2Int> _tempCellList = new List<Vector2Int>();
@@ -207,9 +225,7 @@ namespace Building
 
         #region Pickup/Placement Logic
         
-        /// <summary>
-        /// Spawns a new platform for placement (build mode).
-        /// </summary>
+        /// Spawns a new platform for placement (build mode)
         private void SpawnPlatform(PlatformBlueprint blueprint)
         {
             if (!blueprint.RuntimePrefab) return;
@@ -234,11 +250,11 @@ namespace Building
 
             _currentPickup = pickupable;
             _currentPickup.PickUp(isNewObject: true);
+            
+            EnterBuildMode();
         }
 
-        /// <summary>
-        /// Picks up an existing platform for moving/rotating.
-        /// </summary>
+        /// Picks up an existing platform for moving/rotating
         private void PickupExistingPlatform(IPickupable pickupable)
         {
             if (pickupable == null) return;
@@ -251,6 +267,8 @@ namespace Building
             _currentPickup = pickupable;
             _currentPickup.PickUp(isNewObject: false);
             _currentRotation = pickupable.Transform.eulerAngles.y;
+            
+            EnterBuildMode();
         }
 
         /// <summary>
@@ -288,9 +306,7 @@ namespace Building
             }
         }
 
-        /// <summary>
-        /// Confirms placement of the current pickup.
-        /// </summary>
+        /// Confirms placement of the current pickup
         private void PlacePickup()
         {
             if (_currentPickup == null) return;
@@ -302,11 +318,11 @@ namespace Building
             _currentPickup.Place();
             _currentPickup = null;
             _selectedBlueprint = null;
+            
+            ExitBuildMode();
         }
 
-        /// <summary>
-        /// Cancels placement of the current pickup.
-        /// </summary>
+        /// Cancels placement of the current pickup
         private void CancelPlacement()
         {
             if (_currentPickup == null) return;
@@ -314,6 +330,34 @@ namespace Building
             _currentPickup.CancelPlacement();
             _currentPickup = null;
             _selectedBlueprint = null;
+            
+            ExitBuildMode();
+        }
+        
+        
+        private void EnterBuildMode()
+        {
+            if (_wasInBuildMode) return;
+            _wasInBuildMode = true;
+            
+            // Enable grid cell colors for build mode
+            if (gridVisualizer != null)
+                gridVisualizer.EnableCellColors = true;
+            
+            OnBuildModeEntered?.Invoke();
+        }
+        
+        
+        private void ExitBuildMode()
+        {
+            if (!_wasInBuildMode) return;
+            _wasInBuildMode = false;
+            
+            // Disable grid cell colors after build mode
+            if (gridVisualizer != null)
+                gridVisualizer.EnableCellColors = false;
+            
+            OnBuildModeExited?.Invoke();
         }
         
         #endregion
@@ -382,8 +426,16 @@ namespace Building
 
         #region Public API
         
+        
+        /// True if currently holding a pickup
         public bool HasActivePickup => _currentPickup != null;
+        
+        /// The current pickup being held (null if none)
         public IPickupable CurrentPickup => _currentPickup;
+        
+        /// True if in build mode (actively placing/moving)
+        public bool IsInBuildMode => _wasInBuildMode;
+        
         
         #endregion
     }

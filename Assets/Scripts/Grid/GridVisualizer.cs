@@ -6,43 +6,20 @@ namespace Grid
 
 /// Grid visualization component
 /// Renders cell colors based on CellFlag states
-/// Supports line coloring modes: Solid, Blend, Priority
+/// Supports line coloring modes: Solid, Priority
 ///
 [ExecuteAlways]
 [DisallowMultipleComponent]
 public class GridVisualizer : MonoBehaviour
 {
-    #region Configuration
+    #region Types
     
     
-    [Header("References")]
-    public WorldGrid grid;
-    public Material material;
-
-    
-    [Header("Display")]
-    public bool showGrid = true;
-    [Min(0.001f)] public float lineThickness = 0.05f;
-    [Range(0f, 1f)] public float cellOpacity = 0.35f;
-    [Range(0f, 1f)] public float lineOpacity = 0.7f;
-
-    
-    [Header("Line Coloring")]
-    public LineColorMode lineColorMode = LineColorMode.Solid;
-    public Color solidLineColor = new(0f, 0f, 0f, 1f);
-    [Range(0f, 1f)] public float lineNeighborFade = 0f;
-    [Range(0.1f, 3f)] public float lineBlendFalloff = 1f;
-
     public enum LineColorMode
     {
         Solid,   // Use solidLineColor for all lines
         Priority // Use cell colors with neighbor bleeding
     }
-
-    
-    [Header("Cell Colors")]
-    public bool enableCellColors = true;
-    [Range(0f, 1f)] public float neighborFade = 0.0f;
 
     [Serializable]
     public struct FlagColor
@@ -50,8 +27,52 @@ public class GridVisualizer : MonoBehaviour
         public CellFlag flag;
         public Color color;
     }
+    
+    
+    #endregion
+    
+    
+    #region Events
+    
+    
+    /// Fired when grid visibility changes
+    public event Action<bool> OnGridVisibilityChanged;
+    
+    /// Fired when cell colors enabled state changes
+    public event Action<bool> OnCellColorsEnabledChanged;
+    
+    
+    #endregion
+    
+    
+    #region Configuration
+    
+    
+    [Header("References")]
+    [SerializeField] private WorldGrid _grid;
+    [SerializeField] private Material _material;
 
-    public FlagColor[] flagColors =
+    
+    [Header("Display")]
+    [SerializeField] private bool _showGrid = true;
+    [SerializeField, Min(0.001f)] private float _lineThickness = 0.05f;
+    [SerializeField, Range(0f, 1f)] private float _cellOpacity = 0.35f;
+    [SerializeField, Range(0f, 1f)] private float _lineOpacity = 0.7f;
+
+    
+    [Header("Line Coloring")]
+    [SerializeField] private LineColorMode _lineColorMode = LineColorMode.Solid;
+    [SerializeField] private Color _solidLineColor = new(0f, 0f, 0f, 1f);
+    [SerializeField, Range(0f, 1f)] private float _lineNeighborFade = 0f;
+    [SerializeField, Range(0.1f, 3f)] private float _lineBlendFalloff = 1f;
+
+    
+    [Header("Cell Colors")]
+    [SerializeField] private bool _enableCellColors = true;
+    [SerializeField, Range(0f, 1f)] private float _neighborFade = 0.0f;
+
+    [SerializeField]
+    private FlagColor[] _flagColors =
     {
         new() { flag = CellFlag.Empty, color = new Color(0.12f, 0.34f, 0.55f, 1f) },
         new() { flag = CellFlag.Locked, color = new Color(0.80f, 0.25f, 0.25f, 1f) },
@@ -63,12 +84,12 @@ public class GridVisualizer : MonoBehaviour
 
     
     [Header("Line Corners")]
-    [Min(0f)] public float cornerRadius = 0.05f;
+    [SerializeField, Min(0f)] private float _cornerRadius = 0.05f;
 
     
     [Header("Depth")]
-    public float yBias = 0.005f;
-    public bool zTestAlways = false;
+    [SerializeField] private float _yBias = 0.005f;
+    [SerializeField] private bool _zTestAlways = false;
 
     
     #endregion
@@ -140,7 +161,7 @@ public class GridVisualizer : MonoBehaviour
     private void Update()
     {
         // Check if grid reference changed
-        if (_subscribedGrid != grid)
+        if (_subscribedGrid != _grid)
         {
             UnsubscribeFromGridEvents();
             SubscribeToGridEvents();
@@ -149,16 +170,16 @@ public class GridVisualizer : MonoBehaviour
 
         bool needsRebuild = false;
 
-        if (grid != null)
+        if (_grid != null)
         {
-            needsRebuild |= _cachedSize.x != grid.sizeX || _cachedSize.y != grid.sizeY;
-            needsRebuild |= _cachedOrigin != grid.worldOrigin;
+            needsRebuild |= _cachedSize.x != _grid.sizeX || _cachedSize.y != _grid.sizeY;
+            needsRebuild |= _cachedOrigin != _grid.worldOrigin;
         }
 
         if (needsRebuild) 
             RebuildAll();
 
-        if (grid && enableCellColors && _gridDirty)
+        if (_grid && _enableCellColors && _gridDirty)
         {
             RecomputeColors();
             _gridDirty = false;
@@ -189,11 +210,11 @@ public class GridVisualizer : MonoBehaviour
     
     private void SubscribeToGridEvents()
     {
-        if (grid == null) return;
+        if (_grid == null) return;
         
-        grid.GridCellChanged += OnGridCellChanged;
-        grid.GridAreaChanged += OnGridAreaChanged;
-        _subscribedGrid = grid;
+        _grid.GridCellChanged += OnGridCellChanged;
+        _grid.GridAreaChanged += OnGridAreaChanged;
+        _subscribedGrid = _grid;
     }
 
 
@@ -222,11 +243,146 @@ public class GridVisualizer : MonoBehaviour
     #endregion
     
     
-    #region Public API
+    #region Public API - Properties
+    
+    
+    /// Reference to the WorldGrid
+    public WorldGrid Grid
+    {
+        get => _grid;
+        set
+        {
+            if (_grid == value) return;
+            UnsubscribeFromGridEvents();
+            _grid = value;
+            SubscribeToGridEvents();
+            _gridDirty = true;
+        }
+    }
+    
+    /// Material used for rendering
+    public Material Material
+    {
+        get => _material;
+        set
+        {
+            _material = value;
+            SyncRendererMaterial();
+        }
+    }
+    
+    /// Show or hide the entire grid
+    public bool ShowGrid
+    {
+        get => _showGrid;
+        set
+        {
+            if (_showGrid == value) return;
+            _showGrid = value;
+            OnGridVisibilityChanged?.Invoke(_showGrid);
+        }
+    }
+    
+    /// Enable or disable cell color rendering
+    public bool EnableCellColors
+    {
+        get => _enableCellColors;
+        set
+        {
+            if (_enableCellColors == value) return;
+            _enableCellColors = value;
+            OnCellColorsEnabledChanged?.Invoke(_enableCellColors);
+        }
+    }
+    
+    /// Cell fill opacity (0 = transparent, 1 = opaque)
+    public float CellOpacity
+    {
+        get => _cellOpacity;
+        set => _cellOpacity = Mathf.Clamp01(value);
+    }
+    
+    /// Line opacity (0 = transparent, 1 = opaque)
+    public float LineOpacity
+    {
+        get => _lineOpacity;
+        set => _lineOpacity = Mathf.Clamp01(value);
+    }
+    
+    /// Line thickness in world units
+    public float LineThickness
+    {
+        get => _lineThickness;
+        set => _lineThickness = Mathf.Max(0.001f, value);
+    }
+    
+    /// Line coloring mode (Solid or Priority)
+    public LineColorMode LineMode
+    {
+        get => _lineColorMode;
+        set => _lineColorMode = value;
+    }
+    
+    /// Solid line color (used when LineMode = Solid)
+    public Color SolidLineColor
+    {
+        get => _solidLineColor;
+        set => _solidLineColor = value;
+    }
+    
+    /// How far line colors bleed into neighbor cells (0-1)
+    public float LineNeighborFade
+    {
+        get => _lineNeighborFade;
+        set => _lineNeighborFade = Mathf.Clamp01(value);
+    }
+    
+    /// Line color blend falloff strength
+    public float LineBlendFalloff
+    {
+        get => _lineBlendFalloff;
+        set => _lineBlendFalloff = Mathf.Clamp(value, 0.1f, 3f);
+    }
+    
+    /// Cell neighbor fade amount (0-1)
+    public float NeighborFade
+    {
+        get => _neighborFade;
+        set => _neighborFade = Mathf.Clamp01(value);
+    }
+    
+    /// Corner radius for line intersections
+    public float CornerRadius
+    {
+        get => _cornerRadius;
+        set => _cornerRadius = Mathf.Max(0f, value);
+    }
+    
+    /// Y-axis rendering bias
+    public float YBias
+    {
+        get => _yBias;
+        set => _yBias = Mathf.Max(0f, value);
+    }
+    
+    /// Always pass depth test (render on top)
+    public bool ZTestAlways
+    {
+        get => _zTestAlways;
+        set => _zTestAlways = value;
+    }
+    
+    /// Flag colors array (readonly access - use SetFlagColor to modify)
+    public FlagColor[] FlagColors => _flagColors;
+    
+    
+    #endregion
+    
+    
+    #region Public API - Methods
     
     
     /// Force rebuild of mesh and color map
-    ///
     public void RebuildNow()
     {
         EnsureComponents();
@@ -238,19 +394,57 @@ public class GridVisualizer : MonoBehaviour
     }
 
 
-    /// Force MeshRenderer to use 'material' asset
+    /// Force MeshRenderer to use material asset
     /// Clears any prior per-renderer instance Unity may have created
-    ///
     public void SyncRendererMaterial()
     {
         if (_mr == null) return;
-        if (material == null)
+        if (_material == null)
         {
             _mr.sharedMaterial = null;
             return;
         }
 
-        _mr.sharedMaterial = material;
+        _mr.sharedMaterial = _material;
+    }
+    
+    
+    /// Set the color for a specific flag
+    public void SetFlagColor(CellFlag flag, Color color)
+    {
+        if (_flagColors == null) return;
+        
+        for (int i = 0; i < _flagColors.Length; i++)
+        {
+            if (_flagColors[i].flag == flag)
+            {
+                _flagColors[i].color = color;
+                _gridDirty = true;
+                return;
+            }
+        }
+    }
+    
+    
+    /// Get the color for a specific flag
+    public Color GetFlagColor(CellFlag flag)
+    {
+        if (_flagColors == null) return Color.gray;
+        
+        foreach (var fc in _flagColors)
+        {
+            if (fc.flag == flag)
+                return fc.color;
+        }
+        
+        return Color.gray;
+    }
+    
+    
+    /// Mark the grid as dirty, forcing a color recompute on next update
+    public void MarkDirty()
+    {
+        _gridDirty = true;
     }
     
     
@@ -262,14 +456,13 @@ public class GridVisualizer : MonoBehaviour
     
     /// Recomputes cell colors from grid flag data
     /// Stores color in RGB, priority in Alpha (0 = Empty, higher = more important)
-    ///
     public void RecomputeColors()
     {
-        if (grid == null) return;
+        if (_grid == null) return;
         EnsureColorMap();
 
-        int w = Mathf.Max(1, grid.sizeX);
-        int h = Mathf.Max(1, grid.sizeY);
+        int w = Mathf.Max(1, _grid.sizeX);
+        int h = Mathf.Max(1, _grid.sizeY);
 
         var colors = new Color[w * h];
 
@@ -279,7 +472,7 @@ public class GridVisualizer : MonoBehaviour
             for (int x = 0; x < w; x++)
             {
                 var cell = new Vector2Int(x, y);
-                var cd = grid.GetCell(cell);
+                var cd = _grid.GetCell(cell);
                 var flags = cd?.Flags ?? CellFlag.Empty;
 
                 Color cellColor = GetColorForFlags(flags);
@@ -299,10 +492,9 @@ public class GridVisualizer : MonoBehaviour
 
     /// Gets the color for a given flag combination
     /// Uses highest priority flag if multiple are set
-    ///
     private Color GetColorForFlags(CellFlag flags)
     {
-        if (flagColors == null || flagColors.Length == 0)
+        if (_flagColors == null || _flagColors.Length == 0)
             return Color.gray;
 
         // Priority order: Locked > Occupied > OccupyPreview > ModuleBlocked > Buildable > Empty
@@ -334,20 +526,6 @@ public class GridVisualizer : MonoBehaviour
     }
 
 
-    /// Finds the configured color for a specific flag
-    ///
-    private Color GetFlagColor(CellFlag flag)
-    {
-        foreach (var fc in flagColors)
-        {
-            if (fc.flag == flag)
-                return fc.color;
-        }
-        
-        return Color.gray;
-    }
-
-
     /// Gets priority value for flags (0 = Empty, higher = more important)
     /// Used for line coloring in Priority mode
     ///
@@ -363,14 +541,6 @@ public class GridVisualizer : MonoBehaviour
     }
 
 
-    /// Gets the base line color (without opacity - that's separate)
-    ///
-    private Color GetBaseLineColor()
-    {
-        return solidLineColor;
-    }
-    
-    
     #endregion
     
     
@@ -389,7 +559,7 @@ public class GridVisualizer : MonoBehaviour
     {
         EnsureComponents();
 
-        if (material != null)
+        if (_material != null)
             return;
 
 #if UNITY_EDITOR
@@ -417,16 +587,16 @@ public class GridVisualizer : MonoBehaviour
             name = "GridVisualizer_RuntimeMat",
             hideFlags = HideFlags.HideAndDontSave
         };
-        material = runtimeMat;
+        _material = runtimeMat;
     }
 
 
     private void RebuildAll()
     {
-        if (grid)
+        if (_grid)
         {
-            _cachedSize = new Vector2Int(Mathf.Max(1, grid.sizeX), Mathf.Max(1, grid.sizeY));
-            _cachedOrigin = grid.worldOrigin;
+            _cachedSize = new Vector2Int(Mathf.Max(1, _grid.sizeX), Mathf.Max(1, _grid.sizeY));
+            _cachedOrigin = _grid.worldOrigin;
         }
         else
         {
@@ -436,7 +606,7 @@ public class GridVisualizer : MonoBehaviour
 
         BuildQuadMeshLocal(_cachedSize.x * WorldGrid.CellSize, _cachedSize.y * WorldGrid.CellSize);
 
-        if (grid) 
+        if (_grid) 
             transform.position = new Vector3(_cachedOrigin.x, 0f, _cachedOrigin.z);
 
         EnsureColorMap(initialFill: true);
@@ -523,41 +693,41 @@ public class GridVisualizer : MonoBehaviour
         SyncRendererMaterial();
 
         if (allowRendererToggle)
-            _mr.enabled = showGrid && material != null;
+            _mr.enabled = _showGrid && _material != null;
 
 #if UNITY_EDITOR
-        if (!Application.isPlaying && material == null) return;
+        if (!Application.isPlaying && _material == null) return;
 #endif
-        if (Application.isPlaying && material == null)
+        if (Application.isPlaying && _material == null)
         {
             EnsureMaterialAssetOrRuntime();
-            if (material == null) return;
+            if (_material == null) return;
             SyncRendererMaterial();
         }
 
         var sizeX = Mathf.Max(1, _cachedSize.x);
         var sizeY = Mathf.Max(1, _cachedSize.y);
         var cellSz = WorldGrid.CellSize;
-        var origin = grid ? grid.worldOrigin : transform.position;
+        var origin = _grid ? _grid.worldOrigin : transform.position;
 
         _mpb.Clear();
         _mpb.SetVector(PID_GridOrigin, origin);
         _mpb.SetFloat(PID_CellSize, cellSz);
         _mpb.SetVector(PID_SizeXY, new Vector4(sizeX, sizeY, 0, 0));
         _mpb.SetFloat(PID_LevelY, 0);
-        _mpb.SetColor(PID_LineColor, GetBaseLineColor());
-        _mpb.SetFloat(PID_LineOpacity, Mathf.Clamp01(lineOpacity));
-        _mpb.SetFloat(PID_LineColorMode, (float)lineColorMode);
-        _mpb.SetFloat(PID_LineNeighborFade, Mathf.Clamp01(lineNeighborFade));
-        _mpb.SetFloat(PID_LineBlendFalloff, Mathf.Clamp(lineBlendFalloff, 0.1f, 3f));
-        _mpb.SetFloat(PID_LineWidth, Mathf.Max(0.001f, lineThickness));
-        _mpb.SetFloat(PID_EnableFill, enableCellColors ? 1f : 0f);
-        _mpb.SetFloat(PID_CellOpacity, Mathf.Clamp01(cellOpacity));
-        _mpb.SetFloat(PID_Fade, Mathf.Clamp01(neighborFade));
-        _mpb.SetFloat(PID_CornerRadius, Mathf.Max(0f, cornerRadius));
+        _mpb.SetColor(PID_LineColor, _solidLineColor);
+        _mpb.SetFloat(PID_LineOpacity, _lineOpacity);
+        _mpb.SetFloat(PID_LineColorMode, (float)_lineColorMode);
+        _mpb.SetFloat(PID_LineNeighborFade, _lineNeighborFade);
+        _mpb.SetFloat(PID_LineBlendFalloff, _lineBlendFalloff);
+        _mpb.SetFloat(PID_LineWidth, _lineThickness);
+        _mpb.SetFloat(PID_EnableFill, _enableCellColors ? 1f : 0f);
+        _mpb.SetFloat(PID_CellOpacity, _cellOpacity);
+        _mpb.SetFloat(PID_Fade, _neighborFade);
+        _mpb.SetFloat(PID_CornerRadius, _cornerRadius);
 
-        _mpb.SetFloat(PID_YBias, Mathf.Max(0f, yBias));
-        _mpb.SetFloat(PID_ZTestMode, zTestAlways ? 8f : 4f);
+        _mpb.SetFloat(PID_YBias, _yBias);
+        _mpb.SetFloat(PID_ZTestMode, _zTestAlways ? 8f : 4f);
 
         EnsureColorMap();
         _mpb.SetTexture(PID_CellMap, _colorMap);
