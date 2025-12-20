@@ -18,11 +18,20 @@ namespace Building
         #region Events
         
         
-        /// Fired when build mode is entered (started holding a pickup)
+        /// Fired when build mode is entered (Build UI opened)
         public event Action OnBuildModeEntered;
         
-        /// Fired when build mode is exited (placed or cancelled)
+        /// Fired when build mode is exited (Build UI closed)
         public event Action OnBuildModeExited;
+        
+        /// Fired when a platform is picked up (new or existing)
+        public event Action<IPickupable> OnPlatformPickedUp;
+        
+        /// Fired when a platform is successfully placed
+        public event Action<IPickupable> OnPlatformPlaced;
+        
+        /// Fired when platform placement is cancelled
+        public event Action OnPlacementCancelled;
         
         
         #endregion
@@ -52,7 +61,7 @@ namespace Building
         private PlatformBlueprint _selectedBlueprint;
         private IPickupable _currentPickup;
         private float _currentRotation = 0f;
-        private bool _wasInBuildMode;
+        private bool _isInBuildMode;
         
         // Reusable lists (avoid allocations)
         private readonly List<Vector2Int> _tempCellList = new List<Vector2Int>();
@@ -110,9 +119,12 @@ namespace Building
 
         private void OnEnable()
         {
-
             if (gameUI != null)
+            {
                 gameUI.OnBlueprintSelected += OnBlueprintSelected;
+                gameUI.OnBuildBarShown.AddListener(OnBuildBarShown);
+                gameUI.OnBuildBarHidden.AddListener(OnBuildBarHidden);
+            }
 
             if (placeAction?.action != null)
             {
@@ -148,7 +160,11 @@ namespace Building
         private void OnDisable()
         {
             if (gameUI != null)
+            {
                 gameUI.OnBlueprintSelected -= OnBlueprintSelected;
+                gameUI.OnBuildBarShown.RemoveListener(OnBuildBarShown);
+                gameUI.OnBuildBarHidden.RemoveListener(OnBuildBarHidden);
+            }
 
             if (placeAction?.action != null)
             {
@@ -247,7 +263,7 @@ namespace Building
             _currentPickup = pickupable;
             _currentPickup.PickUp(isNewObject: true);
             
-            EnterBuildMode();
+            OnPlatformPickedUp?.Invoke(_currentPickup);
         }
 
         /// Picks up an existing platform for moving/rotating
@@ -264,7 +280,7 @@ namespace Building
             _currentPickup.PickUp(isNewObject: false);
             _currentRotation = pickupable.Transform.eulerAngles.y;
             
-            EnterBuildMode();
+            OnPlatformPickedUp?.Invoke(_currentPickup);
         }
 
         /// <summary>
@@ -311,11 +327,12 @@ namespace Building
                 return;
             }
             
+            var placed = _currentPickup;
             _currentPickup.Place();
             _currentPickup = null;
             _selectedBlueprint = null;
             
-            ExitBuildMode();
+            OnPlatformPlaced?.Invoke(placed);
         }
 
         /// Cancels placement of the current pickup
@@ -327,22 +344,27 @@ namespace Building
             _currentPickup = null;
             _selectedBlueprint = null;
             
-            ExitBuildMode();
+            OnPlacementCancelled?.Invoke();
         }
         
         
-        private void EnterBuildMode()
+        private void OnBuildBarShown()
         {
-            if (_wasInBuildMode) return;
-            _wasInBuildMode = true;
+            if (_isInBuildMode) return;
+            _isInBuildMode = true;
             OnBuildModeEntered?.Invoke();
         }
         
         
-        private void ExitBuildMode()
+        private void OnBuildBarHidden()
         {
-            if (!_wasInBuildMode) return;
-            _wasInBuildMode = false;
+            if (!_isInBuildMode) return;
+            _isInBuildMode = false;
+            
+            // Cancel any active placement when exiting build mode
+            if (_currentPickup != null)
+                CancelPlacement();
+            
             OnBuildModeExited?.Invoke();
         }
         
@@ -419,8 +441,8 @@ namespace Building
         /// The current pickup being held (null if none)
         public IPickupable CurrentPickup => _currentPickup;
         
-        /// True if in build mode (actively placing/moving)
-        public bool IsInBuildMode => _wasInBuildMode;
+        /// True if in build mode (Build UI is open)
+        public bool IsInBuildMode => _isInBuildMode;
         
         
         #endregion

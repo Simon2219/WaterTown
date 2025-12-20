@@ -253,6 +253,7 @@ public class GridVisualizer : MonoBehaviour
         
         _buildModeManager.OnBuildModeEntered += OnBuildModeEntered;
         _buildModeManager.OnBuildModeExited += OnBuildModeExited;
+        _buildModeManager.OnPlacementCancelled += OnPlacementCancelled;
     }
     
     
@@ -262,6 +263,7 @@ public class GridVisualizer : MonoBehaviour
         
         _buildModeManager.OnBuildModeEntered -= OnBuildModeEntered;
         _buildModeManager.OnBuildModeExited -= OnBuildModeExited;
+        _buildModeManager.OnPlacementCancelled -= OnPlacementCancelled;
     }
     
     
@@ -274,6 +276,12 @@ public class GridVisualizer : MonoBehaviour
     private void OnBuildModeExited()
     {
         EnableCellColors = false;
+    }
+    
+    
+    private void OnPlacementCancelled()
+    {
+        _gridDirty = true;
     }
     
     
