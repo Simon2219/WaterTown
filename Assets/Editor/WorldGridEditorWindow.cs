@@ -19,7 +19,7 @@ public class WorldGridEditorWindow : EditorWindow
     private bool _showVizDisplay = false;
     private bool _showVizLines = false;
     private bool _showVizColors = false;
-    private bool _showVizTube = false;
+    private bool _showVizCorners = false;
     private bool _showVizDepth = false;
 
     private Vector2 _scroll;
@@ -278,32 +278,17 @@ public class WorldGridEditorWindow : EditorWindow
                 }
             }
 
-            // Tube
-            _showVizTube = EditorGUILayout.Foldout(_showVizTube, "Tube Look", true);
-            if (_showVizTube)
+            // Line Corners
+            _showVizCorners = EditorGUILayout.Foldout(_showVizCorners, "Line Corners", true);
+            if (_showVizCorners)
             {
                 using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
                 {
                     EditorGUI.BeginChangeCheck();
                     
-                    _visualizer.tubeLook = EditorGUILayout.Toggle(
-                        new GUIContent("Enable Tube Look"), 
-                        _visualizer.tubeLook);
-                    
-                    using (new EditorGUI.DisabledScope(!_visualizer.tubeLook))
-                    {
-                        _visualizer.tubeJoinSmooth = EditorGUILayout.Slider(
-                            new GUIContent("Join Smooth (m)"), 
-                            _visualizer.tubeJoinSmooth, 0f, 0.25f);
-                        
-                        _visualizer.tubeLightStrength = EditorGUILayout.Slider(
-                            new GUIContent("Light Strength"), 
-                            _visualizer.tubeLightStrength, 0f, 1f);
-                        
-                        _visualizer.tubeRimStrength = EditorGUILayout.Slider(
-                            new GUIContent("Rim Strength"), 
-                            _visualizer.tubeRimStrength, 0f, 1f);
-                    }
+                    _visualizer.cornerRadius = EditorGUILayout.Slider(
+                        new GUIContent("Corner Radius (m)", "Rounds the intersections where grid lines meet"), 
+                        _visualizer.cornerRadius, 0f, 0.25f);
                     
                     if (EditorGUI.EndChangeCheck())
                     {

@@ -12,11 +12,8 @@ Shader "WaterCity/Grid/URPGrid"
         _SizeXY("Grid Size (X,Y)", Vector) = (16,16,0,0)
         _LevelY("Level World Y", Float) = 0.0
 
-        // Tube look
-        _TubeLook("Tube Look (0/1)", Float) = 0.0
-        _JoinSmooth("Join Smooth (m)", Float) = 0.05
-        _TubeLightStrength("Tube Light Strength", Range(0,1)) = 0.35
-        _TubeRimStrength("Tube Rim Strength", Range(0,1)) = 0.15
+        // Line intersection rounding
+        _CornerRadius("Corner Radius (m)", Float) = 0.05
 
         // Depth helpers
         _YBias("Vertical Bias (m)", Float) = 0.005
@@ -69,10 +66,7 @@ Shader "WaterCity/Grid/URPGrid"
             float  _EnableFill;
             float  _NeighborFade;
 
-            float  _TubeLook;
-            float  _JoinSmooth;
-            float  _TubeLightStrength;
-            float  _TubeRimStrength;
+            float  _CornerRadius;
 
             float  _YBias;
 
@@ -117,7 +111,8 @@ Shader "WaterCity/Grid/URPGrid"
                 float  dv        = distM.x - halfW;
                 float  dh        = distM.y - halfW;
 
-                float  d         = smin(dv, dh, max(_JoinSmooth, 0.0));
+                // Smooth min creates rounded corners at line intersections
+                float  d         = smin(dv, dh, max(_CornerRadius, 0.0));
                 float  aa        = max(fwidth(d), 1e-4);
                 float  lineMask  = saturate(0.5 - d / aa);
 
@@ -138,29 +133,6 @@ Shader "WaterCity/Grid/URPGrid"
                 fillCol.a *= (_EnableFill > 0.5) ? 1.0 : 0.0;
 
                 float4 lineCol = _LineColor;
-
-                // Fake tube lighting on the lines
-                if (_TubeLook > 0.5)
-                {
-                    float r = max(halfW + _JoinSmooth, 1e-4);
-                    float wv = saturate(1.0 - dv / r);
-                    float wh = saturate(1.0 - dh / r);
-                    float sum = max(wv + wh, 1e-4);
-                    wv /= sum; wh /= sum;
-
-                    float sx = (cellUV.x <= 0.5) ? -1.0 : 1.0;
-                    float sz = (cellUV.y <= 0.5) ? -1.0 : 1.0;
-                    float3 nx = float3(sx, 0, 0);
-                    float3 nz = float3(0, 0, sz);
-                    float3 n  = normalize(nx * wv + nz * wh + float3(1e-5, 0, 1e-5));
-
-                    float3 L  = normalize(float3(0.4, 1.0, 0.3));
-                    float  ndotl = saturate(dot(n, L));
-                    float  rim   = pow(1.0 - saturate(dot(n, float3(0,1,0))), 1.0);
-
-                    float shade = ndotl * _TubeLightStrength + rim * _TubeRimStrength;
-                    lineCol.rgb = saturate(lineCol.rgb * (0.75 + shade));
-                }
 
                 float aFill = fillCol.a * (1.0 - lineMask);
                 float aLine = lineCol.a * lineMask;

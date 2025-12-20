@@ -61,11 +61,8 @@ public class GridVisualizer : MonoBehaviour
     };
 
     
-    [Header("Tube Look")]
-    public bool tubeLook = true;
-    [Min(0f)] public float tubeJoinSmooth = 0.05f;
-    [Range(0f, 1f)] public float tubeLightStrength = 0.35f;
-    [Range(0f, 1f)] public float tubeRimStrength = 0.15f;
+    [Header("Line Corners")]
+    [Min(0f)] public float cornerRadius = 0.05f;
 
     
     [Header("Depth")]
@@ -101,10 +98,7 @@ public class GridVisualizer : MonoBehaviour
     private static readonly int PID_CellMap = Shader.PropertyToID("_CellMap");
     private static readonly int PID_EnableFill = Shader.PropertyToID("_EnableFill");
     private static readonly int PID_Fade = Shader.PropertyToID("_NeighborFade");
-    private static readonly int PID_TubeLook = Shader.PropertyToID("_TubeLook");
-    private static readonly int PID_JoinSmooth = Shader.PropertyToID("_JoinSmooth");
-    private static readonly int PID_TubeLight = Shader.PropertyToID("_TubeLightStrength");
-    private static readonly int PID_TubeRim = Shader.PropertyToID("_TubeRimStrength");
+    private static readonly int PID_CornerRadius = Shader.PropertyToID("_CornerRadius");
     private static readonly int PID_YBias = Shader.PropertyToID("_YBias");
     private static readonly int PID_ZTestMode = Shader.PropertyToID("_ZTestMode");
 
@@ -537,11 +531,7 @@ public class GridVisualizer : MonoBehaviour
         _mpb.SetFloat(PID_LineWidth, Mathf.Max(0.001f, lineThickness));
         _mpb.SetFloat(PID_EnableFill, enableCellColors ? 1f : 0f);
         _mpb.SetFloat(PID_Fade, Mathf.Clamp01(neighborFade));
-
-        _mpb.SetFloat(PID_TubeLook, tubeLook ? 1f : 0f);
-        _mpb.SetFloat(PID_JoinSmooth, Mathf.Max(0f, tubeJoinSmooth));
-        _mpb.SetFloat(PID_TubeLight, Mathf.Clamp01(tubeLightStrength));
-        _mpb.SetFloat(PID_TubeRim, Mathf.Clamp01(tubeRimStrength));
+        _mpb.SetFloat(PID_CornerRadius, Mathf.Max(0f, cornerRadius));
 
         _mpb.SetFloat(PID_YBias, Mathf.Max(0f, yBias));
         _mpb.SetFloat(PID_ZTestMode, zTestAlways ? 8f : 4f);
