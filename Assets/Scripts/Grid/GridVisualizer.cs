@@ -1,4 +1,5 @@
 using System;
+using Building;
 using UnityEngine;
 
 namespace Grid
@@ -51,6 +52,10 @@ public class GridVisualizer : MonoBehaviour
     [Header("References")]
     [SerializeField] private WorldGrid _grid;
     [SerializeField] private Material _material;
+    
+    [Header("Event Sources")]
+    [Tooltip("Optional - subscribes to build mode events to auto-toggle cell colors")]
+    [SerializeField] private BuildModeManager _buildModeManager;
 
     
     [Header("Display")]
@@ -145,6 +150,7 @@ public class GridVisualizer : MonoBehaviour
         EnsureComponents();
         EnsureMaterialAssetOrRuntime();
         SubscribeToGridEvents();
+        SubscribeToBuildModeEvents();
         RebuildAll();
         SyncRendererMaterial();
         ApplyParams(true);
@@ -155,6 +161,7 @@ public class GridVisualizer : MonoBehaviour
     private void OnDisable()
     {
         UnsubscribeFromGridEvents();
+        UnsubscribeFromBuildModeEvents();
     }
 
 
@@ -237,6 +244,36 @@ public class GridVisualizer : MonoBehaviour
     private void OnGridAreaChanged(Vector2Int min, Vector2Int max)
     {
         _gridDirty = true;
+    }
+    
+    
+    private void SubscribeToBuildModeEvents()
+    {
+        if (_buildModeManager == null) return;
+        
+        _buildModeManager.OnBuildModeEntered += OnBuildModeEntered;
+        _buildModeManager.OnBuildModeExited += OnBuildModeExited;
+    }
+    
+    
+    private void UnsubscribeFromBuildModeEvents()
+    {
+        if (_buildModeManager == null) return;
+        
+        _buildModeManager.OnBuildModeEntered -= OnBuildModeEntered;
+        _buildModeManager.OnBuildModeExited -= OnBuildModeExited;
+    }
+    
+    
+    private void OnBuildModeEntered()
+    {
+        EnableCellColors = true;
+    }
+    
+    
+    private void OnBuildModeExited()
+    {
+        EnableCellColors = false;
     }
     
     

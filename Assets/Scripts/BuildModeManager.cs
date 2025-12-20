@@ -36,10 +36,6 @@ namespace Building
         [SerializeField] private WorldGrid grid;
         [SerializeField] private GameUIController gameUI;
         [SerializeField] private Camera mainCamera;
-        
-        [Header("Grid Visualization")]
-        [Tooltip("Optional - if assigned, cell colors will be enabled during build mode")]
-        [SerializeField] private GridVisualizer gridVisualizer;
 
         [Header("Input Actions")]
         [SerializeField] private InputActionReference placeAction;
@@ -339,11 +335,6 @@ namespace Building
         {
             if (_wasInBuildMode) return;
             _wasInBuildMode = true;
-            
-            // Enable grid cell colors for build mode
-            if (gridVisualizer != null)
-                gridVisualizer.EnableCellColors = true;
-            
             OnBuildModeEntered?.Invoke();
         }
         
@@ -352,11 +343,6 @@ namespace Building
         {
             if (!_wasInBuildMode) return;
             _wasInBuildMode = false;
-            
-            // Disable grid cell colors after build mode
-            if (gridVisualizer != null)
-                gridVisualizer.EnableCellColors = false;
-            
             OnBuildModeExited?.Invoke();
         }
         
