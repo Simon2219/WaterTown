@@ -94,6 +94,8 @@ public class GridVisualizer : MonoBehaviour
     private static readonly int PID_SizeXY = Shader.PropertyToID("_SizeXY");
     private static readonly int PID_LevelY = Shader.PropertyToID("_LevelY");
     private static readonly int PID_LineColor = Shader.PropertyToID("_LineColor");
+    private static readonly int PID_LineOpacity = Shader.PropertyToID("_LineOpacity");
+    private static readonly int PID_LineColorMode = Shader.PropertyToID("_LineColorMode");
     private static readonly int PID_LineWidth = Shader.PropertyToID("_LineWidth");
     private static readonly int PID_CellMap = Shader.PropertyToID("_CellMap");
     private static readonly int PID_EnableFill = Shader.PropertyToID("_EnableFill");
@@ -256,6 +258,7 @@ public class GridVisualizer : MonoBehaviour
     
     
     /// Recomputes cell colors from grid flag data
+    /// Stores color in RGB, priority in Alpha (0 = Empty, higher = more important)
     ///
     public void RecomputeColors()
     {
@@ -274,8 +277,10 @@ public class GridVisualizer : MonoBehaviour
             {
                 var cell = new Vector2Int(x, y);
                 var cd = grid.GetCell(cell);
+                var flags = cd?.Flags ?? CellFlag.Empty;
 
-                Color cellColor = GetColorForFlags(cd?.Flags ?? CellFlag.Empty);
+                Color cellColor = GetColorForFlags(flags);
+                cellColor.a = GetPriorityForFlags(flags);
                 colors[row + x] = cellColor;
             }
         }
@@ -340,15 +345,26 @@ public class GridVisualizer : MonoBehaviour
     }
 
 
-    /// Gets the effective line color based on lineColorMode
-    /// For Solid mode, returns solidLineColor
-    /// For Blend/Priority modes, this would need shader support
+    /// Gets priority value for flags (0 = Empty, higher = more important)
+    /// Used for line coloring in Priority mode
     ///
-    private Color GetEffectiveLineColor()
+    private float GetPriorityForFlags(CellFlag flags)
     {
-        Color baseColor = solidLineColor;
-        baseColor.a *= lineOpacity;
-        return baseColor;
+        // Priority order matches GetColorForFlags
+        if ((flags & CellFlag.Locked) != 0) return 1.0f;
+        if ((flags & CellFlag.Occupied) != 0) return 0.85f;
+        if ((flags & CellFlag.OccupyPreview) != 0) return 0.7f;
+        if ((flags & CellFlag.ModuleBlocked) != 0) return 0.55f;
+        if ((flags & CellFlag.Buildable) != 0) return 0.4f;
+        return 0f; // Empty
+    }
+
+
+    /// Gets the base line color (without opacity - that's separate)
+    ///
+    private Color GetBaseLineColor()
+    {
+        return solidLineColor;
     }
     
     
@@ -486,6 +502,7 @@ public class GridVisualizer : MonoBehaviour
         {
             var arr = new Color32[w * h];
             Color emptyColor = GetFlagColor(CellFlag.Empty);
+            emptyColor.a = 0f; // Priority 0 = Empty (line coloring uses solid color)
             var c32 = (Color32)emptyColor;
             
             for (int i = 0; i < arr.Length; i++) 
@@ -525,7 +542,9 @@ public class GridVisualizer : MonoBehaviour
         _mpb.SetFloat(PID_CellSize, cellSz);
         _mpb.SetVector(PID_SizeXY, new Vector4(sizeX, sizeY, 0, 0));
         _mpb.SetFloat(PID_LevelY, 0);
-        _mpb.SetColor(PID_LineColor, GetEffectiveLineColor());
+        _mpb.SetColor(PID_LineColor, GetBaseLineColor());
+        _mpb.SetFloat(PID_LineOpacity, Mathf.Clamp01(lineOpacity));
+        _mpb.SetFloat(PID_LineColorMode, (float)lineColorMode);
         _mpb.SetFloat(PID_LineWidth, Mathf.Max(0.001f, lineThickness));
         _mpb.SetFloat(PID_EnableFill, enableCellColors ? 1f : 0f);
         _mpb.SetFloat(PID_CellOpacity, Mathf.Clamp01(cellOpacity));

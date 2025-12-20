@@ -3,6 +3,8 @@ Shader "WaterCity/Grid/URPGrid"
     Properties
     {
         _LineColor("Line Color", Color) = (0,0,0,0.7)
+        _LineOpacity("Line Opacity", Range(0,1)) = 0.7
+        _LineColorMode("Line Color Mode", Float) = 0.0
         _LineWidth("Line Width (m)", Float) = 0.05
         _CellSize("Cell Size (m)", Float) = 1.0
         _EnableFill("Enable Cell Fill", Float) = 1.0
@@ -59,6 +61,8 @@ Shader "WaterCity/Grid/URPGrid"
             SAMPLER(sampler_CellMap);
 
             float4 _LineColor;
+            float  _LineOpacity;
+            float  _LineColorMode;
             float  _LineWidth;
             float  _CellSize;
             float4 _GridOrigin;
@@ -92,55 +96,125 @@ Shader "WaterCity/Grid/URPGrid"
                 return OUT;
             }
 
-            float4 SampleCellColor(int2 cell)
+            // Sample cell: rgb = color, a = priority (0 = Empty)
+            float4 SampleCellData(int2 cell, int2 size)
             {
-                float2 size = _SizeXY.xy;
-                float2 uv = (float2(cell) + 0.5) / size;
+                cell = clamp(cell, int2(0, 0), size - int2(1, 1));
+                float2 uv = (float2(cell) + 0.5) / float2(size);
                 return SAMPLE_TEXTURE2D(_CellMap, sampler_CellMap, uv);
+            }
+
+            // Get line color based on two adjacent cells
+            // Mode: 0 = Solid, 1 = Blend, 2 = Priority
+            float3 GetLineColor(float4 cellA, float4 cellB)
+            {
+                // Solid mode: always use _LineColor
+                if (_LineColorMode < 0.5)
+                    return _LineColor.rgb;
+
+                // Check if cells are Empty (priority = 0)
+                bool aEmpty = cellA.a < 0.01;
+                bool bEmpty = cellB.a < 0.01;
+
+                // Both empty: use solid line color
+                if (aEmpty && bEmpty)
+                    return _LineColor.rgb;
+
+                // One empty: use the non-empty cell's color
+                if (aEmpty)
+                    return cellB.rgb;
+                if (bEmpty)
+                    return cellA.rgb;
+
+                // Both have colors
+                if (_LineColorMode < 1.5)
+                {
+                    // Blend mode: average the two colors
+                    return (cellA.rgb + cellB.rgb) * 0.5;
+                }
+                else
+                {
+                    // Priority mode: use higher priority cell
+                    return (cellA.a >= cellB.a) ? cellA.rgb : cellB.rgb;
+                }
             }
 
             float4 frag(Varyings IN) : SV_Target
             {
-                float2 size = _SizeXY.xy;
-                float2 uv01 = saturate(IN.uv);
-                float2 gridPos = uv01 * size;   // [0..size)
-                float2 cellUV  = frac(gridPos); // 0..1 in cell
+                int2   size    = (int2)_SizeXY.xy;
+                float2 uv01    = saturate(IN.uv);
+                float2 gridPos = uv01 * float2(size);
+                float2 cellUV  = frac(gridPos);
                 int2   cell    = (int2)floor(gridPos);
 
-                float2 distFrac  = min(cellUV, 1.0 - cellUV);   // distance to cell edges (0..0.5)
-                float2 distM     = distFrac * _CellSize;        // meters
-                float  halfW     = 0.5 * _LineWidth;
-                float  dv        = distM.x - halfW;
-                float  dh        = distM.y - halfW;
+                float2 distFrac = min(cellUV, 1.0 - cellUV);
+                float2 distM    = distFrac * _CellSize;
+                float  halfW    = 0.5 * _LineWidth;
+                float  dv       = distM.x - halfW;
+                float  dh       = distM.y - halfW;
 
                 // Smooth min creates rounded corners at line intersections
-                float  d         = smin(dv, dh, max(_CornerRadius, 0.0));
-                float  aa        = max(fwidth(d), 1e-4);
-                float  lineMask  = saturate(0.5 - d / aa);
+                float d        = smin(dv, dh, max(_CornerRadius, 0.0));
+                float aa       = max(fwidth(d), 1e-4);
+                float lineMask = saturate(0.5 - d / aa);
 
-                float4 cellCol = SampleCellColor(cell);
+                // Sample current cell
+                float4 cellData = SampleCellData(cell, size);
+
+                // Apply neighbor fade to fill color
+                float3 fillRgb = cellData.rgb;
                 if (_NeighborFade > 0.001)
                 {
-                    int2 sz = (int2)size;
-                    int2 cx = cell;
-                    int2 left  = int2(max(cx.x - 1, 0), cx.y);
-                    int2 right = int2(min(cx.x + 1, sz.x - 1), cx.y);
-                    int2 down  = int2(cx.x, max(cx.y - 1, 0));
-                    int2 up    = int2(cx.x, min(cx.y + 1, sz.y - 1));
-                    float4 avgN = (SampleCellColor(left)+SampleCellColor(right)+SampleCellColor(down)+SampleCellColor(up))*0.25;
-                    cellCol = lerp(cellCol, avgN, _NeighborFade);
+                    float4 left  = SampleCellData(cell + int2(-1, 0), size);
+                    float4 right = SampleCellData(cell + int2( 1, 0), size);
+                    float4 down  = SampleCellData(cell + int2( 0,-1), size);
+                    float4 up    = SampleCellData(cell + int2( 0, 1), size);
+                    float3 avgN  = (left.rgb + right.rgb + down.rgb + up.rgb) * 0.25;
+                    fillRgb = lerp(fillRgb, avgN, _NeighborFade);
                 }
 
-                float4 fillCol = cellCol;
-                float4 lineCol = _LineColor;
+                // Determine adjacent cells for line coloring
+                // Use weights based on proximity to each edge
+                float wLeft  = saturate((0.5 - cellUV.x) / max(halfW, 0.01));
+                float wRight = saturate((cellUV.x - 0.5) / max(halfW, 0.01));
+                float wDown  = saturate((0.5 - cellUV.y) / max(halfW, 0.01));
+                float wUp    = saturate((cellUV.y - 0.5) / max(halfW, 0.01));
 
-                // Fill alpha: base alpha * cell opacity (0 if fill disabled)
+                // Sample neighbors
+                float4 leftCell  = SampleCellData(cell + int2(-1, 0), size);
+                float4 rightCell = SampleCellData(cell + int2( 1, 0), size);
+                float4 downCell  = SampleCellData(cell + int2( 0,-1), size);
+                float4 upCell    = SampleCellData(cell + int2( 0, 1), size);
+
+                // Compute line color from adjacent cells
+                float3 lineRgb;
+                if (_LineColorMode < 0.5)
+                {
+                    // Solid mode
+                    lineRgb = _LineColor.rgb;
+                }
+                else
+                {
+                    // Determine which edge we're on
+                    float3 hLineColor = GetLineColor(cellData, (cellUV.y < 0.5) ? downCell : upCell);
+                    float3 vLineColor = GetLineColor(cellData, (cellUV.x < 0.5) ? leftCell : rightCell);
+
+                    // Weight by distance to each edge type
+                    float vWeight = saturate(1.0 - dv / max(halfW, 0.01));
+                    float hWeight = saturate(1.0 - dh / max(halfW, 0.01));
+                    float totalWeight = max(vWeight + hWeight, 0.001);
+
+                    lineRgb = (vLineColor * vWeight + hLineColor * hWeight) / totalWeight;
+                }
+
+                // Fill alpha (0 if fill disabled)
                 float fillA = _CellOpacity * (_EnableFill > 0.5 ? 1.0 : 0.0);
+                float lineA = _LineOpacity;
 
-                // Blend colors and alphas based on line mask
-                float3 rgb = lerp(fillCol.rgb, lineCol.rgb, lineMask);
-                float  a   = lerp(fillA, lineCol.a, lineMask);
-                
+                // Blend fill and line
+                float3 rgb = lerp(fillRgb, lineRgb, lineMask);
+                float  a   = lerp(fillA, lineA, lineMask);
+
                 return float4(rgb, a);
             }
             ENDHLSL
