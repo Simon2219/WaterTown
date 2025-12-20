@@ -173,20 +173,13 @@ Shader "WaterCity/Grid/URPGrid"
                     fillRgb = lerp(fillRgb, avgN, _NeighborFade);
                 }
 
-                // Determine adjacent cells for line coloring
-                // Use weights based on proximity to each edge
-                float wLeft  = saturate((0.5 - cellUV.x) / max(halfW, 0.01));
-                float wRight = saturate((cellUV.x - 0.5) / max(halfW, 0.01));
-                float wDown  = saturate((0.5 - cellUV.y) / max(halfW, 0.01));
-                float wUp    = saturate((cellUV.y - 0.5) / max(halfW, 0.01));
-
-                // Sample neighbors
+                // Sample neighbors for line coloring
                 float4 leftCell  = SampleCellData(cell + int2(-1, 0), size);
                 float4 rightCell = SampleCellData(cell + int2( 1, 0), size);
                 float4 downCell  = SampleCellData(cell + int2( 0,-1), size);
                 float4 upCell    = SampleCellData(cell + int2( 0, 1), size);
 
-                // Compute line color from adjacent cells
+                // Compute line color
                 float3 lineRgb;
                 if (_LineColorMode < 0.5)
                 {
@@ -195,16 +188,24 @@ Shader "WaterCity/Grid/URPGrid"
                 }
                 else
                 {
-                    // Determine which edge we're on
-                    float3 hLineColor = GetLineColor(cellData, (cellUV.y < 0.5) ? downCell : upCell);
-                    float3 vLineColor = GetLineColor(cellData, (cellUV.x < 0.5) ? leftCell : rightCell);
+                    // Get horizontal neighbor (left or right based on position)
+                    float4 hNeighbor = (cellUV.x < 0.5) ? leftCell : rightCell;
+                    // Get vertical neighbor (down or up based on position)
+                    float4 vNeighbor = (cellUV.y < 0.5) ? downCell : upCell;
 
-                    // Weight by distance to each edge type
-                    float vWeight = saturate(1.0 - dv / max(halfW, 0.01));
-                    float hWeight = saturate(1.0 - dh / max(halfW, 0.01));
-                    float totalWeight = max(vWeight + hWeight, 0.001);
+                    // Get line colors for each edge direction
+                    float3 hLineColor = GetLineColor(cellData, hNeighbor);
+                    float3 vLineColor = GetLineColor(cellData, vNeighbor);
 
-                    lineRgb = (vLineColor * vWeight + hLineColor * hWeight) / totalWeight;
+                    // At corners, blend both edge colors
+                    // Use distance to edge (not signed distance) for weighting
+                    float hDist = abs(distM.y);  // Distance to horizontal edge
+                    float vDist = abs(distM.x);  // Distance to vertical edge
+
+                    // Closer to vertical edge = more vertical line color
+                    // Closer to horizontal edge = more horizontal line color
+                    float blend = saturate(vDist / max(vDist + hDist, 0.001));
+                    lineRgb = lerp(vLineColor, hLineColor, blend);
                 }
 
                 // Fill alpha (0 if fill disabled)

@@ -16,10 +16,9 @@ public class WorldGridEditorWindow : EditorWindow
 
     private bool _showSettings = true;
     private bool _showVisualizer = false;
-    private bool _showVizDisplay = false;
+    private bool _showVizCells = false;
     private bool _showVizLines = false;
     private bool _showVizColors = false;
-    private bool _showVizCorners = false;
     private bool _showVizDepth = false;
 
     private Vector2 _scroll;
@@ -45,6 +44,10 @@ public class WorldGridEditorWindow : EditorWindow
     
     private void OnGUI()
     {
+        // Auto-find references as fallback
+        if (_sceneGrid == null) _sceneGrid = FindWorldGrid();
+        if (_visualizer == null) _visualizer = FindVisualizer();
+
         _scroll = EditorGUILayout.BeginScrollView(_scroll);
 
         EditorGUILayout.Space();
@@ -202,18 +205,30 @@ public class WorldGridEditorWindow : EditorWindow
 
             EditorGUILayout.Space(5);
 
-            // Display
-            _showVizDisplay = EditorGUILayout.Foldout(_showVizDisplay, "Display", true);
-            if (_showVizDisplay)
+            // Show Grid toggle at top
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                EditorGUI.BeginChangeCheck();
+                _visualizer.showGrid = EditorGUILayout.Toggle("Show Grid", _visualizer.showGrid);
+                if (EditorGUI.EndChangeCheck())
+                {
+                    EditorUtility.SetDirty(_visualizer);
+                    SceneView.RepaintAll();
+                    EditorApplication.QueuePlayerLoopUpdate();
+                }
+            }
+
+            EditorGUILayout.Space(3);
+
+            // Cells
+            _showVizCells = EditorGUILayout.Foldout(_showVizCells, "Cells", true);
+            if (_showVizCells)
             {
                 using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
                 {
                     EditorGUI.BeginChangeCheck();
                     
-                    _visualizer.showGrid = EditorGUILayout.Toggle("Show Grid", _visualizer.showGrid);
                     _visualizer.enableCellColors = EditorGUILayout.Toggle("Enable Cell Colors", _visualizer.enableCellColors);
-                    
-                    EditorGUILayout.Space(3);
                     
                     _visualizer.cellOpacity = EditorGUILayout.Slider(
                         new GUIContent("Cell Opacity"), 
@@ -240,6 +255,16 @@ public class WorldGridEditorWindow : EditorWindow
                 {
                     EditorGUI.BeginChangeCheck();
                     
+                    _visualizer.lineColorMode = (GridVisualizer.LineColorMode)EditorGUILayout.EnumPopup(
+                        new GUIContent("Line Color Mode"), 
+                        _visualizer.lineColorMode);
+                    
+                    _visualizer.solidLineColor = EditorGUILayout.ColorField(
+                        new GUIContent("Line Default Color", "Used for Empty cells and Solid mode"), 
+                        _visualizer.solidLineColor);
+                    
+                    EditorGUILayout.Space(3);
+                    
                     _visualizer.lineThickness = EditorGUILayout.Slider(
                         new GUIContent("Line Thickness (m)"), 
                         _visualizer.lineThickness, 0.001f, 0.5f);
@@ -247,44 +272,6 @@ public class WorldGridEditorWindow : EditorWindow
                     _visualizer.lineOpacity = EditorGUILayout.Slider(
                         new GUIContent("Line Opacity"), 
                         _visualizer.lineOpacity, 0f, 1f);
-                    
-                    EditorGUILayout.Space(3);
-                    
-                    _visualizer.lineColorMode = (GridVisualizer.LineColorMode)EditorGUILayout.EnumPopup(
-                        new GUIContent("Line Color Mode"), 
-                        _visualizer.lineColorMode);
-                    
-                    if (_visualizer.lineColorMode == GridVisualizer.LineColorMode.Solid)
-                    {
-                        _visualizer.solidLineColor = EditorGUILayout.ColorField(
-                            "Solid Line Color", 
-                            _visualizer.solidLineColor);
-                    }
-                    else
-                    {
-                        EditorGUILayout.HelpBox(
-                            _visualizer.lineColorMode == GridVisualizer.LineColorMode.Blend
-                                ? "Lines blend colors from adjacent cells"
-                                : "Lines use the higher priority cell's color",
-                            MessageType.Info);
-                    }
-                    
-                    if (EditorGUI.EndChangeCheck())
-                    {
-                        EditorUtility.SetDirty(_visualizer);
-                        SceneView.RepaintAll();
-                        EditorApplication.QueuePlayerLoopUpdate();
-                    }
-                }
-            }
-
-            // Line Corners
-            _showVizCorners = EditorGUILayout.Foldout(_showVizCorners, "Line Corners", true);
-            if (_showVizCorners)
-            {
-                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
-                {
-                    EditorGUI.BeginChangeCheck();
                     
                     _visualizer.cornerRadius = EditorGUILayout.Slider(
                         new GUIContent("Corner Radius (m)", "Rounds the intersections where grid lines meet"), 
