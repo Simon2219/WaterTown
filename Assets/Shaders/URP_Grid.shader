@@ -152,13 +152,14 @@ Shader "WaterCity/Grid/URPGrid"
                 if (_LineColorMode > 0.5)
                 {
                     // Priority mode with neighbor bleeding
-                    // Position within grid in cell units (0.5 = cell center)
-                    float2 posInCell = cellUV;
+                    // Position relative to current cell center (in cell units)
+                    float2 relPos = cellUV - 0.5;
                     
-                    // Max bleed distance in cell units (1.0 = can reach 1 cell away)
-                    float maxBleed = _LineNeighborFade;
+                    // Bleed reach: slider 1.0 means color reaches 1 full cell from source edge
+                    // From cell center to edge is 0.5, so total reach = 0.5 + fadeValue
+                    float bleedReach = 0.5 + _LineNeighborFade;
                     
-                    if (maxBleed > 0.001)
+                    if (_LineNeighborFade > 0.001)
                     {
                         // Sample all 9 cells (current + 8 neighbors including diagonals)
                         float4 cells[9];
@@ -174,38 +175,34 @@ Shader "WaterCity/Grid/URPGrid"
                         cells[7] = SampleCellData(cell + int2(-1, 1), size);    offsets[7] = float2(-1, 1);
                         cells[8] = SampleCellData(cell + int2( 1, 1), size);    offsets[8] = float2( 1, 1);
                         
-                        // Position relative to current cell center
-                        float2 relPos = posInCell - 0.5;
-                        
                         if (_LinePriorityOverride > 0.5)
                         {
-                            // Priority Override: highest priority cell in range wins entirely
-                            float bestPriority = -1.0;
+                            // Priority Override: highest priority in range wins, fade to default with distance
+                            float bestPriority = 0;
                             float3 bestColor = _LineColor.rgb;
+                            float bestBleed = 0;
                             
                             for (int i = 0; i < 9; i++)
                             {
                                 if (cells[i].a < 0.01) continue; // Skip empty cells
                                 
-                                // Distance from this pixel to cell center (in cell units)
-                                float2 cellCenter = offsets[i];
-                                float dist = length(relPos - cellCenter);
-                                
-                                // Bleed strength: 1 at cell center, 0 at maxBleed distance
-                                float bleed = saturate(1.0 - dist / maxBleed);
+                                float dist = length(relPos - offsets[i]);
+                                float bleed = saturate(1.0 - dist / bleedReach);
                                 
                                 if (bleed > 0.001 && cells[i].a > bestPriority)
                                 {
                                     bestPriority = cells[i].a;
                                     bestColor = cells[i].rgb;
+                                    bestBleed = bleed;
                                 }
                             }
                             
-                            lineRgb = (bestPriority > 0) ? bestColor : _LineColor.rgb;
+                            // Fade winning color into default based on distance
+                            lineRgb = lerp(_LineColor.rgb, bestColor, bestBleed);
                         }
                         else
                         {
-                            // Distance-weighted blend with priority as tiebreaker
+                            // Distance-weighted blend, priority as tiebreaker, fade to default
                             float3 colorSum = float3(0, 0, 0);
                             float weightSum = 0;
                             float maxPriorityInRange = 0;
@@ -215,25 +212,22 @@ Shader "WaterCity/Grid/URPGrid"
                             {
                                 if (cells[i].a < 0.01) continue;
                                 
-                                float2 cellCenter = offsets[i];
-                                float dist = length(relPos - cellCenter);
-                                float bleed = saturate(1.0 - dist / maxBleed);
+                                float dist = length(relPos - offsets[i]);
+                                float bleed = saturate(1.0 - dist / bleedReach);
                                 
                                 if (bleed > 0.001)
                                     maxPriorityInRange = max(maxPriorityInRange, cells[i].a);
                             }
                             
-                            // Second pass: blend colors, weighting by distance
-                            // Only include cells with priority >= max - small epsilon (tiebreaker)
+                            // Second pass: blend colors weighted by bleed strength
                             float prioThreshold = maxPriorityInRange - 0.01;
                             
                             for (int j = 0; j < 9; j++)
                             {
                                 if (cells[j].a < prioThreshold) continue;
                                 
-                                float2 cellCenter = offsets[j];
-                                float dist = length(relPos - cellCenter);
-                                float bleed = saturate(1.0 - dist / maxBleed);
+                                float dist = length(relPos - offsets[j]);
+                                float bleed = saturate(1.0 - dist / bleedReach);
                                 
                                 if (bleed > 0.001)
                                 {
@@ -242,7 +236,14 @@ Shader "WaterCity/Grid/URPGrid"
                                 }
                             }
                             
-                            lineRgb = (weightSum > 0.001) ? (colorSum / weightSum) : _LineColor.rgb;
+                            // Blend cell colors with default based on total weight
+                            if (weightSum > 0.001)
+                            {
+                                float3 cellColor = colorSum / weightSum;
+                                // Use max weight as blend factor (stronger influence = more cell color)
+                                float influence = saturate(weightSum);
+                                lineRgb = lerp(_LineColor.rgb, cellColor, influence);
+                            }
                         }
                     }
                     else
