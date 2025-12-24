@@ -3,6 +3,7 @@ using System.Linq;
 using Grid;
 using UnityEngine;
 using UnityEngine.Events;
+using UnityEngine.Rendering.UI;
 
 namespace Platforms
 {
@@ -115,7 +116,7 @@ public class PlatformManager : MonoBehaviour
     {
         // Initialize & Inject Dependencies
         platform.InitializePlatform(this, _worldGrid);
-
+        Debug.Log("OnPlatformCreated");
         // Subscribe to all instance events for this platform
         platform.HasMoved += OnPlatformHasMoved;
         platform.Enabled += OnPlatformEnabled;
@@ -123,6 +124,7 @@ public class PlatformManager : MonoBehaviour
         platform.Placed += OnPlatformPlaced;
         platform.PickedUp += OnPlatformPickedUp;
 
+        
         // Add to registry immediately
         _allPlatforms.Add(platform);
     }
@@ -184,7 +186,7 @@ public class PlatformManager : MonoBehaviour
     ///
     private void OnPlatformPickedUp(GamePlatform platform)
     {
-        ClearCellsForPlatform(platform);
+        ClearCellsForPlatform(platform, false);
         
         // Mark affected platforms (neighbors at old position) for adjacency update
         MarkAdjacencyDirtyForPlatform(platform);
@@ -192,49 +194,13 @@ public class PlatformManager : MonoBehaviour
 
 
 
+    // ReSharper disable Unity.PerformanceAnalysis
     /// Called when a platform reports its transform changed
     /// Lightweight update for runtime platform movement
     ///
     private void OnPlatformHasMoved(GamePlatform platform)
     {
-        // Store current cells as previous for the next update
-        // On first move after pickup, occupiedCells is empty but previousOccupiedCells has the pre-pickup position
-        // Don't overwrite previousOccupiedCells if occupiedCells is empty (preserve pre-pickup position)
-        if (platform.occupiedCells.Count > 0)
-        {
-            platform.previousOccupiedCells.Clear();
-            platform.previousOccupiedCells.AddRange(platform.occupiedCells);
-        }
-
-        // Clear old preview/occupied flags for this platform's old cells
-        foreach (Vector2Int cell in platform.occupiedCells)
-        {
-            // Only clear if this platform owns the cell
-            if (_cellToPlatform.TryGetValue(cell, out var owner) && owner == platform)
-            {
-                _worldGrid.GetCell(cell)?.Clear();
-                _cellToPlatform.Remove(cell);
-            }
-        }
-
-        // Compute new footprint cells from current transform (rotation-aware)
-        List<Vector2Int> newCells = GetCellsForPlatform(platform);
-        platform.occupiedCells.Clear();
-        platform.occupiedCells.AddRange(newCells);
-
-        // Different Flag based on if Preview or Placed
-        CellFlag flagToUse = platform.IsPickedUp ? CellFlag.OccupyPreview : CellFlag.Occupied;
-
-        // Update grid occupancy with proper flags
-        foreach (Vector2Int cell in platform.occupiedCells)
-        {
-            // AddFlags enforces priority (won't overwrite Occupied with OccupyPreview)
-            var cellData = _worldGrid.GetCell(cell);
-            if (cellData != null && cellData.AddFlags(flagToUse))
-            {
-                _cellToPlatform[cell] = platform;
-            }
-        }
+        UpdateCellsForPlatform(platform);
 
         // Mark this platform and affected neighbors for adjacency update
         MarkAdjacencyDirtyForPlatform(platform);
@@ -435,7 +401,7 @@ public class PlatformManager : MonoBehaviour
     /// Removes platform occupancy from the grid and clears its connections
     /// Does NOT unsubscribe from events (handled by OnPlatformDestroyed)
     ///
-    public void UnregisterPlatform(GamePlatform platform)
+    private void UnregisterPlatform(GamePlatform platform)
     {
         if (!platform) return;
         if (!_allPlatforms.Contains(platform)) return;
@@ -471,32 +437,109 @@ public class PlatformManager : MonoBehaviour
         MarkAdjacencyDirtyForPlatform(platform);
     }
 
+    
+    
+    ///
+    /// Get all Vector2Int GridCells that are covered by a Platform
+    /// 
+    /// IMPORTANT: Returns cells in sorted order (left-to-right, bottom-to-top)
+    /// First element = minimum (bottom-left), Last element = maximum (top-right)
+    ///
+    public List<Vector2Int> GetCellsForPlatform(GamePlatform platform)
+    {
+        var outputCells = new List<Vector2Int>();
+
+        // Use platform's world position to find center cell on the desired level
+        var centerCell = _worldGrid.WorldToCell(platform.Transform.position);
+
+        int footprintWidth = platform.Footprint.x;
+        int footprintLength = platform.Footprint.y;
+
+        // Determine rotation in 90° steps (0..3)
+        float yaw = platform.Transform.eulerAngles.y;
+        int rotationSteps = Mathf.RoundToInt(yaw / ROTATION_STEP_DEGREES) & ROTATION_MODULO_MASK;
+        bool isRotated90Or270 = (rotationSteps % 2) == 1; // 90° or 270° rotations swap width/height
+
+        int rotatedWidth = isRotated90Or270 ? footprintLength : footprintWidth; // width in cells after rotation
+        int rotatedLength = isRotated90Or270 ? footprintWidth : footprintLength; // height in cells after rotation
+
+        int startX = centerCell.x - rotatedWidth / 2;
+        int startY = centerCell.y - rotatedLength / 2;
+
+        // Add cells in sorted order: left-to-right, bottom-to-top
+        // This ensures first element = min, last element = max
+        for (int cellY = 0; cellY < rotatedLength; cellY++)
+        {
+            for (int cellX = 0; cellX < rotatedWidth; cellX++)
+            {
+                int gridX = startX + cellX;
+                int gridY = startY + cellY;
+                var gridCell = new Vector2Int(gridX, gridY);
+                if (!_worldGrid.CellInBounds(gridCell))
+                    continue;
+
+                outputCells.Add(new Vector2Int(gridX, gridY));
+            }
+        }
+
+        return outputCells;
+    }
+    
+    
+    
     #endregion
 
     
     #region Adjacency System (Grid-Based)
 
     
-    private void ClearCellsForPlatform(GamePlatform platform)
+    private void ClearCellsForPlatform(GamePlatform platform, bool clearOccupation = false)
     {
-        // Store current cells as previous BEFORE clearing (needed for GetAffectedPlatforms)
-        platform.previousOccupiedCells.Clear();
-        platform.previousOccupiedCells.AddRange(platform.occupiedCells);
-        
-        // Clear Occupied flags and cell ownership for cells this platform was occupying
-        if (platform.occupiedCells != null)
+        if (platform.occupiedCells.Count > 0)
         {
-            foreach (Vector2Int cell in platform.occupiedCells)
-            {
-                if (_cellToPlatform.TryGetValue(cell, out var owner) && owner == platform)
-                {
-                    _worldGrid.GetCell(cell)?.Clear();
-                    _cellToPlatform.Remove(cell);
-                }
-            }
-
-            platform.occupiedCells.Clear();
+            platform.previousOccupiedCells.Clear();
+            platform.previousOccupiedCells.AddRange(platform.occupiedCells);
         }
+        
+        // Clear old preview/occupied flags for this platform's old cells
+        foreach (Vector2Int cell in platform.occupiedCells)
+        {
+            // Only clear if this platform owns the cell
+            if (_cellToPlatform.TryGetValue(cell, out var owner) && owner == platform)
+            {
+                _worldGrid.GetCell(cell)?.Clear();
+                _cellToPlatform.Remove(cell);
+            }
+        }
+
+        if (clearOccupation)  
+            platform.occupiedCells.Clear();
+    }
+
+
+
+    private void UpdateCellsForPlatform(GamePlatform platform)
+    {
+        ClearCellsForPlatform(platform, true);
+        
+        // Compute new footprint cells from current transform (rotation-aware)
+        List<Vector2Int> newCells = GetCellsForPlatform(platform);
+        platform.occupiedCells.AddRange(newCells);
+        
+        // Different Flag based on if Preview or Placed
+        CellFlag flagToUse = platform.IsPickedUp ? CellFlag.OccupyPreview : CellFlag.Occupied;
+
+        // Update grid occupancy with proper flags
+        foreach (Vector2Int cell in platform.occupiedCells)
+        {
+            // AddFlags enforces priority (won't overwrite Occupied with OccupyPreview)
+            var cellData = _worldGrid.GetCell(cell);
+            if (cellData != null && cellData.AddFlags(flagToUse))
+            {
+                _cellToPlatform[cell] = platform;
+            }
+        }
+        
     }
     
     
@@ -509,7 +552,6 @@ public class PlatformManager : MonoBehaviour
     private HashSet<GamePlatform> GetAffectedPlatforms(GamePlatform platform)
     {
         var affected = new HashSet<GamePlatform>();
-        if (!platform) return affected;
 
         affected.Add(platform);
 
@@ -521,10 +563,10 @@ public class PlatformManager : MonoBehaviour
 
         if (platform.previousOccupiedCells is { Count: > 0 })
         {
-            foreach (var cell in platform.previousOccupiedCells)
+            foreach (var cell in platform.previousOccupiedCells
+                         .Where(cell => !allCellsToCheck.Contains(cell)))
             {
-                if (!allCellsToCheck.Contains(cell))
-                    allCellsToCheck.Add(cell);
+                allCellsToCheck.Add(cell);
             }
         }
 
@@ -544,46 +586,7 @@ public class PlatformManager : MonoBehaviour
         return affected;
     }
 
-
-    ///
-    /// Public method for checking if two platforms are adjacent and connecting them
-    /// Used by editor tools (SceneLinkTester)
-    /// Each platform updates its own sockets - connections are determined automatically
-    ///
-    public void ConnectPlatformsIfAdjacent(GamePlatform platformA, GamePlatform platformB)
-    {
-        if (!platformA || !platformB) return;
-
-        // Ensure platforms are registered with their grid cells
-        if (!_allPlatforms.Contains(platformA))
-        {
-            List<Vector2Int> cells = GetCellsForPlatform(platformA);
-            if (cells.Count > 0)
-            {
-                platformA.occupiedCells = cells;
-                RegisterPlatform(platformA);
-            }
-            else return;
-        }
-
-        if (!_allPlatforms.Contains(platformB))
-        {
-            List<Vector2Int> cells = GetCellsForPlatform(platformB);
-            if (cells.Count > 0)
-            {
-                platformB.occupiedCells = cells;
-                RegisterPlatform(platformB);
-            }
-            else return;
-        }
-
-        // Each platform updates its own sockets
-        platformA.RefreshSocketStatuses();
-        platformB.RefreshSocketStatuses();
-    }
-
-
-
+    
 
     ///
     /// Recomputes adjacency only for platforms marked as needing update
@@ -611,61 +614,7 @@ public class PlatformManager : MonoBehaviour
 
 
     #endregion
-
     
-    #region Helper Methods
-
-    ///
-    /// Compute which 2D grid cells a platform covers on a given level
-    /// assuming its footprint is aligned to the 1x1 world grid AND
-    /// that rotation is in 90° steps (0, 90, 180, 270)
-    /// This is the single source of truth for runtime footprint
-    /// 
-    /// IMPORTANT: Returns cells in sorted order (left-to-right, bottom-to-top)
-    /// First element = minimum (bottom-left), Last element = maximum (top-right)
-    ///
-    public List<Vector2Int> GetCellsForPlatform(GamePlatform platform)
-    {
-        var outputCells = new List<Vector2Int>();
-        if (!platform) return outputCells;
-
-        // Use platform's world position to find center cell on the desired level
-        Vector3 worldPosition = platform.Transform.position;
-        var centerCell = _worldGrid.WorldToCell(worldPosition);
-
-        int footprintWidth = Mathf.Max(1, platform.Footprint.x);
-        int footprintHeight = Mathf.Max(1, platform.Footprint.y);
-
-        // Determine rotation in 90° steps (0..3)
-        float yaw = platform.Transform.eulerAngles.y;
-        int rotationSteps = Mathf.RoundToInt(yaw / ROTATION_STEP_DEGREES) & ROTATION_MODULO_MASK;
-        bool isRotated90Or270 = (rotationSteps % 2) == 1; // 90° or 270° rotations swap width/height
-
-        int rotatedWidth = isRotated90Or270 ? footprintHeight : footprintWidth; // width in cells after rotation
-        int rotatedHeight = isRotated90Or270 ? footprintWidth : footprintHeight; // height in cells after rotation
-
-        int startX = centerCell.x - rotatedWidth / 2;
-        int startY = centerCell.y - rotatedHeight / 2;
-
-        // Add cells in sorted order: left-to-right, bottom-to-top
-        // This ensures first element = min, last element = max
-        for (int cellY = 0; cellY < rotatedHeight; cellY++)
-        {
-            for (int cellX = 0; cellX < rotatedWidth; cellX++)
-            {
-                int gridX = startX + cellX;
-                int gridY = startY + cellY;
-                var gridCell = new Vector2Int(gridX, gridY);
-                if (!_worldGrid.CellInBounds(gridCell))
-                    continue;
-
-                outputCells.Add(new Vector2Int(gridX, gridY));
-            }
-        }
-
-        return outputCells;
-    }
-
-    #endregion
+    
 }
 }

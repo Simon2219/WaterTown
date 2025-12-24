@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 namespace Platforms
@@ -20,8 +22,6 @@ namespace Platforms
         #endregion
         
         
-        
-        
         #region Railing Data
         
         
@@ -32,22 +32,19 @@ namespace Platforms
         #endregion
         
         
-        
-        
         #region Initialization
         
         
         /// Called by GamePlatform to inject dependencies
-        public void SetDependencies(GamePlatform platform, PlatformSocketSystem socketSystem)
+        public void Initialize(GamePlatform platform, PlatformSocketSystem socketSystem)
         {
             _platform = platform;
             _socketSystem = socketSystem;
+            EnsureChildrenRailingsRegistered();
         }
         
         
         #endregion
-        
-        
         
         
         #region Railing Registration
@@ -56,41 +53,45 @@ namespace Platforms
         /// Called by PlatformRailing to bind itself to given socket indices
         public void RegisterRailing(PlatformRailing railing)
         {
-            if (!railing || !_socketSystem) return;
-
+            // Cache commonly used refs (avoids repeated property / engine calls)
             var indices = railing.SocketIndices;
+
             if (indices == null || indices.Length == 0)
             {
                 // Fallback: bind to nearest socket
-                int nearest = _socketSystem.FindNearestSocketIndexLocal(
-                    transform.InverseTransformPoint(railing.transform.position));
-                if (nearest >= 0)
-                {
-                    indices = new[] { nearest };
-                    railing.SetSocketIndices(indices);
-                }
-                else
-                    return;
+                int nearest = _socketSystem.FindNearestSocketIndexLocal
+                    (transform.InverseTransformPoint(railing.transform.position));
+                
+                if (nearest < 0) return;
+                
+                railing.SetSocketIndices(nearest);
             }
 
-            foreach (int sIdx in indices)
+            // Array iteration (no enumerator, predictable)
+            // ! -> Surpresses wrong null check warning, we do check above
+            for (int i = 0, len = indices!.Length; i < len; i++)
             {
-                if (!_socketToRailings.TryGetValue(sIdx, out var list))
+                int sIdx = indices[i];
+
+                // Check Socket Assignment - Fallback
+                if (!_socketToRailings.TryGetValue(sIdx, out List<PlatformRailing> list))
                 {
                     list = new List<PlatformRailing>();
-                    _socketToRailings[sIdx] = list;
+                    _socketToRailings.Add(sIdx, list);
                 }
-                if (!list.Contains(railing)) list.Add(railing);
+
+                // Duplicate Check
+                if (!list.Contains(railing))
+                    list.Add(railing);
             }
         }
 
 
+        
         /// Called by PlatformRailing when disabled/destroyed
         public void UnregisterRailing(PlatformRailing railing)
         {
-            if (!railing) return;
-
-            foreach (var kv in _socketToRailings)
+            foreach (KeyValuePair<int, List<PlatformRailing>> kv in _socketToRailings)
             {
                 kv.Value.Remove(railing);
             }
@@ -100,62 +101,39 @@ namespace Platforms
         #endregion
         
         
-        
-        
         #region Visibility Management
-        
-        
-        /// Returns true if any of the given sockets has at least one visible rail
-        /// Directly checks Rail visibility state instead of relying on counters
-        public bool HasVisibleRailOnSockets(int[] socketIndices)
+
+
+        public bool AllSocketsConnected(int[] socketIndices)
         {
-            if (socketIndices == null || socketIndices.Length == 0) return false;
-            
-            foreach (int socketIndex in socketIndices)
-            {
-                if (_socketToRailings.TryGetValue(socketIndex, out var railings))
-                {
-                    foreach (var railing in railings)
-                    {
-                        // Check if this is a visible Rail (not Post)
-                        if (railing && railing.type == PlatformRailing.RailingType.Rail && !railing.IsHidden)
-                            return true;
-                    }
-                }
-            }
-            return false;
+            return _socketSystem.AllSocketsConnected(socketIndices);
         }
 
-
+        
+        
         /// Triggers visibility update on all railings
         /// IMPORTANT: Rails must update FIRST so counters are correct when Posts check visibility
         public void RefreshAllRailingsVisibility()
         {
-            if (!_platform) return;
-            
-            // First pass: update all Rails (they update the visibility counters via SetHidden)
-            foreach (var r in _platform.PlatformRailings)
+            foreach (var platformRailing in _platform.PlatformRailings)
             {
-                if (r && r.type == PlatformRailing.RailingType.Rail)
-                    r.UpdateVisibility();
-            }
-            
-            // Second pass: update all Posts (they use HasVisibleRailOnSockets which reads counters)
-            foreach (var r in _platform.PlatformRailings)
-            {
-                if (r && r.type == PlatformRailing.RailingType.Post)
-                    r.UpdateVisibility();
+                if (platformRailing)
+                    platformRailing.UpdateVisibility();
             }
         }
 
 
-        public void EnsureChildrenRailingsRegistered()
+
+        ///  IMPORTANT - THIS RUNS VERY OFTEN IF CALLED
+        /// 
+        private void EnsureChildrenRailingsRegistered()
         {
-            if (!_platform) return;
-            
-            foreach (var r in _platform.PlatformRailings)
+            foreach (PlatformRailing railing in _platform.PlatformRailings)
             {
-                if (r) r.EnsureRegistered();
+                if (railing && !railing.IsRegistered)
+                {
+                    RegisterRailing(railing);
+                }
             }
         }
         

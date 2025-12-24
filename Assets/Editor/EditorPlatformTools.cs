@@ -1,6 +1,7 @@
 #if UNITY_EDITOR
 using System.Collections.Generic;
 using Platforms;
+using UnityEditor;
 using UnityEngine;
 
 namespace Editor
@@ -39,8 +40,15 @@ namespace Editor
             platform.TryGetComponent(out PlatformRailingSystem railingSystem);
             return railingSystem;
         }
-        
-        
+
+
+
+        public static PlatformEditorUtility GetEditorUtility(GamePlatform platform)
+        {
+            if (!platform) return null;
+            platform.TryGetComponent(out PlatformEditorUtility editorUtility);
+            return editorUtility;
+        }
         #endregion
         
         
@@ -57,7 +65,7 @@ namespace Editor
             var socketSystem = GetSocketSystem(platform);
             if (socketSystem)
             {
-                socketSystem.BuildSockets();
+                socketSystem.ReBuildSockets(platform.Footprint);
             }
         }
         
@@ -131,16 +139,6 @@ namespace Editor
         
         
         #region Railing Operations
-        
-        
-        /// <summary>
-        /// Registers a railing with a platform in editor mode.
-        /// </summary>
-        public static void RegisterRailing(GamePlatform platform, PlatformRailing railing)
-        {
-            var railingSystem = GetRailingSystem(platform);
-            railingSystem?.RegisterRailing(railing);
-        }
         
         
         /// <summary>

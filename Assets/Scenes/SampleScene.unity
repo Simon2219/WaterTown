@@ -1038,30 +1038,33 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 6199fde9fa75364459196654b2ce6bb2, type: 3}
   m_Name: 
   m_EditorClassIdentifier: '::'
-  grid: {fileID: 479294916}
-  material: {fileID: 2100000, guid: 6c2a1f2d2d106ed4e8007fe41dc2a19d, type: 2}
-  showGrid: 1
-  lineThickness: 0.04
-  cellOpacity: 0.3
-  lineOpacity: 0.6
-  lineColorMode: 1
-  solidLineColor: {r: 0.7207546, g: 0.7207546, b: 0.7207546, a: 1}
-  lineNeighborFade: 0.5
-  lineBlendFalloff: 0.3
-  enableCellColors: 1
-  neighborFade: 0
-  flagColors:
-  - flag: 1
-    color: {r: 0.8, g: 0.25, b: 0.25, a: 0.35}
+  _grid: {fileID: 479294916}
+  _material: {fileID: 2100000, guid: 6c2a1f2d2d106ed4e8007fe41dc2a19d, type: 2}
+  _buildModeManager: {fileID: 479294922}
+  _showGrid: 1
+  _lineThickness: 0.05
+  _cellOpacity: 0.25
+  _lineOpacity: 0.7
+  _lineColorMode: 1
+  _solidLineColor: {r: 0.7132075, g: 0.7132075, b: 0.7132075, a: 1}
+  _lineNeighborFade: 0.6
+  _lineBlendFalloff: 0.5
+  _enableCellColors: 0
+  _neighborFade: 0
+  _flagColors:
   - flag: 0
-    color: {r: 0.25, g: 0.8, b: 0.35, a: 0.35}
+    color: {r: 0.2509804, g: 0.8000001, b: 0.34901962, a: 1}
+  - flag: 1
+    color: {r: 0.8, g: 0.25, b: 0.25, a: 1}
   - flag: 4
-    color: {r: 0.25, g: 0.5, b: 0.9, a: 0.35}
+    color: {r: 0.25, g: 0.5, b: 0.9, a: 1}
   - flag: 8
-    color: {r: 1, g: 0.5527824, b: 0, a: 0.35}
-  cornerRadius: 0.1187
-  yBias: 0
-  zTestAlways: 0
+    color: {r: 0.95, g: 0.75, b: 0.2, a: 1}
+  - flag: 16
+    color: {r: 0.6, g: 0.2, b: 0.6, a: 1}
+  _cornerRadius: 0.1049
+  _yBias: 0.005
+  _zTestAlways: 0
 --- !u!114 &479294921
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1074,12 +1077,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f7cdf6afc25aa574b889db797894dbc9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: '::'
-  OnPlatformPlaced:
-    m_PersistentCalls:
-      m_Calls: []
-  OnPlatformRemoved:
-    m_PersistentCalls:
-      m_Calls: []
 --- !u!114 &479294922
 MonoBehaviour:
   m_ObjectHideFlags: 0

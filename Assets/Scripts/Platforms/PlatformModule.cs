@@ -11,7 +11,6 @@ namespace Platforms
         [Min(1)] public int sizeInwardMeters = 1;  // reserved for future (depth), not used for sockets
 
         [Header("Behavior")]
-        public bool isCornerModule = false; // true: occupy nearest corner socket only (no-op with segment-only sockets)
         public bool blocksLink = false;     // true & active => socket becomes Occupied after Refresh
 
         public enum EdgeOverride { Auto, North, East, South, West }
@@ -99,17 +98,7 @@ namespace Platforms
         {
             var socketIndices = new List<int>();
             if (!platform) return socketIndices;
-
-            // DEPRECATED: Corner modules no longer have dedicated corner sockets.
-            // This feature is not supported in the current socket system.
-            if (isCornerModule)
-            {
-                Debug.LogWarning($"[PlatformModule] '{name}': isCornerModule is deprecated. " +
-                                 "Corner sockets no longer exist. Set isCornerModule to false and use attachEdge instead.", this);
-                int nearestCornerIndex = FindNearestCornerSocketIndex(platform);
-                if (nearestCornerIndex >= 0) socketIndices.Add(nearestCornerIndex);
-                return socketIndices;
-            }
+            
 
             // Choose edge (override or nearest)
             Vector3 localPosition = ((Component)platform).transform.InverseTransformPoint(transform.position);
@@ -208,29 +197,7 @@ namespace Platforms
 
             return socketIndices;
         }
-
-        private int FindNearestCornerSocketIndex(GamePlatform platform)
-        {
-            // With new segment-only sockets, there are no true corner sockets.
-            // This remains for backward compatibility; it will usually return -1.
-            int bestSocketIndex = -1; 
-            float bestDistance = float.MaxValue;
-            var sockets = platform.Sockets;
-            Vector3 moduleWorldPosition = transform.position;
-            
-            for (int socketIndex = 0; socketIndex < sockets.Count; socketIndex++)
-            {
-                var socket = sockets[socketIndex];
-                if (socket.Location != PlatformSocketSystem.SocketLocation.Corner) continue;
-                float distance = Vector3.Distance(moduleWorldPosition, platform.GetSocketWorldPosition(socketIndex));
-                if (distance < bestDistance) 
-                { 
-                    bestDistance = distance; 
-                    bestSocketIndex = socketIndex; 
-                }
-            }
-            return bestSocketIndex;
-        }
+        
 
         // ---------- Visibility ----------
         public void Hide() => SetHidden(true);
@@ -253,14 +220,26 @@ namespace Platforms
                 gameObject.SetActive(shouldBeActive);
         }
 
+
+
+        public void UpdateVisibility()
+        {
+            // Not sure how to handle visibility yet
+            // Old implementation was hiding Modules on Connection
+        }
+        
         private static bool IsEditingPrefab()
         {
-#if UNITY_EDITOR
+        #if UNITY_EDITOR
+            
             var stage = UnityEditor.SceneManagement.PrefabStageUtility.GetCurrentPrefabStage();
             return stage != null;
-#else
+            
+        #else
+        
             return false;
-#endif
+            
+        #endif
         }
     }
 }

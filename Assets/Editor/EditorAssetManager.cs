@@ -341,7 +341,7 @@ namespace Editor
                 if (!pr) pr = Undo.AddComponent<PlatformRailing>(go);
 
                 pr.type = type;
-                pr.platform = platform;
+                pr._platform = platform;
                 pr.SetSocketIndices(socketIndices);
 
                 pr.EnsureRegistered();

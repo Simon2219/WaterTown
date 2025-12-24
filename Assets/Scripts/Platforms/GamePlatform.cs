@@ -34,7 +34,6 @@ public class GamePlatform : MonoBehaviour, IPickupable
     public Vector2Int Footprint => footprintSize;
     
     
-    
     private PlatformManager _platformManager;
     private WorldGrid _worldGrid;
     
@@ -43,7 +42,6 @@ public class GamePlatform : MonoBehaviour, IPickupable
     private PlatformRailingSystem _railingSystem;
     private PickupHandler _pickupHandler;
     private PlatformEditorUtility _editorUtility;
-    
     
     
     public List<Vector2Int> occupiedCells = new();
@@ -57,12 +55,6 @@ public class GamePlatform : MonoBehaviour, IPickupable
     public IReadOnlyList<PlatformModule> PlatformModules => _platformModules;
     public IReadOnlyList<PlatformRailing> PlatformRailings => _platformRailings;
     public IReadOnlyList<Collider> PlatformColliders => _platformColliders;
-    
-    
-
-    // NOTE: NavMeshSurface removed - A* Pathfinding will handle graph generation
-    // private NavMeshSurface _navSurface;
-    // public NavMeshSurface NavSurface => _navSurface;
     
     
     private Vector3 _lastPos;
@@ -120,17 +112,26 @@ public class GamePlatform : MonoBehaviour, IPickupable
     private void InitializeSubComponents()
     {
         // Initialize sub-components with dependencies
-        _socketSystem?.SetDependencies(this, _platformManager, _worldGrid);
-        _pickupHandler?.SetDependencies(this, _platformManager);
-        _railingSystem?.SetDependencies(this, _socketSystem);
-        _editorUtility?.SetDependencies(this, _socketSystem);
+        _socketSystem?.Initialize(this, _platformManager, _worldGrid);
+        _pickupHandler?.Initialize(this);
+        _railingSystem?.Initialize(this, _socketSystem);
+        _editorUtility?.Initialize(this, _socketSystem);
         
         // Subscribe to sub-component events (only once)
         SubscribeToSubComponentEvents();
+    }
+    
+    
+    
+    private void CacheChildComponents()
+    {
+        _platformModules.Clear();
+        _platformRailings.Clear();
+        _platformColliders.Clear();
         
-        // Build sockets and register children
-        _socketSystem?.Initialize();
-        _railingSystem?.EnsureChildrenRailingsRegistered();
+        _platformModules.AddRange(GetComponentsInChildren<PlatformModule>(true));
+        _platformRailings.AddRange(GetComponentsInChildren<PlatformRailing>(true));
+        _platformColliders.AddRange(GetComponentsInChildren<Collider>(true));
     }
     
     
@@ -145,24 +146,12 @@ public class GamePlatform : MonoBehaviour, IPickupable
     {
         _socketSystem.SocketsChanged -= OnSocketsChanged;
     }
-
-
-    private void CacheChildComponents()
-    {
-        _platformModules.Clear();
-        _platformRailings.Clear();
-        _platformColliders.Clear();
-        
-        _platformModules.AddRange(GetComponentsInChildren<PlatformModule>(true));
-        _platformRailings.AddRange(GetComponentsInChildren<PlatformRailing>(true));
-        _platformColliders.AddRange(GetComponentsInChildren<Collider>(true));
-    }
     
     
     #endregion
     
     
-    #region Unity Lifecycle
+    #region Lifecycle
     
     
     private void Awake()
@@ -210,19 +199,7 @@ public class GamePlatform : MonoBehaviour, IPickupable
 
     private void LateUpdate()
     {
-        if (IsPickedUp)
-        {
-            if (transform.position != _lastPos ||
-                transform.rotation != _lastRot ||
-                transform.localScale != _lastScale)
-            {
-                _lastPos = transform.position;
-                _lastRot = transform.rotation;
-                _lastScale = transform.localScale;
-
-                HasMoved?.Invoke(this);
-            }
-        }
+        if(CheckPlatformMoved()) HasMoved?.Invoke(this);
     }
     
     
@@ -235,35 +212,33 @@ public class GamePlatform : MonoBehaviour, IPickupable
 
     public bool IsNewObject { get; private set; }
 
-    public bool CanBePlaced => _pickupHandler?.CanBePlaced ?? false;
+    public bool CanBePlaced => ValidatePlacement();
     public Transform Transform => transform;
     public GameObject GameObject => gameObject;
     
     
-    /// Initiates pickup - fires PickedUp event for sub-systems to react
+    
+    /// Initiates pickup
     public void PickUp(bool isNewObject)
     {
         IsNewObject = isNewObject;
         IsPickedUp = true;
         
-        // Fire event - sub-systems (PickupHandler) listen and react
-        // PlatformManager also listens to clear grid cells (safe for new objects - they have empty occupiedCells)
         PickedUp?.Invoke(this);
     }
     
     
-    /// Confirms placement - fires Placed event for sub-systems to react
+    
+    /// Confirms Placement
     public void Place()
     {
         IsPickedUp = false;
         
-        // Compute cells for the new position
-        if (_platformManager)
-            occupiedCells = _platformManager.GetCellsForPlatform(this);
+        occupiedCells = _platformManager.GetCellsForPlatform(this);
         
-        // Fire event - sub-systems and managers react
         Placed?.Invoke(this);
     }
+    
     
     
     /// Cancels placement
@@ -273,21 +248,10 @@ public class GamePlatform : MonoBehaviour, IPickupable
     {
         IsPickedUp = false;
         
-        // Fire event - PickupHandler restores position (existing) or marks for destroy (new)
+        // PickupHandler restores position (existing) or marks for destroy (new)
         PlacementCancelled?.Invoke(this);
-        
-        // For existing objects, re-place at original position (triggers Placed event)
-        // Note: PickupHandler handles the actual position restore before this
-        if (!IsNewObject)
-        {
-            // Compute cells at restored position
-            if (_platformManager)
-                occupiedCells = _platformManager.GetCellsForPlatform(this);
-            
-            // Fire Placed to re-register and restore visuals
-            Placed?.Invoke(this);
-        }
     }
+    
     
     
     /// Visual feedback during pickup - delegates to handler
@@ -348,13 +312,7 @@ public class GamePlatform : MonoBehaviour, IPickupable
 
     public void GetSocketIndexRangeForEdge(Edge edge, out int startIndex, out int endIndex)
     {
-        if (_socketSystem)
-            _socketSystem.GetSocketIndexRangeForEdge((PlatformSocketSystem.Edge)(int)edge, out startIndex, out endIndex);
-        else
-        {
-            startIndex = 0;
-            endIndex = 0;
-        }
+        _socketSystem.GetSocketIndexRangeForEdge((PlatformSocketSystem.Edge)(int)edge, out startIndex, out endIndex);
     }
 
 
@@ -395,7 +353,7 @@ public class GamePlatform : MonoBehaviour, IPickupable
 
 
     public void BuildSockets() 
-        => _socketSystem?.BuildSockets();
+        => _socketSystem?.ReBuildSockets();
     
     
     #endregion
@@ -423,40 +381,23 @@ public class GamePlatform : MonoBehaviour, IPickupable
     #endregion
     
     
-    #region Railing Interface Methods
-    
-    
-    public void RegisterRailing(PlatformRailing railing) 
-        => _railingSystem?.RegisterRailing(railing);
-
-
-    public void UnregisterRailing(PlatformRailing railing) 
-        => _railingSystem?.UnregisterRailing(railing);
-
-
-    public bool HasVisibleRailOnSockets(int[] socketIndices) 
-        => _railingSystem?.HasVisibleRailOnSockets(socketIndices) ?? false;
-
-
-    public void RefreshAllRailingsVisibility() 
-        => _railingSystem?.RefreshAllRailingsVisibility();
-
-
-    public void EnsureChildrenRailingsRegistered() 
-        => _railingSystem?.EnsureChildrenRailingsRegistered();
-    
-    
-    #endregion
-    
-    
-    
-    // NOTE: NavMesh Interface Methods region removed
-    // BuildLocalNavMesh() and QueueRebuild() are no longer needed
-    // A* Pathfinding Project will handle graph generation separately
-    
-    
-    
     #region Utility Methods
+
+    private bool CheckPlatformMoved()
+    {
+        if (transform.position != _lastPos ||
+            transform.rotation != _lastRot ||
+            transform.localScale != _lastScale)
+        {
+            _lastPos = transform.position;
+            _lastRot = transform.rotation;
+            _lastScale = transform.localScale;
+            
+            return true;
+        }
+        return false;
+    }
+    
     
     
     public void ForceHasMoved()
@@ -468,12 +409,20 @@ public class GamePlatform : MonoBehaviour, IPickupable
     }
     
     
-#if UNITY_EDITOR
-    public void EditorResetAllConnections() 
-        => _editorUtility?.EditorResetAllConnections();
-#endif
     
-    
+    private bool ValidatePlacement()
+    {
+        List<Vector2Int> cells = _platformManager.GetCellsForPlatform(this);
+            
+        return cells.Count != 0 && _platformManager.IsAreaEmpty(cells);
+    }
+
+
+
+    internal Vector2Int Editor_GetFootprint()
+    {
+        return _editorUtility.Editor_GetFootprint();
+    }
     #endregion
 }
 }

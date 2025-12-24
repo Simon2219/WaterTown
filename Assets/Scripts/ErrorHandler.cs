@@ -77,4 +77,11 @@ public static class ErrorHandler
     {
         return new ArgumentOutOfRangeException(parameterName, actualValue, message);
     }
+
+
+
+    public static void LogWarning(Component source, string message)
+    {
+        Debug.LogWarning($"[{source.GetType().Name}] - {message}");
+    }
 }

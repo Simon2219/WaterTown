@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Grid;
 using UnityEngine;
 using UnityEngine.Serialization;
@@ -17,14 +18,7 @@ namespace Platforms
 [DisallowMultipleComponent]
 public class PlatformSocketSystem : MonoBehaviour
 {
-    #region Events
-    
-    /// Fired when socket connection state changes (sockets connected/disconnected)
-    public event Action SocketsChanged;
-    
-    #endregion
-    
-    #region Dependencies
+    #region Configuration
     
     
     private GamePlatform _platform;
@@ -32,16 +26,36 @@ public class PlatformSocketSystem : MonoBehaviour
     private WorldGrid _worldGrid;
     
     
+    private readonly Dictionary<PlatformModule, ModuleReg> _moduleRegs = new();
+    private readonly Dictionary<int, PlatformModule> _socketToModules = new();
+    
+    
+    [Header("Sockets")]
+    [SerializeField] private List<SocketData> _platformSockets = new();
+
+    private bool SocketsBuilt { get; set; }
+
+    public IReadOnlyList<SocketData> PlatformSockets => _platformSockets;
+    
+    public int SocketCount => _platformSockets.Count;
+    
+    
     #endregion
     
     
-    #region Enums & Data Structures
+    #region Events
+    /// Fired when socket connection state changes (sockets connected/disconnected)
+    public event Action SocketsChanged;
+    
+    
+    #endregion
+    
+    
+    #region Socket Enums & Data Structures
     
     
     // Edge enum (for compatibility with PlatformModule)
     public enum Edge { North, East, South, West }
-    
-    public enum SocketLocation { Edge, Corner }
     
     // Socket status and location enums
     public enum SocketStatus
@@ -54,30 +68,36 @@ public class PlatformSocketSystem : MonoBehaviour
     }
     
     
-    
     /// Socket data structure
     /// Each socket knows its local position, world position, and which direction faces outward
     [Serializable]
-    public struct SocketData
+    public class SocketData
     {
         [SerializeField, HideInInspector] private int index;
+        [SerializeField, HideInInspector] private Vector2Int currentGridCell;
         [SerializeField, HideInInspector] private Vector3 localPos;
         [SerializeField, HideInInspector] private Vector2Int outwardOffset;
-        [SerializeField, HideInInspector] private SocketLocation location;
         [SerializeField] private SocketStatus status;
         
-        // World position - updated when platform moves
+        
+        public bool IsLinkable => status == SocketStatus.Linkable;
+        public bool IsOccupied => status == SocketStatus.Occupied;
+        public bool IsConnected => status == SocketStatus.Connected;
+        public bool IsLocked => status == SocketStatus.Locked;
+        public bool IsDisabled => status == SocketStatus.Disabled;
+        
+        
 
         public int Index
-        {
+        { 
             get => index; 
-            set => index = value;
+            private set => index = value;
         }
 
         public Vector3 LocalPos
         {
             get => localPos;
-            set => localPos = value;
+            private set => localPos = value;
         }
 
         public Vector3 WorldPos 
@@ -98,31 +118,24 @@ public class PlatformSocketSystem : MonoBehaviour
             set => status = value;
         }
 
-        public bool IsLinkable
-        {
-            get => status == SocketStatus.Linkable;
-            set => throw new NotImplementedException();
-        }
 
-        public SocketLocation Location
-        {
-            get => location;
-            set => location = value;
-        }
-
-        internal void Initialize(int idx, Vector3 lp, Vector2Int outward, SocketStatus defaultStatus)
+        public SocketData(int idx, Vector3 lp, Vector2Int outward, SocketStatus defaultStatus)
         {
             index = idx;
             localPos = lp;
             outwardOffset = outward;
-            location = SocketLocation.Edge;
             status = defaultStatus;
             WorldPos = Vector3.zero;
         }
+        
 
         public void SetStatus(SocketStatus s) => status = s;
         
+        public SocketStatus GetStatus() => status;
+        
         internal void SetWorldPosition(Vector3 pos) => WorldPos = pos;
+        
+        internal void SetCurrentGridCell(Vector2Int cell) => currentGridCell = cell;
     }
     
     
@@ -139,52 +152,10 @@ public class PlatformSocketSystem : MonoBehaviour
     #endregion
     
     
-    
-    
-    #region Socket Data
-    
-    
-    [FormerlySerializedAs("sockets")]
-    [Header("Sockets")]
-    [SerializeField] private List<SocketData> _platformSockets = new();
+    #region Initialization & Lifecycle
 
-    private bool SocketsBuilt { get; set; }
-
-    public IReadOnlyList<SocketData> PlatformSockets => _platformSockets;
-    
-    public int SocketCount => _platformSockets.Count;
-
-    #endregion
-    
-    
-    
-    
-    #region Module Registry
-    
-    
-    private readonly Dictionary<PlatformModule, ModuleReg> _moduleRegs = new();
-    private readonly Dictionary<int, PlatformModule> _socketToModules = new();
-    
-    
-    #endregion
-    
-    
-    
-    
-    #region Initialization
-
-
-    public void Initialize()
-    {
-        BuildSockets();
-        EnsureChildrenModulesRegistered();
-        RefreshAllSocketStatuses();
-    }
-    
-    
-    
-    /// Called by GamePlatform to inject dependencies
-    public void SetDependencies(GamePlatform platform, PlatformManager platformManager, WorldGrid worldGrid)
+ 
+    public void Initialize(GamePlatform platform, PlatformManager platformManager, WorldGrid worldGrid)
     {
         _platform = platform;
         _platformManager = platformManager;
@@ -194,68 +165,65 @@ public class PlatformSocketSystem : MonoBehaviour
         // Remove first to avoid double subscription
         _platform.HasMoved -= OnPlatformMoved;
         _platform.HasMoved += OnPlatformMoved;
+        
+        ReBuildSockets();
+        EnsureChildrenModulesRegistered();
+        RefreshAllSocketStatuses();
     }
+    
     
     
     private void OnDestroy()
     {
-        if (_platform)
-        {
-            _platform.HasMoved -= OnPlatformMoved;
-        }
+        _platform.HasMoved -= OnPlatformMoved;
     }
+    
     
     
     private void OnPlatformMoved(GamePlatform platform)
     {
-        UpdateSocketWorldPositions();
+        UpdateSocketPositions();
     }
     
     
     #endregion
     
     
-    
-    
     #region Socket Building
     
     
-    /// <summary>
-    /// Gets the footprint from the GamePlatform component.
-    /// Works in both runtime (via _platform) and editor (via GetComponent).
-    /// </summary>
-    private Vector2Int GetFootprint()
-    {
-        // Use injected dependency if available (runtime)
-        if (_platform) return _platform.Footprint;
-        
-        // Fallback to GetComponent (editor mode, or if called before SetDependencies)
-        var gp = GetComponent<GamePlatform>();
-        return gp ? gp.Footprint : Vector2Int.one;
-    }
     
-    
-    /// Build sockets along the perimeter of the footprint, in local space
-    /// One socket per cell edge segment
+    /// Build sockets along the perimeter of the footprint
+    /// In local Space - One socket per cell edge segment
     /// Order: +Z edge, -Z edge, +X edge, -X edge (for compat with Edge API)
-    public void BuildSockets()
+    /// 
+    public void ReBuildSockets(Vector2Int footprintSize = default)
     {
-        var footprintSize = GetFootprint();
+        if(footprintSize == default) footprintSize = GetFootprint();
         
         // Preserve existing socket statuses when rebuilding
-        var previousStatuses = new Dictionary<Vector3, SocketStatus>();
+        var previousStatuses = new Dictionary<int, SocketStatus>();
         foreach (var s in _platformSockets)
-            previousStatuses[s.LocalPos] = s.Status;
+            previousStatuses[s.Index] = s.Status;
 
+        BuildSockets(footprintSize);
+        SetSocketStatus(previousStatuses);
+        
+        UpdateSocketPositions();
+    }
+
+
+
+    private void BuildSockets(Vector2Int footprintSize)
+    {
         _platformSockets.Clear();
         SocketsBuilt = false;
 
-        int footprintWidth = Mathf.Max(1, footprintSize.x);
-        int footprintLength = Mathf.Max(1, footprintSize.y);
+        int footprintWidth = footprintSize.x;
+        int footprintLength = footprintSize.y;
         
         // Use WorldGrid.CellSize for consistency with grid system
-        float cellSize = WorldGrid.CellSize;
-        float halfCellSize = cellSize * 0.5f;
+        float halfCellSize = WorldGrid.CellSize * 0.5f;
         float halfWidth = footprintWidth * halfCellSize;
         float halfLength = footprintLength * halfCellSize;
 
@@ -265,12 +233,12 @@ public class PlatformSocketSystem : MonoBehaviour
         Vector2Int outwardPlusZ = new Vector2Int(0, 1);
         for (int segmentIndex = 0; segmentIndex < footprintWidth; segmentIndex++)
         {
-            float localX = -halfWidth + halfCellSize + (segmentIndex * cellSize);
+            float localX = -halfWidth + halfCellSize + (segmentIndex * WorldGrid.CellSize);
             Vector3 localPosition = new Vector3(localX, 0f, +halfLength);
-            var socketData = new SocketData();
-            socketData.Initialize(socketIndex, localPosition, outwardPlusZ, 
-                previousStatuses.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
+            
+            var socketData = new SocketData(socketIndex, localPosition, outwardPlusZ, SocketStatus.Linkable);
             _platformSockets.Add(socketData);
+            
             socketIndex++;
         }
 
@@ -278,26 +246,25 @@ public class PlatformSocketSystem : MonoBehaviour
         Vector2Int outwardMinusZ = new Vector2Int(0, -1);
         for (int segmentIndex = 0; segmentIndex < footprintWidth; segmentIndex++)
         {
-            float localX = -halfWidth + halfCellSize + (segmentIndex * cellSize);
+            float localX = -halfWidth + halfCellSize + (segmentIndex * WorldGrid.CellSize);
             Vector3 localPosition = new Vector3(localX, 0f, -halfLength);
-            var socketData = new SocketData();
-            socketData.Initialize(socketIndex, localPosition, outwardMinusZ, 
-                previousStatuses.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
+            
+            var socketData = new SocketData(socketIndex, localPosition, outwardMinusZ, SocketStatus.Linkable);
             _platformSockets.Add(socketData);
+            
             socketIndex++;
         }
-
         
         // +X edge (East - local x ≈ +halfWidth), outward direction is (+1, 0)
         Vector2Int outwardPlusX = new Vector2Int(1, 0);
         for (int segmentIndex = 0; segmentIndex < footprintLength; segmentIndex++)
         {
-            float localZ = +halfLength - halfCellSize - (segmentIndex * cellSize);
+            float localZ = +halfLength - halfCellSize - (segmentIndex * WorldGrid.CellSize);
             Vector3 localPosition = new Vector3(+halfWidth, 0f, localZ);
-            var socketData = new SocketData();
-            socketData.Initialize(socketIndex, localPosition, outwardPlusX, 
-                previousStatuses.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
+            
+            var socketData = new SocketData(socketIndex, localPosition, outwardPlusX, SocketStatus.Linkable);
             _platformSockets.Add(socketData);
+            
             socketIndex++;
         }
 
@@ -305,27 +272,23 @@ public class PlatformSocketSystem : MonoBehaviour
         Vector2Int outwardMinusX = new Vector2Int(-1, 0);
         for (int segmentIndex = 0; segmentIndex < footprintLength; segmentIndex++)
         {
-            float localZ = +halfLength - halfCellSize - (segmentIndex * cellSize);
+            float localZ = +halfLength - halfCellSize - (segmentIndex * WorldGrid.CellSize);
             Vector3 localPosition = new Vector3(-halfWidth, 0f, localZ);
-            var socketData = new SocketData();
-            socketData.Initialize(socketIndex, localPosition, outwardMinusX, 
-                previousStatuses.TryGetValue(localPosition, out var oldStatus) ? oldStatus : SocketStatus.Linkable);
+            
+            var socketData = new SocketData(socketIndex, localPosition, outwardMinusX, SocketStatus.Linkable);
             _platformSockets.Add(socketData);
+            
             socketIndex++;
         }
 
         SocketsBuilt = true;
-        
-        UpdateSocketWorldPositions();
     }
     
     
     #endregion
     
     
-    
-    
-    #region Socket Accessors
+    #region Socket Functions
     
     
     public SocketData GetSocket(int index)
@@ -333,12 +296,14 @@ public class PlatformSocketSystem : MonoBehaviour
         if (index < 0 || index >= _platformSockets.Count)
         {
             Debug.LogWarning($"[PlatformSocketSystem] GetSocket: index {index} out of range (0..{_platformSockets.Count - 1}).", this);
-            return default;
+            return null;
         }
+        
         return _platformSockets[index];
     }
 
 
+    
     public Vector3 GetSocketWorldPosition(int index)
     {
         if (index < 0 || index >= _platformSockets.Count)
@@ -348,29 +313,38 @@ public class PlatformSocketSystem : MonoBehaviour
     }
 
 
-    public void SetSocketStatus(int index, SocketStatus status)
+    
+    public bool SetSocketStatus(int socketIndex, SocketStatus newStatus)
     {
-        if (index < 0 || index >= _platformSockets.Count)
-        {
-            Debug.LogWarning($"[PlatformSocketSystem] SetSocketStatus: index {index} out of range (0..{_platformSockets.Count - 1}).", this);
-            return;
-        }
-        var s = _platformSockets[index];
-        s.SetStatus(status);
-        _platformSockets[index] = s;
+        if (_platformSockets[socketIndex].Status == newStatus) // OldStatus == New Status
+            return false;
+        
+        _platformSockets[socketIndex].SetStatus(newStatus);
+        UpdateModuleVisibility(socketIndex);
+        
+        return true;
     }
 
 
+    
+    //Returns false if ONE of the Status could not be set
+    private bool SetSocketStatus(Dictionary<int, SocketStatus> statuses)
+    {
+        return statuses.Keys.All(socket => SetSocketStatus(socket, statuses[socket]));
+    }
+
+
+    
     /// Updates world positions for all sockets based on current transform
-    public void UpdateSocketWorldPositions()
+    private void UpdateSocketPositions()
     {
-        for (int i = 0; i < _platformSockets.Count; i++)
+        foreach (var socket in _platformSockets)
         {
-            var socket = _platformSockets[i];
             socket.SetWorldPosition(transform.TransformPoint(socket.LocalPos));
-            _platformSockets[i] = socket;
+            socket.SetCurrentGridCell(_worldGrid.WorldToCell(socket.WorldPos));
         }
     }
+    
     
     
     /// True if the given socket index is currently connected to a neighbor
@@ -378,13 +352,49 @@ public class PlatformSocketSystem : MonoBehaviour
     {
         if (socketIndex < 0 || socketIndex >= _platformSockets.Count)
             return false;
-        return _platformSockets[socketIndex].Status == SocketStatus.Connected;
+
+        return _platformSockets[socketIndex].IsConnected;
+    }
+
+    
+    
+    public bool AllSocketsConnected(int[] socketIndices)
+    {
+        if (socketIndices.Length == 0 || socketIndices.Length >= _platformSockets.Count)
+            return false;
+        
+        bool isVisible = socketIndices
+            .All(socketIndex => _platformSockets[socketIndex].Status == SocketStatus.Connected);
+        
+        return isVisible;
+    }
+    
+    
+    
+    public bool AnySocketsConnected(int[] socketIndices)
+    {
+        if (socketIndices.Length == 0 || socketIndices.Length >= _platformSockets.Count)
+            return false;
+
+        bool anyConnected = socketIndices
+            .Any(socketIndex => _platformSockets[socketIndex].Status == SocketStatus.Connected);
+        
+        return anyConnected;
+    }
+
+
+
+    private void UpdateModuleVisibility(int socketIndex)
+    {
+        // Update module visibility when connection state changes
+        if (_socketToModules.TryGetValue(socketIndex, out var pm))
+        {
+            pm.UpdateVisibility();
+        }
     }
     
     
     #endregion
-    
-    
     
     
     #region Edge & Socket Index Helpers
@@ -394,7 +404,8 @@ public class PlatformSocketSystem : MonoBehaviour
     public int EdgeLengthMeters(Edge edge)
     {
         var footprintSize = GetFootprint();
-        return (edge == Edge.North || edge == Edge.South) ? footprintSize.x : footprintSize.y;
+        
+        return edge is Edge.North or Edge.South ? footprintSize.x : footprintSize.y;
     }
 
 
@@ -411,14 +422,17 @@ public class PlatformSocketSystem : MonoBehaviour
                 startIndex = 0;
                 endIndex = footprintWidth - 1;
                 break;
+            
             case Edge.South:
                 startIndex = footprintWidth;
                 endIndex = 2 * footprintWidth - 1;
                 break;
+            
             case Edge.East:
                 startIndex = 2 * footprintWidth;
                 endIndex = 2 * footprintWidth + footprintLength - 1;
                 break;
+            
             case Edge.West:
             default:
                 startIndex = 2 * footprintWidth + footprintLength;
@@ -428,6 +442,7 @@ public class PlatformSocketSystem : MonoBehaviour
     }
 
 
+    
     /// Compatibility helper for code that thinks in Edge+mark (PlatformModule, old tools)
     public int GetSocketIndexByEdgeMark(Edge edge, int mark)
     {
@@ -454,7 +469,9 @@ public class PlatformSocketSystem : MonoBehaviour
     }
 
 
+    
     /// Return the single nearest socket index to a local position
+    /// 
     public int FindNearestSocketIndexLocal(Vector3 localPos)
     {
         int best = -1;
@@ -472,6 +489,13 @@ public class PlatformSocketSystem : MonoBehaviour
         return best;
     }
 
+
+    public int FindNearestSocketIndex(Vector3 worldPos)
+    {
+        Vector2Int gridCell = _worldGrid.WorldToCell(worldPos);
+        
+        
+    }
 
     /// Finds up to maxCount nearest socket indices to localPos within maxDistance
     public void FindNearestSocketIndicesLocal(Vector3 localPos, int maxCount, float maxDistance, List<int> result)
@@ -506,8 +530,6 @@ public class PlatformSocketSystem : MonoBehaviour
     #endregion
     
     
-    
-    
     #region Grid Adjacency
     
     
@@ -537,8 +559,9 @@ public class PlatformSocketSystem : MonoBehaviour
     }
 
 
-    /// Gets the grid cell behind a socket (the cell this platform occupies at the socket)
-    /// This is the cell on the platform's side of the socket edge
+    /// Gets the grid cell behind a socket 
+    /// - the cell the socket is "attached" to
+    /// 
     private Vector2Int GetCellBehindSocket(int socketIndex)
     {
         if (socketIndex < 0 || socketIndex >= _platformSockets.Count)
@@ -584,8 +607,6 @@ public class PlatformSocketSystem : MonoBehaviour
     #endregion
     
     
-    
-    
     #region Connection Management
     
     
@@ -601,43 +622,17 @@ public class PlatformSocketSystem : MonoBehaviour
                 continue;
             
             SocketStatus newStatus = DetermineSocketStatus(i);
-            if (ApplySocketStatus(i, newStatus))
+            if (SetSocketStatus(i, newStatus))
                 anyChanged = true;
         }
         
         if (anyChanged)
             SocketsChanged?.Invoke();
     }
+
+
     
-    
-    /// <summary>
-    /// Applies a new status to a socket, handling module visibility changes.
-    /// Returns true if status actually changed.
-    /// </summary>
-    private bool ApplySocketStatus(int socketIndex, SocketStatus newStatus)
-    {
-        var socket = _platformSockets[socketIndex];
-        SocketStatus oldStatus = socket.Status;
-        
-        if (oldStatus == newStatus)
-            return false;
-        
-        socket.SetStatus(newStatus);
-        _platformSockets[socketIndex] = socket;
-        
-        // Update module visibility when connection state changes
-        if (_socketToModules.TryGetValue(socketIndex, out var pm))
-        {
-            if (newStatus == SocketStatus.Connected && oldStatus != SocketStatus.Connected)
-                pm.SetHidden(true);
-            else if (newStatus != SocketStatus.Connected && oldStatus == SocketStatus.Connected)
-                pm.SetHidden(false);
-        }
-        
-        return true;
-    }
-    
-    
+
     /// <summary>
     /// Determines a socket's status by querying the grid.
     /// Rules:
@@ -714,9 +709,15 @@ public class PlatformSocketSystem : MonoBehaviour
     }
     
     
+    /// Gets the footprint from the GamePlatform component.
+    /// 
+    private Vector2Int GetFootprint()
+    {
+        return _platform.Footprint;
+    }
+    
+    
     #endregion
-    
-    
     
     
     #region Module Registry

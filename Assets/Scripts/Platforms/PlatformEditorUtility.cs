@@ -19,8 +19,6 @@ namespace Platforms
         #endregion
         
         
-        
-        
         #region Gizmo Settings
         
         
@@ -61,13 +59,11 @@ namespace Platforms
         #endregion
         
         
-        
-        
         #region Initialization
         
         
         /// Called by GamePlatform to inject dependencies
-        public void SetDependencies(GamePlatform platform, PlatformSocketSystem socketSystem)
+        public void Initialize(GamePlatform platform, PlatformSocketSystem socketSystem)
         {
             _platform = platform;
             _socketSystem = socketSystem;
@@ -77,11 +73,7 @@ namespace Platforms
         #endregion
         
         
-        
-        
 #if UNITY_EDITOR
-        
-        #region Editor Methods
         
         
         /// Editor-only method to reset connections and clean up NavMesh links with Undo support
@@ -92,15 +84,6 @@ namespace Platforms
             
             _socketSystem.ResetConnections();
         }
-        
-        
-        #endregion
-        
-        
-        
-        
-        #region Gizmos
-        
         
         private void OnDrawGizmosSelected()
         {
@@ -162,9 +145,13 @@ namespace Platforms
                 }
             }
         }
-        
-        
-        #endregion
+
+        public Vector2Int Editor_GetFootprint()
+        {
+            // Fallback to GetComponent (editor mode, or if called before SetDependencies)
+            var gp = GetComponent<GamePlatform>();
+            return gp ? gp.Footprint : Vector2Int.one;
+        }
         
         
 #endif

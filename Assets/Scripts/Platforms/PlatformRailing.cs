@@ -1,126 +1,164 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 namespace Platforms
 {
-    [DisallowMultipleComponent]
-    public class PlatformRailing : MonoBehaviour
+    
+[DisallowMultipleComponent]
+public class PlatformRailing : MonoBehaviour
+{
+    #region Configuration
+    
+    
+    public enum RailingType { Post, Rail }
+
+    [Header("Binding")]
+    public RailingType type;
+
+    [Tooltip("Owning platform (auto-filled from parent)")]
+    public GamePlatform _platform;
+    public PlatformRailingSystem _railingSystem ;
+    
+    
+    [Tooltip("Indices of sockets this piece is associated with on its platform")]
+    [SerializeField] private int[] socketIndices = System.Array.Empty<int>();
+
+    public bool IsRegistered { get; private set; }
+    
+    public bool IsVisible { get; private set; }
+
+    public int[] SocketIndices => socketIndices;
+
+    
+    #endregion
+    
+    
+    #region Lifecycle
+
+
+    private void Awake()
     {
-        public enum RailingType { Post, Rail }
-
-        [Header("Binding")]
-        public RailingType type = RailingType.Rail;
-
-        [Tooltip("Owning platform (auto-filled from parent).")]
-        public GamePlatform platform;
-
-        [Tooltip("Indices of sockets this piece is associated with on its platform.")]
-        [SerializeField] private int[] socketIndices = System.Array.Empty<int>();
-
-        private bool _registered;
-        private bool _isHidden;
-
-        public int[] SocketIndices => socketIndices;
-
-        public void SetSocketIndices(int[] indices)
-        {
-            socketIndices = indices ?? System.Array.Empty<int>();
-        }
-
-        private void Awake()
-        {
-            if (!platform)
-                platform = GetComponentInParent<GamePlatform>();
-        }
-
-        private void OnEnable()
-        {
-            EnsureRegistered();
-        }
-
-        private void OnDisable()
-        {
-            if (platform && _registered)
-            {
-                platform.UnregisterRailing(this);
-                _registered = false;
-            }
-        }
-
-#if UNITY_EDITOR
-        private void OnValidate()
-        {
-            if (!platform)
-                platform = GetComponentInParent<GamePlatform>();
-        }
-#endif
-
-        /// <summary>Ensure this railing is known to its GamePlatform (for visibility updates).</summary>
-        public void EnsureRegistered()
-        {
-            if (!platform)
-                platform = GetComponentInParent<GamePlatform>();
-            if (!platform) return;
-
-            if (_registered)
-                platform.UnregisterRailing(this);
-
-            platform.RegisterRailing(this);
-            _registered = true;
-        }
-
-        /// <summary>
-        /// Hidden = GameObject inactive (NOT destroyed).
-        /// This matches the previous behavior where railings disappear on connection
-        /// and reappear when platforms separate.
-        /// </summary>
-        public void SetHidden(bool hidden)
-        {
-            if (_isHidden == hidden) return;
-            _isHidden = hidden;
-            gameObject.SetActive(!hidden);
-        }
-
-        public bool IsHidden => _isHidden;
+        if (!_platform)
+            _platform = GetComponentInParent<GamePlatform>();
         
-        // ReSharper disable Unity.PerformanceAnalysis
-        /// <summary>
-        /// Updates this railing's visibility based on socket connection state.
-        /// Rails: Hidden when ALL their socket indices are Connected.
-        /// Posts: Hidden when ALL rails connected to the same sockets are hidden.
-        /// </summary>
-        public void UpdateVisibility()
+        if(!_railingSystem)
+            _railingSystem = GetComponentInParent<PlatformRailingSystem>();
+    }
+
+    
+    
+    private void OnEnable()
+    {
+        EnsureRegistered();
+    }
+
+    
+    
+    private void OnDisable()
+    {
+        if (IsRegistered)
         {
-            if (!platform) return;
-            
-            var indices = socketIndices ?? System.Array.Empty<int>();
-            if (indices.Length == 0)
-            {
-                SetHidden(false);
-                return;
-            }
-
-            // For rails: hide if all sockets are connected
-            if (type == RailingType.Rail)
-            {
-                bool allSocketsConnected = true;
-                foreach (int socketIndex in indices)
-                {
-                    if (!platform.IsSocketConnected(socketIndex))
-                    {
-                        allSocketsConnected = false;
-                        break;
-                    }
-                }
-                SetHidden(allSocketsConnected && indices.Length > 0);
-                return;
-            }
-
-            // For posts: hide if all rails on the same sockets are hidden
-            if (type == RailingType.Post)
-            {
-                bool hasVisibleRail = platform.HasVisibleRailOnSockets(indices);
-                SetHidden(!hasVisibleRail && indices.Length > 0);
-            }
+            _railingSystem.UnregisterRailing(this);
+            IsRegistered = false;
         }
     }
+    
+    
+    #endregion
+    
+    
+    #region Railing Functions
+    
+    
+    public void SetSocketIndices(int[] indices)
+    {
+        socketIndices = indices ?? System.Array.Empty<int>();
+    }
+
+    
+    public void SetSocketIndices(int index)
+    {
+        socketIndices = new int[1] { index };
+    }
+    
+    
+    public void SetSocketIndices(List<int> indices)
+    {
+        socketIndices = indices.Count > 0 ? indices.ToArray() : System.Array.Empty<int>();
+    }
+
+
+
+    /// Ensure this railing is known to its GamePlatform (for visibility updates)
+    /// 
+    public void EnsureRegistered()
+    {
+        if (IsRegistered)
+            _railingSystem.UnregisterRailing(this);
+        
+        
+        _railingSystem.RegisterRailing(this);
+        IsRegistered = true;
+    }
+
+    
+    
+
+    /// Set Railing Visibility
+    /// Hidden = GameObject inactive (NOT destroyed).
+    /// Railings disappear on Platform Connection (dependend on bound Socket Status)
+    /// 
+    private void SetVisibility(bool isVisible)
+    {
+        if (IsVisible == isVisible) return;
+        
+        if (isVisible)
+        {
+            IsVisible = true;
+            gameObject.SetActive(true);
+        }
+        else
+        {
+            IsVisible = false;
+            gameObject.SetActive(false);
+        }
+    }
+    
+
+
+    /// Updates Visibility - based on Socket Status
+    /// Rails: Hidden when their bound Socket Status is Connected.
+    /// Posts: Hidden when both sockets to each side are Connected (no Rails, no post between them)
+    /// 
+    public void UpdateVisibility()
+    {
+        var indices = socketIndices ?? Array.Empty<int>();
+        if (indices.Length == 0)
+        {
+            SetVisibility(true);
+            return;
+        }
+
+        bool railingSocketsConnected = _railingSystem.AllSocketsConnected(indices);
+
+        //Invert - if all connected, call with false
+        SetVisibility(!railingSocketsConnected);
+    }
+    
+    
+    #endregion
+    
+    
+    
+#if UNITY_EDITOR
+    private void OnValidate()
+    {
+        if (!_platform)
+            _platform = GetComponentInParent<GamePlatform>();
+    }
+#endif
+}
 }

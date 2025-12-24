@@ -678,8 +678,7 @@ public class WorldGrid : MonoBehaviour
     /// 
     public GridCellData GetCell(Vector2Int cell)
     {
-        if (!CellInBounds(cell)) return null;
-        return _cells[cell.x, cell.y];
+        return !CellInBounds(cell) ? null : _cells[cell.x, cell.y];
     }
 
     
