@@ -418,7 +418,7 @@ public class PlatformSocketSystem : MonoBehaviour
     
     
     /// Gets the nearest socket index to a world position
-    /// Uses cell-to-socket lookup for O(1) access
+    /// Uses cell-to-socket lookup - checks at most 2 sockets (1 per cell, max 2 cells)
     ///
     public int GetNearestSocketIndex(Vector3 worldPos)
     {
@@ -426,43 +426,30 @@ public class PlatformSocketSystem : MonoBehaviour
         
         Vector2Int cell = _worldGrid.WorldToCell(worldPos);
         
-        int best = -1;
-        float bestDistSqr = float.MaxValue;
-        
-        // Check sockets in this cell
+        // Primary cell should have the socket(s) for this position
         if (_cellToSockets.TryGetValue(cell, out var socketsInCell))
         {
-            foreach (int idx in socketsInCell)
-            {
-                float distSqr = Vector3.SqrMagnitude(worldPos - _platformSockets[idx].WorldPos);
-                if (distSqr < bestDistSqr)
-                {
-                    bestDistSqr = distSqr;
-                    best = idx;
-                }
-            }
+            return FindNearestAmong(worldPos, socketsInCell);
         }
         
-        // For positions on cell boundaries (posts), check adjacent cells
-        if (best < 0 || IsNearCellBoundary(worldPos, cell))
+        // Fallback: position landed in adjacent cell (rare boundary case)
+        // Only need to check cardinal neighbors - platform cells will have sockets
+        Vector2Int[] neighbors = {
+            new(cell.x + 1, cell.y),
+            new(cell.x - 1, cell.y),
+            new(cell.x, cell.y + 1),
+            new(cell.x, cell.y - 1)
+        };
+        
+        foreach (var neighbor in neighbors)
         {
-            foreach (var neighborCell in _worldGrid.GetNeighborCells(cell))
+            if (_cellToSockets.TryGetValue(neighbor, out var neighborSockets))
             {
-                if (!_cellToSockets.TryGetValue(neighborCell, out var neighborSockets)) continue;
-                
-                foreach (int idx in neighborSockets)
-                {
-                    float distSqr = Vector3.SqrMagnitude(worldPos - _platformSockets[idx].WorldPos);
-                    if (distSqr < bestDistSqr)
-                    {
-                        bestDistSqr = distSqr;
-                        best = idx;
-                    }
-                }
+                return FindNearestAmong(worldPos, neighborSockets);
             }
         }
         
-        return best;
+        return -1;
     }
     
     
@@ -486,31 +473,26 @@ public class PlatformSocketSystem : MonoBehaviour
         result.Add(startIndex);
         if (maxCount == 1) return result;
         
-        // Walk outward in both directions using continuous perimeter ordering
+        // Walk outward using continuous perimeter ordering (neighbors are ±1)
         int totalSockets = _platformSockets.Count;
         int offset = 1;
         
         while (result.Count < maxCount && offset <= totalSockets / 2)
         {
-            // Previous neighbor (counter-clockwise)
             int prevIndex = (startIndex - offset + totalSockets) % totalSockets;
-            if (!result.Contains(prevIndex))
-            {
-                float distSqr = Vector3.SqrMagnitude(worldPos - _platformSockets[prevIndex].WorldPos);
-                if (distSqr <= maxDistSqr)
-                    result.Add(prevIndex);
-            }
+            int nextIndex = (startIndex + offset) % totalSockets;
+            
+            // Check previous neighbor
+            float prevDistSqr = Vector3.SqrMagnitude(worldPos - _platformSockets[prevIndex].WorldPos);
+            if (prevDistSqr <= maxDistSqr)
+                result.Add(prevIndex);
             
             if (result.Count >= maxCount) break;
             
-            // Next neighbor (clockwise)
-            int nextIndex = (startIndex + offset) % totalSockets;
-            if (!result.Contains(nextIndex))
-            {
-                float distSqr = Vector3.SqrMagnitude(worldPos - _platformSockets[nextIndex].WorldPos);
-                if (distSqr <= maxDistSqr)
-                    result.Add(nextIndex);
-            }
+            // Check next neighbor
+            float nextDistSqr = Vector3.SqrMagnitude(worldPos - _platformSockets[nextIndex].WorldPos);
+            if (nextDistSqr <= maxDistSqr)
+                result.Add(nextIndex);
             
             offset++;
         }
@@ -519,18 +501,27 @@ public class PlatformSocketSystem : MonoBehaviour
     }
     
     
-    /// Checks if position is near a cell boundary (for posts between cells)
+    /// Finds the nearest socket among a small list (1-2 sockets per cell)
     ///
-    private bool IsNearCellBoundary(Vector3 worldPos, Vector2Int cell)
+    private int FindNearestAmong(Vector3 worldPos, List<int> socketIndices)
     {
-        Vector3 cellCenter = _worldGrid.GetCellCenter(cell);
-        const float boundaryThreshold = 0.1f;
-        float halfCell = WorldGrid.CellSize * 0.5f;
+        if (socketIndices.Count == 1) return socketIndices[0];
         
-        float offsetX = Mathf.Abs(worldPos.x - cellCenter.x);
-        float offsetZ = Mathf.Abs(worldPos.z - cellCenter.z);
+        int best = socketIndices[0];
+        float bestDistSqr = Vector3.SqrMagnitude(worldPos - _platformSockets[best].WorldPos);
         
-        return offsetX > halfCell - boundaryThreshold || offsetZ > halfCell - boundaryThreshold;
+        for (int i = 1; i < socketIndices.Count; i++)
+        {
+            int idx = socketIndices[i];
+            float distSqr = Vector3.SqrMagnitude(worldPos - _platformSockets[idx].WorldPos);
+            if (distSqr < bestDistSqr)
+            {
+                bestDistSqr = distSqr;
+                best = idx;
+            }
+        }
+        
+        return best;
     }
     
     #endregion

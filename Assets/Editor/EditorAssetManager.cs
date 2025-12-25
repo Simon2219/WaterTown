@@ -401,8 +401,8 @@ namespace Editor
                 t.localPosition = new Vector3(x, yLocal, z);
 
                 // Bind to up to 2 nearest sockets
-                var sockets = EditorPlatformTools.GetNearestSocketIndices(gp, t.localPosition, 2, 1.5f);
-                CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, sockets.ToArray());
+                var postSockets = EditorPlatformTools.GetNearestSocketIndices(gp, t.localPosition, 2, 1.5f);
+                CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, postSockets.ToArray());
             }
 
             // South edge posts: z=-hz
@@ -425,8 +425,8 @@ namespace Editor
                 var t = go.transform;
                 t.localPosition = new Vector3(x, yLocal, z);
 
-                var sockets = EditorPlatformTools.GetNearestSocketIndices(gp, t.localPosition, 2, 1.5f);
-                CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, sockets.ToArray());
+                var postSockets = EditorPlatformTools.GetNearestSocketIndices(gp, t.localPosition, 2, 1.5f);
+                CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, postSockets.ToArray());
             }
 
             // East edge intermediate posts (skip corners)
@@ -444,8 +444,8 @@ namespace Editor
                 var t = go.transform;
                 t.localPosition = new Vector3(x, yLocal, z);
 
-                var sockets = EditorPlatformTools.GetNearestSocketIndices(gp, t.localPosition, 2, 1.5f);
-                CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, sockets.ToArray());
+                var postSockets = EditorPlatformTools.GetNearestSocketIndices(gp, t.localPosition, 2, 1.5f);
+                CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, postSockets.ToArray());
             }
 
             // West edge intermediate posts (skip corners)
@@ -463,8 +463,8 @@ namespace Editor
                 var t = go.transform;
                 t.localPosition = new Vector3(x, yLocal, z);
 
-                var sockets = EditorPlatformTools.GetNearestSocketIndices(gp, t.localPosition, 2, 1.5f);
-                CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, sockets.ToArray());
+                var postSockets = EditorPlatformTools.GetNearestSocketIndices(gp, t.localPosition, 2, 1.5f);
+                CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, postSockets.ToArray());
             }
 
             EditorGUIUtility.PingObject(railingsParent);
