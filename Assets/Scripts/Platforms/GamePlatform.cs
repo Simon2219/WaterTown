@@ -356,6 +356,22 @@ public class GamePlatform : MonoBehaviour, IPickupable
         => _socketSystem?.ReBuildSockets();
     
     
+    public int GetNextSocketIndex(int socketIndex)
+        => _socketSystem?.GetNextSocketIndex(socketIndex) ?? -1;
+    
+    
+    public int GetPreviousSocketIndex(int socketIndex)
+        => _socketSystem?.GetPreviousSocketIndex(socketIndex) ?? -1;
+    
+    
+    public (int previous, int next) GetNeighborSocketIndices(int socketIndex)
+        => _socketSystem?.GetNeighborSocketIndices(socketIndex) ?? (-1, -1);
+    
+    
+    public List<int> GetNearestSocketIndices(Vector3 worldPos, int maxCount, float maxDistance)
+        => _socketSystem?.GetNearestSocketIndices(worldPos, maxCount, maxDistance) ?? new List<int>();
+    
+    
     #endregion
     
     

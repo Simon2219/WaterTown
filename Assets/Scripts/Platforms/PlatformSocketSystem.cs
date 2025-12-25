@@ -200,9 +200,11 @@ public class PlatformSocketSystem : MonoBehaviour
     
     
     /// Build sockets along the perimeter of the footprint
-    /// In local Space - One socket per cell edge segment
-    /// Order: +Z edge, -Z edge, +X edge, -X edge (for compat with Edge API)
-    /// 
+    /// In local space - one socket per cell edge segment
+    /// Order: Clockwise starting from bottom-left (SW corner)
+    /// South → East → North → West
+    /// This ensures adjacent sockets are always index ±1 (with wrap-around)
+    ///
     public void ReBuildSockets(Vector2Int footprintSize = default)
     {
         if(footprintSize == default) footprintSize = GetFootprint();
@@ -219,72 +221,67 @@ public class PlatformSocketSystem : MonoBehaviour
     }
 
 
-
+    /// Builds sockets in clockwise order starting from bottom-left corner
+    /// Layout for 4x4:
+    ///            North (← going left)
+    ///        ┌── 11  10   9   8 ──┐
+    ///        │                    │
+    /// West ↓ 12                   7 ↑ East
+    ///        13                   6
+    ///        14                   5
+    ///        15                   4
+    ///        │                    │
+    ///        └── 0   1   2   3 ───┘
+    ///            South (→ going right)
+    ///
     private void BuildSockets(Vector2Int footprintSize)
     {
         _platformSockets.Clear();
         SocketsBuilt = false;
 
-        int footprintWidth = footprintSize.x;
-        int footprintLength = footprintSize.y;
+        int width = footprintSize.x;
+        int length = footprintSize.y;
         
-        // Use WorldGrid.CellSize for consistency with grid system
         float halfCellSize = WorldGrid.CellSize * 0.5f;
-        float halfWidth = footprintWidth * halfCellSize;
-        float halfLength = footprintLength * halfCellSize;
+        float halfWidth = width * halfCellSize;
+        float halfLength = length * halfCellSize;
 
         int socketIndex = 0;
 
-        // +Z edge (North - local z ≈ +halfLength), outward direction is (0, +1)
-        Vector2Int outwardPlusZ = new Vector2Int(0, 1);
-        for (int segmentIndex = 0; segmentIndex < footprintWidth; segmentIndex++)
+        // South edge: left to right (outward = -Z)
+        Vector2Int outwardSouth = new Vector2Int(0, -1);
+        for (int i = 0; i < width; i++)
         {
-            float localX = -halfWidth + halfCellSize + (segmentIndex * WorldGrid.CellSize);
-            Vector3 localPosition = new Vector3(localX, 0f, +halfLength);
-            
-            var socketData = new SocketData(socketIndex, localPosition, outwardPlusZ, SocketStatus.Linkable);
-            _platformSockets.Add(socketData);
-            
-            socketIndex++;
-        }
-
-        // -Z edge (South - local z ≈ -halfLength), outward direction is (0, -1)
-        Vector2Int outwardMinusZ = new Vector2Int(0, -1);
-        for (int segmentIndex = 0; segmentIndex < footprintWidth; segmentIndex++)
-        {
-            float localX = -halfWidth + halfCellSize + (segmentIndex * WorldGrid.CellSize);
+            float localX = -halfWidth + halfCellSize + (i * WorldGrid.CellSize);
             Vector3 localPosition = new Vector3(localX, 0f, -halfLength);
-            
-            var socketData = new SocketData(socketIndex, localPosition, outwardMinusZ, SocketStatus.Linkable);
-            _platformSockets.Add(socketData);
-            
-            socketIndex++;
-        }
-        
-        // +X edge (East - local x ≈ +halfWidth), outward direction is (+1, 0)
-        Vector2Int outwardPlusX = new Vector2Int(1, 0);
-        for (int segmentIndex = 0; segmentIndex < footprintLength; segmentIndex++)
-        {
-            float localZ = +halfLength - halfCellSize - (segmentIndex * WorldGrid.CellSize);
-            Vector3 localPosition = new Vector3(+halfWidth, 0f, localZ);
-            
-            var socketData = new SocketData(socketIndex, localPosition, outwardPlusX, SocketStatus.Linkable);
-            _platformSockets.Add(socketData);
-            
-            socketIndex++;
+            _platformSockets.Add(new SocketData(socketIndex++, localPosition, outwardSouth, SocketStatus.Linkable));
         }
 
-        // -X edge (West - local x ≈ -halfWidth), outward direction is (-1, 0)
-        Vector2Int outwardMinusX = new Vector2Int(-1, 0);
-        for (int segmentIndex = 0; segmentIndex < footprintLength; segmentIndex++)
+        // East edge: bottom to top (outward = +X)
+        Vector2Int outwardEast = new Vector2Int(1, 0);
+        for (int i = 0; i < length; i++)
         {
-            float localZ = +halfLength - halfCellSize - (segmentIndex * WorldGrid.CellSize);
+            float localZ = -halfLength + halfCellSize + (i * WorldGrid.CellSize);
+            Vector3 localPosition = new Vector3(+halfWidth, 0f, localZ);
+            _platformSockets.Add(new SocketData(socketIndex++, localPosition, outwardEast, SocketStatus.Linkable));
+        }
+
+        // North edge: right to left (outward = +Z)
+        Vector2Int outwardNorth = new Vector2Int(0, 1);
+        for (int i = 0; i < width; i++)
+        {
+            float localX = +halfWidth - halfCellSize - (i * WorldGrid.CellSize);
+            Vector3 localPosition = new Vector3(localX, 0f, +halfLength);
+            _platformSockets.Add(new SocketData(socketIndex++, localPosition, outwardNorth, SocketStatus.Linkable));
+        }
+
+        // West edge: top to bottom (outward = -X)
+        Vector2Int outwardWest = new Vector2Int(-1, 0);
+        for (int i = 0; i < length; i++)
+        {
+            float localZ = +halfLength - halfCellSize - (i * WorldGrid.CellSize);
             Vector3 localPosition = new Vector3(-halfWidth, 0f, localZ);
-            
-            var socketData = new SocketData(socketIndex, localPosition, outwardMinusX, SocketStatus.Linkable);
-            _platformSockets.Add(socketData);
-            
-            socketIndex++;
+            _platformSockets.Add(new SocketData(socketIndex++, localPosition, outwardWest, SocketStatus.Linkable));
         }
 
         SocketsBuilt = true;
@@ -410,46 +407,48 @@ public class PlatformSocketSystem : MonoBehaviour
     public int EdgeLengthMeters(Edge edge)
     {
         var footprintSize = GetFootprint();
-        
         return edge is Edge.North or Edge.South ? footprintSize.x : footprintSize.y;
     }
 
 
     /// Gets the socket index range (start, end inclusive) for a given edge
+    /// Clockwise order: South → East → North → West
+    ///
     public void GetSocketIndexRangeForEdge(Edge edge, out int startIndex, out int endIndex)
     {
         var footprintSize = GetFootprint();
-        int footprintWidth = Mathf.Max(1, footprintSize.x);
-        int footprintLength = Mathf.Max(1, footprintSize.y);
+        int width = Mathf.Max(1, footprintSize.x);
+        int length = Mathf.Max(1, footprintSize.y);
 
         switch (edge)
         {
-            case Edge.North:
-                startIndex = 0;
-                endIndex = footprintWidth - 1;
-                break;
-            
             case Edge.South:
-                startIndex = footprintWidth;
-                endIndex = 2 * footprintWidth - 1;
+                startIndex = 0;
+                endIndex = width - 1;
                 break;
             
             case Edge.East:
-                startIndex = 2 * footprintWidth;
-                endIndex = 2 * footprintWidth + footprintLength - 1;
+                startIndex = width;
+                endIndex = width + length - 1;
+                break;
+            
+            case Edge.North:
+                startIndex = width + length;
+                endIndex = 2 * width + length - 1;
                 break;
             
             case Edge.West:
             default:
-                startIndex = 2 * footprintWidth + footprintLength;
-                endIndex = 2 * footprintWidth + 2 * footprintLength - 1;
+                startIndex = 2 * width + length;
+                endIndex = 2 * width + 2 * length - 1;
                 break;
         }
     }
 
 
-    
-    /// Compatibility helper for code that thinks in Edge+mark (PlatformModule, old tools)
+    /// Gets socket index for a specific position (mark) along an edge
+    /// Mark 0 = first socket on that edge in clockwise direction
+    ///
     public int GetSocketIndexByEdgeMark(Edge edge, int mark)
     {
         var footprintSize = GetFootprint();
@@ -458,15 +457,15 @@ public class PlatformSocketSystem : MonoBehaviour
 
         switch (edge)
         {
-            case Edge.North:
-                mark = Mathf.Clamp(mark, 0, width - 1);
-                return mark;
             case Edge.South:
                 mark = Mathf.Clamp(mark, 0, width - 1);
-                return width + mark;
+                return mark;
             case Edge.East:
                 mark = Mathf.Clamp(mark, 0, length - 1);
-                return 2 * width + mark;
+                return width + mark;
+            case Edge.North:
+                mark = Mathf.Clamp(mark, 0, width - 1);
+                return width + length + mark;
             case Edge.West:
             default:
                 mark = Mathf.Clamp(mark, 0, length - 1);
@@ -474,70 +473,168 @@ public class PlatformSocketSystem : MonoBehaviour
         }
     }
     
+    
+    /// Gets the next socket index in clockwise direction (with wrap-around)
+    ///
+    public int GetNextSocketIndex(int socketIndex)
+    {
+        if (_platformSockets.Count == 0) return -1;
+        return (socketIndex + 1) % _platformSockets.Count;
+    }
+    
+    
+    /// Gets the previous socket index in counter-clockwise direction (with wrap-around)
+    ///
+    public int GetPreviousSocketIndex(int socketIndex)
+    {
+        if (_platformSockets.Count == 0) return -1;
+        return (socketIndex - 1 + _platformSockets.Count) % _platformSockets.Count;
+    }
+    
+    
+    /// Gets both neighbor socket indices (previous and next in perimeter order)
+    ///
+    public (int previous, int next) GetNeighborSocketIndices(int socketIndex)
+    {
+        return (GetPreviousSocketIndex(socketIndex), GetNextSocketIndex(socketIndex));
+    }
+    
 
 
+    /// Finds the nearest socket to a world position
+    /// Uses grid cell filtering for efficiency, then distance check
+    ///
     public int FindNearestSocketIndex(Vector3 worldPos)
     {
+        if (_platformSockets.Count == 0) return -1;
+        
         Vector2Int gridCell = _worldGrid.WorldToCell(worldPos);
         
-        List<SocketData> socketsInCell = _platformSockets.Where(socket => socket.CurrentGridCell == gridCell).ToList();
-        
+        // First try sockets in the same grid cell
         int best = -1;
-        float bestD = float.MaxValue;
-        for (int i = 0; i < socketsInCell.Count(); i++)
+        float bestDistSqr = float.MaxValue;
+        
+        for (int i = 0; i < _platformSockets.Count; i++)
         {
-            float d = Vector3.SqrMagnitude(worldPos - _platformSockets[i].WorldPos);
-            if (d < bestD)
+            var socket = _platformSockets[i];
+            if (socket.CurrentGridCell != gridCell) continue;
+            
+            float distSqr = Vector3.SqrMagnitude(worldPos - socket.WorldPos);
+            if (distSqr < bestDistSqr)
             {
-                bestD = d;
+                bestDistSqr = distSqr;
                 best = i;
             }
         }
+        
+        // If no socket in cell, fall back to checking all sockets
+        if (best < 0)
+        {
+            for (int i = 0; i < _platformSockets.Count; i++)
+            {
+                float distSqr = Vector3.SqrMagnitude(worldPos - _platformSockets[i].WorldPos);
+                if (distSqr < bestDistSqr)
+                {
+                    bestDistSqr = distSqr;
+                    best = i;
+                }
+            }
+        }
+        
         return best;
     }
 
+
     /// Finds up to maxCount nearest socket indices to localPos within maxDistance
+    /// Used by editor tools for module/railing binding
+    ///
     public void FindNearestSocketIndicesLocal(Vector3 localPos, int maxCount, float maxDistance, List<int> result)
     {
         result.Clear();
         if (maxCount <= 0 || _platformSockets.Count == 0) return;
 
-        float maxSqr = maxDistance * maxDistance;
+        float maxDistSqr = maxDistance * maxDistance;
 
-        List<(int idx, float d)> tmp = new List<(int, float)>(_platformSockets.Count);
+        var candidates = new List<(int idx, float distSqr)>(_platformSockets.Count);
         for (int i = 0; i < _platformSockets.Count; i++)
         {
-            float d = Vector3.SqrMagnitude(localPos - _platformSockets[i].LocalPos);
-            if (d <= maxSqr)
-                tmp.Add((i, d));
+            float distSqr = Vector3.SqrMagnitude(localPos - _platformSockets[i].LocalPos);
+            if (distSqr <= maxDistSqr)
+                candidates.Add((i, distSqr));
         }
 
-        tmp.Sort((a, b) => a.d.CompareTo(b.d));
-        for (int i = 0; i < tmp.Count && i < maxCount; i++)
-            result.Add(tmp[i].idx);
+        candidates.Sort((a, b) => a.distSqr.CompareTo(b.distSqr));
+        for (int i = 0; i < candidates.Count && i < maxCount; i++)
+            result.Add(candidates[i].idx);
     }
 
 
-
+    /// Finds up to maxCount nearest socket indices by walking outward from closest socket
+    /// Leverages continuous perimeter ordering: neighbors are always ±1 (with wrap)
+    ///
     public List<int> GetNearestSocketIndices(Vector3 worldPos, int maxCount, float maxDistance)
     {
-
-        List<int> result = new();
-        int closestIndex = FindNearestSocketIndex(worldPos);
+        var result = new List<int>();
+        if (maxCount <= 0 || _platformSockets.Count == 0) return result;
         
-        while (result.Count < maxCount)
+        int closestIndex = FindNearestSocketIndex(worldPos);
+        if (closestIndex < 0) return result;
+        
+        float maxDistSqr = maxDistance * maxDistance;
+        int totalSockets = _platformSockets.Count;
+        
+        // Check if closest is within range
+        float closestDistSqr = Vector3.SqrMagnitude(worldPos - _platformSockets[closestIndex].WorldPos);
+        if (closestDistSqr > maxDistSqr) return result;
+        
+        result.Add(closestIndex);
+        
+        // Walk outward in both directions simultaneously
+        int leftOffset = 1;
+        int rightOffset = 1;
+        bool canGoLeft = true;
+        bool canGoRight = true;
+        
+        while (result.Count < maxCount && (canGoLeft || canGoRight))
         {
-            int currentSocket = closestIndex;
-            int neighbor1 = closestIndex - 1;
-            int neighbor2 = closestIndex + 1;
+            // Try left neighbor (wrap around)
+            if (canGoLeft)
+            {
+                int leftIndex = (closestIndex - leftOffset + totalSockets) % totalSockets;
+                float leftDistSqr = Vector3.SqrMagnitude(worldPos - _platformSockets[leftIndex].WorldPos);
+                
+                if (leftDistSqr <= maxDistSqr && !result.Contains(leftIndex))
+                {
+                    result.Add(leftIndex);
+                    leftOffset++;
+                }
+                else
+                {
+                    canGoLeft = false;
+                }
+            }
             
-            if(!result.Contains(closestIndex)) result.Add(closestIndex);
+            if (result.Count >= maxCount) break;
             
-            
+            // Try right neighbor (wrap around)
+            if (canGoRight)
+            {
+                int rightIndex = (closestIndex + rightOffset) % totalSockets;
+                float rightDistSqr = Vector3.SqrMagnitude(worldPos - _platformSockets[rightIndex].WorldPos);
+                
+                if (rightDistSqr <= maxDistSqr && !result.Contains(rightIndex))
+                {
+                    result.Add(rightIndex);
+                    rightOffset++;
+                }
+                else
+                {
+                    canGoRight = false;
+                }
+            }
         }
-
-
-
+        
+        return result;
     }
     
     #endregion
