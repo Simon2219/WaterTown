@@ -502,22 +502,57 @@ public class PlatformSocketSystem : MonoBehaviour
 
 
     /// Finds the nearest socket to a world position
-    /// Uses grid cell filtering for efficiency, then distance check
+    /// Handles positions on cell boundaries (like posts between cells) by checking adjacent cells
     ///
     public int FindNearestSocketIndex(Vector3 worldPos)
     {
         if (_platformSockets.Count == 0) return -1;
         
-        Vector2Int gridCell = _worldGrid.WorldToCell(worldPos);
+        Vector2Int primaryCell = _worldGrid.WorldToCell(worldPos);
+        Vector3 cellCenter = _worldGrid.CellToWorld(primaryCell);
         
-        // First try sockets in the same grid cell
+        // Check if position is on a cell boundary (within tolerance)
+        const float boundaryTolerance = 0.01f;
+        float halfCell = WorldGrid.CellSize * 0.5f;
+        
+        float offsetX = worldPos.x - cellCenter.x;
+        float offsetZ = worldPos.z - cellCenter.z;
+        
+        bool onXBoundary = Mathf.Abs(Mathf.Abs(offsetX) - halfCell) < boundaryTolerance;
+        bool onZBoundary = Mathf.Abs(Mathf.Abs(offsetZ) - halfCell) < boundaryTolerance;
+        
         int best = -1;
         float bestDistSqr = float.MaxValue;
         
+        // Check primary cell
+        FindNearestInCell(primaryCell, worldPos, ref best, ref bestDistSqr);
+        
+        // Check adjacent cell on X boundary (post between cells along X axis)
+        if (onXBoundary)
+        {
+            int adjacentX = offsetX > 0 ? primaryCell.x + 1 : primaryCell.x - 1;
+            FindNearestInCell(new Vector2Int(adjacentX, primaryCell.y), worldPos, ref best, ref bestDistSqr);
+        }
+        
+        // Check adjacent cell on Z boundary (post between cells along Z axis)
+        if (onZBoundary)
+        {
+            int adjacentZ = offsetZ > 0 ? primaryCell.y + 1 : primaryCell.y - 1;
+            FindNearestInCell(new Vector2Int(primaryCell.x, adjacentZ), worldPos, ref best, ref bestDistSqr);
+        }
+        
+        return best;
+    }
+    
+    
+    /// Helper: finds nearest socket in a specific cell
+    ///
+    private void FindNearestInCell(Vector2Int cell, Vector3 worldPos, ref int best, ref float bestDistSqr)
+    {
         for (int i = 0; i < _platformSockets.Count; i++)
         {
             var socket = _platformSockets[i];
-            if (socket.CurrentGridCell != gridCell) continue;
+            if (socket.CurrentGridCell != cell) continue;
             
             float distSqr = Vector3.SqrMagnitude(worldPos - socket.WorldPos);
             if (distSqr < bestDistSqr)
@@ -526,22 +561,6 @@ public class PlatformSocketSystem : MonoBehaviour
                 best = i;
             }
         }
-        
-        // If no socket in cell, fall back to checking all sockets
-        if (best < 0)
-        {
-            for (int i = 0; i < _platformSockets.Count; i++)
-            {
-                float distSqr = Vector3.SqrMagnitude(worldPos - _platformSockets[i].WorldPos);
-                if (distSqr < bestDistSqr)
-                {
-                    bestDistSqr = distSqr;
-                    best = i;
-                }
-            }
-        }
-        
-        return best;
     }
 
 
