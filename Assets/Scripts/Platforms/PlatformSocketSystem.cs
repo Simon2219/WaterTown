@@ -205,9 +205,9 @@ public class PlatformSocketSystem : MonoBehaviour
     
     /// Build sockets along the perimeter of the footprint
     /// In local space - one socket per cell edge segment
-    /// Order: Clockwise starting from bottom-left (SW corner)
-    /// South → East → North → West
-    /// This ensures adjacent sockets are always index ±1 (with wrap-around)
+    /// Order: Clockwise starting from NW corner
+    /// North → East → South → West
+    /// Adjacent sockets are always index ±1 (with wrap-around)
     ///
     public void ReBuildSockets(Vector2Int footprintSize = default)
     {
@@ -225,18 +225,19 @@ public class PlatformSocketSystem : MonoBehaviour
     }
 
 
-    /// Builds sockets in clockwise order starting from bottom-left corner
+    /// Builds sockets in clockwise order starting from NW corner
+    /// Edge order: North → East → South → West
     /// Layout for 4x4:
-    ///            North (← going left)
-    ///        ┌── 11  10   9   8 ──┐
+    ///            North (→ indices increase)
+    ///        ┌── 0   1   2   3 ───┐
     ///        │                    │
-    /// West ↓ 12                   7 ↑ East
-    ///        13                   6
+    /// West ↑ 15                   4 ↓ East
     ///        14                   5
-    ///        15                   4
+    ///        13                   6
+    ///        12                   7
     ///        │                    │
-    ///        └── 0   1   2   3 ───┘
-    ///            South (→ going right)
+    ///        └── 11  10   9   8 ──┘
+    ///            South (← indices increase)
     ///
     private void BuildSockets(Vector2Int footprintSize)
     {
@@ -252,38 +253,38 @@ public class PlatformSocketSystem : MonoBehaviour
 
         int socketIndex = 0;
 
-        // South edge: left to right (outward = -Z)
-        Vector2Int outwardSouth = new Vector2Int(0, -1);
-        for (int i = 0; i < width; i++)
-        {
-            float localX = -halfWidth + halfCellSize + (i * WorldGrid.CellSize);
-            Vector3 localPosition = new Vector3(localX, 0f, -halfLength);
-            _platformSockets.Add(new SocketData(socketIndex++, localPosition, outwardSouth, SocketStatus.Linkable));
-        }
-
-        // East edge: bottom to top (outward = +X)
-        Vector2Int outwardEast = new Vector2Int(1, 0);
-        for (int i = 0; i < length; i++)
-        {
-            float localZ = -halfLength + halfCellSize + (i * WorldGrid.CellSize);
-            Vector3 localPosition = new Vector3(+halfWidth, 0f, localZ);
-            _platformSockets.Add(new SocketData(socketIndex++, localPosition, outwardEast, SocketStatus.Linkable));
-        }
-
-        // North edge: right to left (outward = +Z)
+        // North edge: left to right, NW → NE (outward = +Z)
         Vector2Int outwardNorth = new Vector2Int(0, 1);
         for (int i = 0; i < width; i++)
         {
-            float localX = +halfWidth - halfCellSize - (i * WorldGrid.CellSize);
+            float localX = -halfWidth + halfCellSize + (i * WorldGrid.CellSize);
             Vector3 localPosition = new Vector3(localX, 0f, +halfLength);
             _platformSockets.Add(new SocketData(socketIndex++, localPosition, outwardNorth, SocketStatus.Linkable));
         }
 
-        // West edge: top to bottom (outward = -X)
-        Vector2Int outwardWest = new Vector2Int(-1, 0);
+        // East edge: top to bottom, NE → SE (outward = +X)
+        Vector2Int outwardEast = new Vector2Int(1, 0);
         for (int i = 0; i < length; i++)
         {
             float localZ = +halfLength - halfCellSize - (i * WorldGrid.CellSize);
+            Vector3 localPosition = new Vector3(+halfWidth, 0f, localZ);
+            _platformSockets.Add(new SocketData(socketIndex++, localPosition, outwardEast, SocketStatus.Linkable));
+        }
+
+        // South edge: right to left, SE → SW (outward = -Z)
+        Vector2Int outwardSouth = new Vector2Int(0, -1);
+        for (int i = 0; i < width; i++)
+        {
+            float localX = +halfWidth - halfCellSize - (i * WorldGrid.CellSize);
+            Vector3 localPosition = new Vector3(localX, 0f, -halfLength);
+            _platformSockets.Add(new SocketData(socketIndex++, localPosition, outwardSouth, SocketStatus.Linkable));
+        }
+
+        // West edge: bottom to top, SW → NW (outward = -X)
+        Vector2Int outwardWest = new Vector2Int(-1, 0);
+        for (int i = 0; i < length; i++)
+        {
+            float localZ = -halfLength + halfCellSize + (i * WorldGrid.CellSize);
             Vector3 localPosition = new Vector3(-halfWidth, 0f, localZ);
             _platformSockets.Add(new SocketData(socketIndex++, localPosition, outwardWest, SocketStatus.Linkable));
         }
@@ -431,7 +432,7 @@ public class PlatformSocketSystem : MonoBehaviour
 
 
     /// Gets the socket index range (start, end inclusive) for a given edge
-    /// Socket order: South → East → North → West (clockwise from SW corner)
+    /// Socket order: North → East → South → West (clockwise from NW corner)
     public void GetSocketIndexRangeForEdge(Edge edge, out int startIndex, out int endIndex)
     {
         var footprintSize = GetFootprint();
@@ -440,7 +441,7 @@ public class PlatformSocketSystem : MonoBehaviour
 
         switch (edge)
         {
-            case Edge.South:
+            case Edge.North:
                 startIndex = 0;
                 endIndex = width - 1;
                 break;
@@ -450,7 +451,7 @@ public class PlatformSocketSystem : MonoBehaviour
                 endIndex = width + length - 1;
                 break;
             
-            case Edge.North:
+            case Edge.South:
                 startIndex = width + length;
                 endIndex = 2 * width + length - 1;
                 break;
