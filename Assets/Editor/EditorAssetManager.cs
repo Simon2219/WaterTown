@@ -404,7 +404,7 @@ namespace Editor
 
                 // Bind to up to 2 nearest sockets
                 tmpSockets.Clear();
-                EditorPlatformTools.FindNearestSocketIndicesLocal(gp, t.localPosition, maxCount: 2, maxDistance: 1.5f, result: tmpSockets);
+                EditorPlatformTools.GetNearestSocketIndicesLocal(gp, t.localPosition, maxCount: 2, maxDistance: 1.5f, result: tmpSockets);
                 CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, tmpSockets.ToArray());
             }
 
@@ -429,7 +429,7 @@ namespace Editor
                 t.localPosition = new Vector3(x, yLocal, z);
 
                 tmpSockets.Clear();
-                EditorPlatformTools.FindNearestSocketIndicesLocal(gp, t.localPosition, maxCount: 2, maxDistance: 1.5f, result: tmpSockets);
+                EditorPlatformTools.GetNearestSocketIndicesLocal(gp, t.localPosition, maxCount: 2, maxDistance: 1.5f, result: tmpSockets);
                 CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, tmpSockets.ToArray());
             }
 
@@ -449,7 +449,7 @@ namespace Editor
                 t.localPosition = new Vector3(x, yLocal, z);
 
                 tmpSockets.Clear();
-                EditorPlatformTools.FindNearestSocketIndicesLocal(gp, t.localPosition, maxCount: 2, maxDistance: 1.5f, result: tmpSockets);
+                EditorPlatformTools.GetNearestSocketIndicesLocal(gp, t.localPosition, maxCount: 2, maxDistance: 1.5f, result: tmpSockets);
                 CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, tmpSockets.ToArray());
             }
 
@@ -469,7 +469,7 @@ namespace Editor
                 t.localPosition = new Vector3(x, yLocal, z);
 
                 tmpSockets.Clear();
-                EditorPlatformTools.FindNearestSocketIndicesLocal(gp, t.localPosition, maxCount: 2, maxDistance: 1.5f, result: tmpSockets);
+                EditorPlatformTools.GetNearestSocketIndicesLocal(gp, t.localPosition, maxCount: 2, maxDistance: 1.5f, result: tmpSockets);
                 CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, tmpSockets.ToArray());
             }
 

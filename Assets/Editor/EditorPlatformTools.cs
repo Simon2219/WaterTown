@@ -98,10 +98,10 @@ namespace Editor
         
         /// Finds nearest socket indices to a local position in editor mode
         ///
-        public static void FindNearestSocketIndicesLocal(GamePlatform platform, Vector3 localPos, int maxCount, float maxDistance, List<int> result)
+        public static void GetNearestSocketIndicesLocal(GamePlatform platform, Vector3 localPos, int maxCount, float maxDistance, List<int> result)
         {
             var socketSystem = GetSocketSystem(platform);
-            socketSystem?.FindNearestSocketIndicesLocal(localPos, maxCount, maxDistance, result);
+            socketSystem?.GetNearestSocketIndicesLocal(localPos, maxCount, maxDistance, result);
         }
         
         

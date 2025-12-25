@@ -59,7 +59,7 @@ namespace Platforms
             if (indices == null || indices.Length == 0)
             {
                 // Fallback: bind to nearest socket
-                int nearest = _socketSystem.FindNearestSocketIndex(railing.transform.position);
+                int nearest = _socketSystem.GetNearestSocketIndex(railing.transform.position);
                 
                 if (nearest < 0) return;
                 

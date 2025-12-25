@@ -501,73 +501,43 @@ public class PlatformSocketSystem : MonoBehaviour
     
 
 
-    /// Finds the nearest socket to a world position
-    /// Handles positions on cell boundaries (like posts between cells) by checking adjacent cells
+    /// Returns the single nearest socket index to a world position
     ///
-    public int FindNearestSocketIndex(Vector3 worldPos)
+    public int GetNearestSocketIndex(Vector3 worldPos)
     {
         if (_platformSockets.Count == 0) return -1;
-        
-        Vector2Int primaryCell = _worldGrid.WorldToCell(worldPos);
-        Vector3 cellCenter = _worldGrid.CellToWorld(primaryCell);
-        
-        // Check if position is on a cell boundary (within tolerance)
-        const float boundaryTolerance = 0.01f;
-        float halfCell = WorldGrid.CellSize * 0.5f;
-        
-        float offsetX = worldPos.x - cellCenter.x;
-        float offsetZ = worldPos.z - cellCenter.z;
-        
-        bool onXBoundary = Mathf.Abs(Mathf.Abs(offsetX) - halfCell) < boundaryTolerance;
-        bool onZBoundary = Mathf.Abs(Mathf.Abs(offsetZ) - halfCell) < boundaryTolerance;
-        
-        int best = -1;
-        float bestDistSqr = float.MaxValue;
-        
-        // Check primary cell
-        FindNearestInCell(primaryCell, worldPos, ref best, ref bestDistSqr);
-        
-        // Check adjacent cell on X boundary (post between cells along X axis)
-        if (onXBoundary)
-        {
-            int adjacentX = offsetX > 0 ? primaryCell.x + 1 : primaryCell.x - 1;
-            FindNearestInCell(new Vector2Int(adjacentX, primaryCell.y), worldPos, ref best, ref bestDistSqr);
-        }
-        
-        // Check adjacent cell on Z boundary (post between cells along Z axis)
-        if (onZBoundary)
-        {
-            int adjacentZ = offsetZ > 0 ? primaryCell.y + 1 : primaryCell.y - 1;
-            FindNearestInCell(new Vector2Int(primaryCell.x, adjacentZ), worldPos, ref best, ref bestDistSqr);
-        }
-        
-        return best;
+        return FindClosestInCells(GetRelevantCells(worldPos), worldPos);
     }
     
     
-    /// Helper: finds nearest socket in a specific cell
+    /// Returns up to maxCount nearest socket indices within maxDistance
+    /// Walks outward from closest socket using continuous perimeter ordering
     ///
-    private void FindNearestInCell(Vector2Int cell, Vector3 worldPos, ref int best, ref float bestDistSqr)
+    public List<int> GetNearestSocketIndices(Vector3 worldPos, int maxCount, float maxDistance)
     {
-        for (int i = 0; i < _platformSockets.Count; i++)
-        {
-            var socket = _platformSockets[i];
-            if (socket.CurrentGridCell != cell) continue;
-            
-            float distSqr = Vector3.SqrMagnitude(worldPos - socket.WorldPos);
-            if (distSqr < bestDistSqr)
-            {
-                bestDistSqr = distSqr;
-                best = i;
-            }
-        }
+        var result = new List<int>();
+        if (maxCount <= 0 || _platformSockets.Count == 0) return result;
+        
+        int closestIndex = GetNearestSocketIndex(worldPos);
+        if (closestIndex < 0) return result;
+        
+        float maxDistSqr = maxDistance * maxDistance;
+        
+        // Check if closest is within range
+        if (Vector3.SqrMagnitude(worldPos - _platformSockets[closestIndex].WorldPos) > maxDistSqr)
+            return result;
+        
+        result.Add(closestIndex);
+        WalkPerimeterOutward(closestIndex, worldPos, maxCount, maxDistSqr, result);
+        
+        return result;
     }
-
-
-    /// Finds up to maxCount nearest socket indices to localPos within maxDistance
-    /// Used by editor tools for module/railing binding
+    
+    
+    /// Editor version using local space positions
+    /// Falls back to distance-sorted search (no cell optimization in local space)
     ///
-    public void FindNearestSocketIndicesLocal(Vector3 localPos, int maxCount, float maxDistance, List<int> result)
+    public void GetNearestSocketIndicesLocal(Vector3 localPos, int maxCount, float maxDistance, List<int> result)
     {
         result.Clear();
         if (maxCount <= 0 || _platformSockets.Count == 0) return;
@@ -583,32 +553,80 @@ public class PlatformSocketSystem : MonoBehaviour
         }
 
         candidates.Sort((a, b) => a.distSqr.CompareTo(b.distSqr));
-        for (int i = 0; i < candidates.Count && i < maxCount; i++)
+        int count = Mathf.Min(candidates.Count, maxCount);
+        for (int i = 0; i < count; i++)
             result.Add(candidates[i].idx);
     }
-
-
-    /// Finds up to maxCount nearest socket indices by walking outward from closest socket
-    /// Leverages continuous perimeter ordering: neighbors are always ±1 (with wrap)
+    
+    
+    #region Private Socket Search Helpers
+    
+    
+    /// Gets the grid cells that could contain relevant sockets for a position
+    /// Handles boundary positions (posts between cells)
     ///
-    public List<int> GetNearestSocketIndices(Vector3 worldPos, int maxCount, float maxDistance)
+    private List<Vector2Int> GetRelevantCells(Vector3 worldPos)
     {
-        var result = new List<int>();
-        if (maxCount <= 0 || _platformSockets.Count == 0) return result;
+        var cells = new List<Vector2Int>(3);
         
-        int closestIndex = FindNearestSocketIndex(worldPos);
-        if (closestIndex < 0) return result;
+        Vector2Int primaryCell = _worldGrid.WorldToCell(worldPos);
+        cells.Add(primaryCell);
         
-        float maxDistSqr = maxDistance * maxDistance;
+        Vector3 cellCenter = _worldGrid.CellToWorld(primaryCell);
+        const float boundaryTolerance = 0.01f;
+        float halfCell = WorldGrid.CellSize * 0.5f;
+        
+        float offsetX = worldPos.x - cellCenter.x;
+        float offsetZ = worldPos.z - cellCenter.z;
+        
+        // Add adjacent cell if on X boundary
+        if (Mathf.Abs(Mathf.Abs(offsetX) - halfCell) < boundaryTolerance)
+        {
+            int adjacentX = offsetX > 0 ? primaryCell.x + 1 : primaryCell.x - 1;
+            cells.Add(new Vector2Int(adjacentX, primaryCell.y));
+        }
+        
+        // Add adjacent cell if on Z boundary
+        if (Mathf.Abs(Mathf.Abs(offsetZ) - halfCell) < boundaryTolerance)
+        {
+            int adjacentZ = offsetZ > 0 ? primaryCell.y + 1 : primaryCell.y - 1;
+            cells.Add(new Vector2Int(primaryCell.x, adjacentZ));
+        }
+        
+        return cells;
+    }
+    
+    
+    /// Finds the closest socket index across multiple cells
+    ///
+    private int FindClosestInCells(List<Vector2Int> cells, Vector3 worldPos)
+    {
+        int best = -1;
+        float bestDistSqr = float.MaxValue;
+        
+        for (int i = 0; i < _platformSockets.Count; i++)
+        {
+            var socket = _platformSockets[i];
+            if (!cells.Contains(socket.CurrentGridCell)) continue;
+            
+            float distSqr = Vector3.SqrMagnitude(worldPos - socket.WorldPos);
+            if (distSqr < bestDistSqr)
+            {
+                bestDistSqr = distSqr;
+                best = i;
+            }
+        }
+        
+        return best;
+    }
+    
+    
+    /// Walks outward from a starting socket in both directions
+    /// Leverages continuous perimeter ordering (neighbors are ±1 with wrap)
+    ///
+    private void WalkPerimeterOutward(int startIndex, Vector3 worldPos, int maxCount, float maxDistSqr, List<int> result)
+    {
         int totalSockets = _platformSockets.Count;
-        
-        // Check if closest is within range
-        float closestDistSqr = Vector3.SqrMagnitude(worldPos - _platformSockets[closestIndex].WorldPos);
-        if (closestDistSqr > maxDistSqr) return result;
-        
-        result.Add(closestIndex);
-        
-        // Walk outward in both directions simultaneously
         int leftOffset = 1;
         int rightOffset = 1;
         bool canGoLeft = true;
@@ -616,45 +634,38 @@ public class PlatformSocketSystem : MonoBehaviour
         
         while (result.Count < maxCount && (canGoLeft || canGoRight))
         {
-            // Try left neighbor (wrap around)
             if (canGoLeft)
             {
-                int leftIndex = (closestIndex - leftOffset + totalSockets) % totalSockets;
+                int leftIndex = (startIndex - leftOffset + totalSockets) % totalSockets;
                 float leftDistSqr = Vector3.SqrMagnitude(worldPos - _platformSockets[leftIndex].WorldPos);
                 
-                if (leftDistSqr <= maxDistSqr && !result.Contains(leftIndex))
+                if (leftDistSqr <= maxDistSqr)
                 {
                     result.Add(leftIndex);
                     leftOffset++;
                 }
-                else
-                {
-                    canGoLeft = false;
-                }
+                else canGoLeft = false;
             }
             
             if (result.Count >= maxCount) break;
             
-            // Try right neighbor (wrap around)
             if (canGoRight)
             {
-                int rightIndex = (closestIndex + rightOffset) % totalSockets;
+                int rightIndex = (startIndex + rightOffset) % totalSockets;
                 float rightDistSqr = Vector3.SqrMagnitude(worldPos - _platformSockets[rightIndex].WorldPos);
                 
-                if (rightDistSqr <= maxDistSqr && !result.Contains(rightIndex))
+                if (rightDistSqr <= maxDistSqr)
                 {
                     result.Add(rightIndex);
                     rightOffset++;
                 }
-                else
-                {
-                    canGoRight = false;
-                }
+                else canGoRight = false;
             }
         }
-        
-        return result;
     }
+    
+    
+    #endregion
     
     #endregion
     
