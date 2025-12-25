@@ -96,13 +96,16 @@ namespace Editor
         
         
         
-        /// <summary>
-        /// Finds nearest socket indices to a local position in editor mode.
-        /// </summary>
+        /// Finds nearest socket indices to a local position in editor mode
+        /// Converts to world position for the new socket lookup API
+        ///
         public static void FindNearestSocketIndicesLocal(GamePlatform platform, Vector3 localPos, int maxCount, float maxDistance, List<int> result)
         {
             var socketSystem = GetSocketSystem(platform);
-            socketSystem?.FindNearestSocketIndicesLocal(localPos, maxCount, maxDistance, result);
+            if (socketSystem == null) return;
+            
+            Vector3 worldPos = ((Component)platform).transform.TransformPoint(localPos);
+            socketSystem.FindNearestSocketIndices(worldPos, maxCount, maxDistance, result);
         }
         
         
