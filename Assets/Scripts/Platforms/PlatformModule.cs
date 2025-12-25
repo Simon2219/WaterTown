@@ -13,12 +13,6 @@ namespace Platforms
         [Header("Behavior")]
         public bool blocksLink = false;     // true & active => socket becomes Occupied after Refresh
 
-        public enum EdgeOverride { Auto, North, East, South, West }
-
-        [Header("Attachment")]
-        [Tooltip("Lock to a specific edge if pivot proximity would otherwise choose the wrong edge.")]
-        public EdgeOverride attachEdge = EdgeOverride.Auto;
-
         [SerializeField, HideInInspector] private List<int> _boundSocketIndices = new List<int>();
         [SerializeField, HideInInspector] private bool _isHidden;
 
@@ -94,118 +88,19 @@ namespace Platforms
                 _platform.RegisterModuleOnSockets(this, occupiesSockets: true, _boundSocketIndices);
         }
 
-        /// Computes which socket indices this module should bind to based on its position
-        /// Socket ordering is clockwise from bottom-left: South → East → North → West
-        /// Mark 0 is always the first socket in clockwise direction for each edge
+        /// Computes which socket indices this module should bind to
+        /// Gets sizeAlongMeters nearest sockets from module's world position
         ///
         private List<int> ComputeSocketIndices(GamePlatform platform)
         {
-            var socketIndices = new List<int>();
-            if (!platform) return socketIndices;
-
-            // Get module position in platform's local space
-            Vector3 localPosition = ((Component)platform).transform.InverseTransformPoint(transform.position);
-            float halfWidth = platform.Footprint.x * 0.5f;
-            float halfLength = platform.Footprint.y * 0.5f;
-
-            // Find nearest edge
-            float distanceToNorth = Mathf.Abs(localPosition.z - (+halfLength));
-            float distanceToSouth = Mathf.Abs(localPosition.z - (-halfLength));
-            float distanceToEast = Mathf.Abs(localPosition.x - (+halfWidth));
-            float distanceToWest = Mathf.Abs(localPosition.x - (-halfWidth));
-
-            GamePlatform.Edge selectedEdge;
-            int edgeLengthInSegments;
-            float normalizedPosition;
-
-            // Socket ordering (clockwise from bottom-left):
-            // South: left→right (mark 0 = left, uses +X direction)
-            // East: bottom→top (mark 0 = bottom, uses +Z direction)
-            // North: right→left (mark 0 = right, uses -X direction)
-            // West: top→bottom (mark 0 = top, uses -Z direction)
-
-            if (attachEdge != EdgeOverride.Auto)
-            {
-                switch (attachEdge)
-                {
-                    case EdgeOverride.North:
-                        selectedEdge = GamePlatform.Edge.North;
-                        edgeLengthInSegments = platform.Footprint.x;
-                        // North goes right-to-left, so mark 0 is at +halfWidth
-                        normalizedPosition = halfWidth - localPosition.x;
-                        break;
-                    case EdgeOverride.South:
-                        selectedEdge = GamePlatform.Edge.South;
-                        edgeLengthInSegments = platform.Footprint.x;
-                        // South goes left-to-right, so mark 0 is at -halfWidth
-                        normalizedPosition = localPosition.x + halfWidth;
-                        break;
-                    case EdgeOverride.East:
-                        selectedEdge = GamePlatform.Edge.East;
-                        edgeLengthInSegments = platform.Footprint.y;
-                        // East goes bottom-to-top, so mark 0 is at -halfLength
-                        normalizedPosition = localPosition.z + halfLength;
-                        break;
-                    default: // West
-                        selectedEdge = GamePlatform.Edge.West;
-                        edgeLengthInSegments = platform.Footprint.y;
-                        // West goes top-to-bottom, so mark 0 is at +halfLength
-                        normalizedPosition = halfLength - localPosition.z;
-                        break;
-                }
-            }
-            else
-            {
-                // Auto-detect nearest edge
-                if (distanceToNorth <= distanceToSouth && distanceToNorth <= distanceToEast && distanceToNorth <= distanceToWest)
-                {
-                    selectedEdge = GamePlatform.Edge.North;
-                    edgeLengthInSegments = platform.Footprint.x;
-                    normalizedPosition = halfWidth - localPosition.x;
-                }
-                else if (distanceToSouth <= distanceToNorth && distanceToSouth <= distanceToEast && distanceToSouth <= distanceToWest)
-                {
-                    selectedEdge = GamePlatform.Edge.South;
-                    edgeLengthInSegments = platform.Footprint.x;
-                    normalizedPosition = localPosition.x + halfWidth;
-                }
-                else if (distanceToEast <= distanceToWest)
-                {
-                    selectedEdge = GamePlatform.Edge.East;
-                    edgeLengthInSegments = platform.Footprint.y;
-                    normalizedPosition = localPosition.z + halfLength;
-                }
-                else
-                {
-                    selectedEdge = GamePlatform.Edge.West;
-                    edgeLengthInSegments = platform.Footprint.y;
-                    normalizedPosition = halfLength - localPosition.z;
-                }
-            }
-
-            int totalEdgeSegments = edgeLengthInSegments;
-
-            // Calculate which segment(s) this module covers
-            int centerSegmentIndex = Mathf.Clamp(
-                Mathf.RoundToInt(normalizedPosition - 0.5f), 
-                0, 
-                Mathf.Max(0, totalEdgeSegments - 1));
-
-            int moduleSizeInSegments = Mathf.Max(1, sizeAlongMeters);
-            int startSegmentIndex = Mathf.Clamp(
-                centerSegmentIndex - moduleSizeInSegments / 2, 
-                0, 
-                Mathf.Max(0, totalEdgeSegments - moduleSizeInSegments));
-            int endSegmentIndex = startSegmentIndex + (moduleSizeInSegments - 1);
-
-            for (int segmentIndex = startSegmentIndex; segmentIndex <= endSegmentIndex; segmentIndex++)
-            {
-                int socketIndex = platform.GetSocketIndexByEdgeMark(selectedEdge, segmentIndex);
-                if (!socketIndices.Contains(socketIndex)) 
-                    socketIndices.Add(socketIndex);
-            }
-
-            return socketIndices;
+            if (!platform) return new List<int>();
+            
+            // Get the nearest sockets based on module size
+            // maxDistance of 1.5 * sizeAlongMeters covers the module's span with margin
+            int socketCount = Mathf.Max(1, sizeAlongMeters);
+            float maxDistance = socketCount * 1.5f;
+            
+            return platform.GetNearestSocketIndices(transform.position, socketCount, maxDistance);
         }
         
 

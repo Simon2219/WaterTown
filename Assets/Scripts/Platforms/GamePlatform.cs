@@ -279,10 +279,8 @@ public class GamePlatform : MonoBehaviour, IPickupable
     #region Socket Interface Methods & Type Aliases
     
     
-    // Type aliases for external compatibility - maps to PlatformSocketSystem enums
-    public enum Edge { North = 0, East = 1, South = 2, West = 3 }
+    // Socket status enum for external compatibility
     public enum SocketStatus { Linkable = 0, Occupied = 1, Connected = 2, Locked = 3, Disabled = 4 }
-    public enum SocketLocation { Edge = 0, Corner = 1 }
     
     /// Access to socket system (read-only list)
     public IReadOnlyList<PlatformSocketSystem.SocketData> Sockets => _socketSystem?.PlatformSockets;
@@ -306,26 +304,12 @@ public class GamePlatform : MonoBehaviour, IPickupable
         => _socketSystem?.IsSocketConnected(socketIndex) ?? false;
 
 
-    public int EdgeLengthMeters(Edge edge) 
-        => _socketSystem?.EdgeLengthMeters((PlatformSocketSystem.Edge)(int)edge) ?? 0;
-
-
-    public void GetSocketIndexRangeForEdge(Edge edge, out int startIndex, out int endIndex)
-    {
-        _socketSystem.GetSocketIndexRangeForEdge((PlatformSocketSystem.Edge)(int)edge, out startIndex, out endIndex);
-    }
-
-
-    public int GetSocketIndexByEdgeMark(Edge edge, int mark) 
-        => _socketSystem?.GetSocketIndexByEdgeMark((PlatformSocketSystem.Edge)(int)edge, mark) ?? 0;
-
-
     public int GetNearestSocketIndex(Vector3 worldPos) 
         => _socketSystem?.GetNearestSocketIndex(worldPos) ?? -1;
 
 
-    public void GetNearestSocketIndicesLocal(Vector3 localPos, int maxCount, float maxDistance, List<int> result)
-        => _socketSystem?.GetNearestSocketIndicesLocal(localPos, maxCount, maxDistance, result);
+    public List<int> GetNearestSocketIndices(Vector3 worldPos, int maxCount, float maxDistance)
+        => _socketSystem?.GetNearestSocketIndices(worldPos, maxCount, maxDistance) ?? new List<int>();
 
 
     public Vector3 GetSocketWorldOutwardDirection(int socketIndex) 
@@ -350,22 +334,6 @@ public class GamePlatform : MonoBehaviour, IPickupable
 
     public void BuildSockets() 
         => _socketSystem?.ReBuildSockets();
-    
-    
-    public int GetNextSocketIndex(int socketIndex)
-        => _socketSystem?.GetNextSocketIndex(socketIndex) ?? -1;
-    
-    
-    public int GetPreviousSocketIndex(int socketIndex)
-        => _socketSystem?.GetPreviousSocketIndex(socketIndex) ?? -1;
-    
-    
-    public (int previous, int next) GetNeighborSocketIndices(int socketIndex)
-        => _socketSystem?.GetNeighborSocketIndices(socketIndex) ?? (-1, -1);
-    
-    
-    public List<int> GetNearestSocketIndices(Vector3 worldPos, int maxCount, float maxDistance)
-        => _socketSystem?.GetNearestSocketIndices(worldPos, maxCount, maxDistance) ?? new List<int>();
     
     
     #endregion

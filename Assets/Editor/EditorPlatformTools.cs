@@ -96,30 +96,13 @@ namespace Editor
         
         
         
-        /// Finds nearest socket indices to a local position in editor mode
+        /// Gets nearest socket indices within maxDistance (for posts that span multiple sockets)
         ///
-        public static void GetNearestSocketIndicesLocal(GamePlatform platform, Vector3 localPos, int maxCount, float maxDistance, List<int> result)
+        public static List<int> GetNearestSocketIndices(GamePlatform platform, Vector3 localPos, int maxCount, float maxDistance)
         {
-            var socketSystem = GetSocketSystem(platform);
-            socketSystem?.GetNearestSocketIndicesLocal(localPos, maxCount, maxDistance, result);
-        }
-        
-        
-        /// Gets the next socket index in clockwise direction (with wrap-around)
-        ///
-        public static int GetNextSocketIndex(GamePlatform platform, int socketIndex)
-        {
-            var socketSystem = GetSocketSystem(platform);
-            return socketSystem?.GetNextSocketIndex(socketIndex) ?? -1;
-        }
-        
-        
-        /// Gets the previous socket index in counter-clockwise direction (with wrap-around)
-        ///
-        public static int GetPreviousSocketIndex(GamePlatform platform, int socketIndex)
-        {
-            var socketSystem = GetSocketSystem(platform);
-            return socketSystem?.GetPreviousSocketIndex(socketIndex) ?? -1;
+            if (!platform) return new List<int>();
+            Vector3 worldPos = platform.transform.TransformPoint(localPos);
+            return platform.GetNearestSocketIndices(worldPos, maxCount, maxDistance);
         }
         
         
