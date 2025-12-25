@@ -321,7 +321,7 @@ public class GamePlatform : MonoBehaviour, IPickupable
 
 
     public int FindNearestSocketIndexLocal(Vector3 localPos) 
-        => _socketSystem?.FindNearestSocketIndexLocal(localPos) ?? -1;
+        => _socketSystem?.FindNearestSocketIndex(transform.TransformPoint(localPos)) ?? -1;
 
 
     public void FindNearestSocketIndicesLocal(Vector3 localPos, int maxCount, float maxDistance, List<int> result)
@@ -329,7 +329,7 @@ public class GamePlatform : MonoBehaviour, IPickupable
 
 
     public int FindNearestSocketIndexWorld(Vector3 worldPos) 
-        => _socketSystem?.FindNearestSocketIndexWorld(worldPos) ?? -1;
+        => _socketSystem?.FindNearestSocketIndex(worldPos) ?? -1;
 
 
     public Vector3 GetSocketWorldOutwardDirection(int socketIndex) 

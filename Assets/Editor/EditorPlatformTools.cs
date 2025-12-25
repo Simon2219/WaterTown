@@ -95,15 +95,6 @@ namespace Editor
         // in editor prefab mode. Socket statuses are calculated at runtime.
         
         
-        /// <summary>
-        /// Finds the nearest socket index to a local position in editor mode.
-        /// </summary>
-        public static int FindNearestSocketIndexLocal(GamePlatform platform, Vector3 localPos)
-        {
-            var socketSystem = GetSocketSystem(platform);
-            return socketSystem?.FindNearestSocketIndexLocal(localPos) ?? -1;
-        }
-        
         
         /// <summary>
         /// Finds nearest socket indices to a local position in editor mode.

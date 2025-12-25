@@ -75,7 +75,7 @@ public class PlatformSocketSystem : MonoBehaviour
     {
         [SerializeField, HideInInspector] private int index;
         [SerializeField, HideInInspector] private Vector2Int currentGridCell;
-        [SerializeField, HideInInspector] private Vector3 localPos;
+        [SerializeField, HideInInspector] private Vector3 localPos; //Only gets set on Initialization, then stays
         [SerializeField, HideInInspector] private Vector2Int outwardOffset;
         [SerializeField] private SocketStatus status;
         
@@ -92,6 +92,12 @@ public class PlatformSocketSystem : MonoBehaviour
         { 
             get => index; 
             private set => index = value;
+        }
+
+        public Vector2Int CurrentGridCell
+        {
+            get => currentGridCell;
+            private set => currentGridCell = value;
         }
 
         public Vector3 LocalPos
@@ -129,13 +135,13 @@ public class PlatformSocketSystem : MonoBehaviour
         }
         
 
-        public void SetStatus(SocketStatus s) => status = s;
+        public void SetStatus(SocketStatus s) => Status = s;
         
-        public SocketStatus GetStatus() => status;
+        public SocketStatus GetStatus() => Status;
         
         internal void SetWorldPosition(Vector3 pos) => WorldPos = pos;
         
-        internal void SetCurrentGridCell(Vector2Int cell) => currentGridCell = cell;
+        internal void SetCurrentGridCell(Vector2Int cell) => CurrentGridCell = cell;
     }
     
     
@@ -340,7 +346,7 @@ public class PlatformSocketSystem : MonoBehaviour
     {
         foreach (var socket in _platformSockets)
         {
-            socket.SetWorldPosition(transform.TransformPoint(socket.LocalPos));
+            socket.SetWorldPosition(transform.TransformPoint(socket.LocalPos)); //Local pos is always the same relative to platform
             socket.SetCurrentGridCell(_worldGrid.WorldToCell(socket.WorldPos));
         }
     }
@@ -467,19 +473,20 @@ public class PlatformSocketSystem : MonoBehaviour
                 return 2 * width + length + mark;
         }
     }
-
-
     
-    /// Return the single nearest socket index to a local position
-    /// 
-    public int FindNearestSocketIndexLocal(Vector3 localPos)
+
+
+    public int FindNearestSocketIndex(Vector3 worldPos)
     {
+        Vector2Int gridCell = _worldGrid.WorldToCell(worldPos);
+        
+        List<SocketData> socketsInCell = _platformSockets.Where(socket => socket.CurrentGridCell == gridCell).ToList();
+        
         int best = -1;
         float bestD = float.MaxValue;
-
-        for (int i = 0; i < _platformSockets.Count; i++)
+        for (int i = 0; i < socketsInCell.Count(); i++)
         {
-            float d = Vector3.SqrMagnitude(localPos - _platformSockets[i].LocalPos);
+            float d = Vector3.SqrMagnitude(worldPos - _platformSockets[i].WorldPos);
             if (d < bestD)
             {
                 bestD = d;
@@ -487,14 +494,6 @@ public class PlatformSocketSystem : MonoBehaviour
             }
         }
         return best;
-    }
-
-
-    public int FindNearestSocketIndex(Vector3 worldPos)
-    {
-        Vector2Int gridCell = _worldGrid.WorldToCell(worldPos);
-        
-        
     }
 
     /// Finds up to maxCount nearest socket indices to localPos within maxDistance
@@ -519,13 +518,27 @@ public class PlatformSocketSystem : MonoBehaviour
     }
 
 
-    /// Convenience: find nearest socket to a WORLD position
-    public int FindNearestSocketIndexWorld(Vector3 worldPos)
+
+    public List<int> GetNearestSocketIndices(Vector3 worldPos, int maxCount, float maxDistance)
     {
-        Vector3 local = transform.InverseTransformPoint(worldPos);
-        return FindNearestSocketIndexLocal(local);
+
+        List<int> result = new();
+        int closestIndex = FindNearestSocketIndex(worldPos);
+        
+        while (result.Count < maxCount)
+        {
+            int currentSocket = closestIndex;
+            int neighbor1 = closestIndex - 1;
+            int neighbor2 = closestIndex + 1;
+            
+            if(!result.Contains(closestIndex)) result.Add(closestIndex);
+            
+            
+        }
+
+
+
     }
-    
     
     #endregion
     

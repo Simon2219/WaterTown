@@ -43,7 +43,7 @@ MonoBehaviour:
     width: 1536
     height: 813.60004
   m_ShowMode: 0
-  m_Title: Console
+  m_Title: Hierarchy
   m_RootView: {fileID: 9}
   m_MinSize: {x: 300, y: 112}
   m_MaxSize: {x: 24288, y: 16192}
@@ -2141,7 +2141,7 @@ MonoBehaviour:
     m_SelectedInstanceIDs:
     - m_Data: 54040
     m_LastClickedInstanceID: 54040
-    m_HadKeyboardFocusLastEvent: 1
+    m_HadKeyboardFocusLastEvent: 0
     m_ExpandedInstanceIDs: []
     m_RenameOverlay:
       m_UserAcceptedRename: 0
