@@ -1,5 +1,7 @@
 #if UNITY_EDITOR
 using System.Collections.Generic;
+using System.Reflection;
+using Grid;
 using Platforms;
 using UnityEditor;
 using UnityEngine;
@@ -57,16 +59,31 @@ namespace Editor
         #region Socket Operations
         
         
-        /// <summary>
-        /// Builds sockets for a platform in editor mode.
-        /// </summary>
+        /// Builds sockets for a platform in editor mode
+        /// Sets WorldGrid reference if available (scene mode)
+        ///
         public static void BuildSockets(GamePlatform platform)
         {
             var socketSystem = GetSocketSystem(platform);
-            if (socketSystem)
-            {
-                socketSystem.ReBuildSockets(platform.Footprint);
-            }
+            if (!socketSystem) return;
+            
+            // Try to set WorldGrid reference for cell mapping (only works in scene, not prefab mode)
+            SetWorldGridReference(socketSystem);
+            
+            socketSystem.ReBuildSockets(platform.Footprint);
+        }
+        
+        
+        /// Sets the WorldGrid reference on a socket system via reflection
+        /// Required for cell-to-socket mapping to work in editor
+        ///
+        private static void SetWorldGridReference(PlatformSocketSystem socketSystem)
+        {
+            var worldGrid = Object.FindFirstObjectByType<WorldGrid>();
+            if (!worldGrid) return;
+            
+            var field = typeof(PlatformSocketSystem).GetField("_worldGrid", BindingFlags.NonPublic | BindingFlags.Instance);
+            field?.SetValue(socketSystem, worldGrid);
         }
         
         
@@ -103,6 +120,9 @@ namespace Editor
         {
             var socketSystem = GetSocketSystem(platform);
             if (socketSystem == null) return;
+            
+            // Ensure WorldGrid is set for cell lookup
+            SetWorldGridReference(socketSystem);
             
             Vector3 worldPos = ((Component)platform).transform.TransformPoint(localPos);
             socketSystem.FindNearestSocketIndices(worldPos, maxCount, maxDistance, result);
