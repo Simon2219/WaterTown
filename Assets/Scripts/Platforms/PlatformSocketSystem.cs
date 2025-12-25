@@ -29,6 +29,9 @@ public class PlatformSocketSystem : MonoBehaviour
     private readonly Dictionary<PlatformModule, ModuleReg> _moduleRegs = new();
     private readonly Dictionary<int, PlatformModule> _socketToModules = new();
     
+    // Cell to socket indices lookup for O(1) access
+    private readonly Dictionary<Vector2Int, List<int>> _cellToSockets = new();
+    
     
     [Header("Sockets")]
     [SerializeField] private List<SocketData> _platformSockets = new();
@@ -335,13 +338,27 @@ public class PlatformSocketSystem : MonoBehaviour
 
 
     
-    /// Updates world positions for all sockets based on current transform
+    /// Updates world positions for all sockets and rebuilds cell-to-socket lookup
+    ///
     private void UpdateSocketPositions()
     {
-        foreach (var socket in _platformSockets)
+        _cellToSockets.Clear();
+        
+        for (int i = 0; i < _platformSockets.Count; i++)
         {
-            socket.SetWorldPosition(transform.TransformPoint(socket.LocalPos)); //Local pos is always the same relative to platform
-            socket.SetCurrentGridCell(_worldGrid.WorldToCell(socket.WorldPos));
+            var socket = _platformSockets[i];
+            socket.SetWorldPosition(transform.TransformPoint(socket.LocalPos));
+            
+            Vector2Int cell = _worldGrid.WorldToCell(socket.WorldPos);
+            socket.SetCurrentGridCell(cell);
+            
+            // Build cell lookup (perimeter cells have 1-2 sockets each)
+            if (!_cellToSockets.TryGetValue(cell, out var list))
+            {
+                list = new List<int>(2);
+                _cellToSockets[cell] = list;
+            }
+            list.Add(i);
         }
     }
     
@@ -401,11 +418,51 @@ public class PlatformSocketSystem : MonoBehaviour
     
     
     /// Gets the nearest socket index to a world position
+    /// Uses cell-to-socket lookup for O(1) access
     ///
     public int GetNearestSocketIndex(Vector3 worldPos)
     {
         if (_platformSockets.Count == 0) return -1;
-        return CalculateNearestSocketIndex(transform.InverseTransformPoint(worldPos));
+        
+        Vector2Int cell = _worldGrid.WorldToCell(worldPos);
+        
+        int best = -1;
+        float bestDistSqr = float.MaxValue;
+        
+        // Check sockets in this cell
+        if (_cellToSockets.TryGetValue(cell, out var socketsInCell))
+        {
+            foreach (int idx in socketsInCell)
+            {
+                float distSqr = Vector3.SqrMagnitude(worldPos - _platformSockets[idx].WorldPos);
+                if (distSqr < bestDistSqr)
+                {
+                    bestDistSqr = distSqr;
+                    best = idx;
+                }
+            }
+        }
+        
+        // For positions on cell boundaries (posts), check adjacent cells
+        if (best < 0 || IsNearCellBoundary(worldPos, cell))
+        {
+            foreach (var neighborCell in _worldGrid.GetNeighborCells(cell))
+            {
+                if (!_cellToSockets.TryGetValue(neighborCell, out var neighborSockets)) continue;
+                
+                foreach (int idx in neighborSockets)
+                {
+                    float distSqr = Vector3.SqrMagnitude(worldPos - _platformSockets[idx].WorldPos);
+                    if (distSqr < bestDistSqr)
+                    {
+                        bestDistSqr = distSqr;
+                        best = idx;
+                    }
+                }
+            }
+        }
+        
+        return best;
     }
     
     
@@ -429,16 +486,14 @@ public class PlatformSocketSystem : MonoBehaviour
         result.Add(startIndex);
         if (maxCount == 1) return result;
         
-        // Walk outward in both directions using continuous ordering
+        // Walk outward in both directions using continuous perimeter ordering
         int totalSockets = _platformSockets.Count;
         int offset = 1;
         
         while (result.Count < maxCount && offset <= totalSockets / 2)
         {
-            int prevIndex = WrapSocketIndex(startIndex - offset);
-            int nextIndex = WrapSocketIndex(startIndex + offset);
-            
-            // Add previous neighbor if within range
+            // Previous neighbor (counter-clockwise)
+            int prevIndex = (startIndex - offset + totalSockets) % totalSockets;
             if (!result.Contains(prevIndex))
             {
                 float distSqr = Vector3.SqrMagnitude(worldPos - _platformSockets[prevIndex].WorldPos);
@@ -448,7 +503,8 @@ public class PlatformSocketSystem : MonoBehaviour
             
             if (result.Count >= maxCount) break;
             
-            // Add next neighbor if within range
+            // Next neighbor (clockwise)
+            int nextIndex = (startIndex + offset) % totalSockets;
             if (!result.Contains(nextIndex))
             {
                 float distSqr = Vector3.SqrMagnitude(worldPos - _platformSockets[nextIndex].WorldPos);
@@ -463,72 +519,18 @@ public class PlatformSocketSystem : MonoBehaviour
     }
     
     
-    /// Calculates nearest socket from local position using perimeter geometry
+    /// Checks if position is near a cell boundary (for posts between cells)
     ///
-    private int CalculateNearestSocketIndex(Vector3 localPos)
+    private bool IsNearCellBoundary(Vector3 worldPos, Vector2Int cell)
     {
-        var footprint = GetFootprint();
-        int width = footprint.x;
-        int length = footprint.y;
-        float halfWidth = width * 0.5f;
-        float halfLength = length * 0.5f;
+        Vector3 cellCenter = _worldGrid.GetCellCenter(cell);
+        const float boundaryThreshold = 0.1f;
+        float halfCell = WorldGrid.CellSize * 0.5f;
         
-        // Distance to each edge
-        float distSouth = Mathf.Abs(localPos.z + halfLength);
-        float distNorth = Mathf.Abs(localPos.z - halfLength);
-        float distEast = Mathf.Abs(localPos.x - halfWidth);
-        float distWest = Mathf.Abs(localPos.x + halfWidth);
+        float offsetX = Mathf.Abs(worldPos.x - cellCenter.x);
+        float offsetZ = Mathf.Abs(worldPos.z - cellCenter.z);
         
-        int socketIndex;
-        
-        // Calculate socket index directly based on nearest edge
-        // Socket layout (clockwise from bottom-left): South(0..w-1), East(w..w+l-1), North(w+l..2w+l-1), West(2w+l..2w+2l-1)
-        if (distSouth <= distNorth && distSouth <= distEast && distSouth <= distWest)
-        {
-            // South edge: left to right
-            int mark = Mathf.Clamp(Mathf.RoundToInt(localPos.x + halfWidth - 0.5f), 0, width - 1);
-            socketIndex = mark;
-        }
-        else if (distEast <= distNorth && distEast <= distWest)
-        {
-            // East edge: bottom to top
-            int mark = Mathf.Clamp(Mathf.RoundToInt(localPos.z + halfLength - 0.5f), 0, length - 1);
-            socketIndex = width + mark;
-        }
-        else if (distNorth <= distWest)
-        {
-            // North edge: right to left
-            int mark = Mathf.Clamp(Mathf.RoundToInt(halfWidth - localPos.x - 0.5f), 0, width - 1);
-            socketIndex = width + length + mark;
-        }
-        else
-        {
-            // West edge: top to bottom
-            int mark = Mathf.Clamp(Mathf.RoundToInt(halfLength - localPos.z - 0.5f), 0, length - 1);
-            socketIndex = 2 * width + length + mark;
-        }
-        
-        // Refine: check if neighbor sockets are actually closer (handles corners)
-        int prevSocket = WrapSocketIndex(socketIndex - 1);
-        int nextSocket = WrapSocketIndex(socketIndex + 1);
-        
-        float distCurrent = Vector3.SqrMagnitude(localPos - _platformSockets[socketIndex].LocalPos);
-        float distPrev = Vector3.SqrMagnitude(localPos - _platformSockets[prevSocket].LocalPos);
-        float distNext = Vector3.SqrMagnitude(localPos - _platformSockets[nextSocket].LocalPos);
-        
-        if (distPrev < distCurrent && distPrev <= distNext) return prevSocket;
-        if (distNext < distCurrent) return nextSocket;
-        
-        return socketIndex;
-    }
-    
-    
-    /// Wraps socket index for continuous perimeter traversal
-    ///
-    private int WrapSocketIndex(int index)
-    {
-        int count = _platformSockets.Count;
-        return ((index % count) + count) % count;
+        return offsetX > halfCell - boundaryThreshold || offsetZ > halfCell - boundaryThreshold;
     }
     
     #endregion
