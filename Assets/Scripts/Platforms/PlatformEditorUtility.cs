@@ -132,8 +132,15 @@ namespace Platforms
 
                 if (GizmoSettings.ShowIndices)
                 {
-                    // Show socket index and status (simpler label without edge/mark)
-                    string label = $"#{i} {s.Status}";
+                    // Reconstruct pseudo edge+mark only for labeling (for debug)
+                    PlatformSocketSystem.Edge edge;
+                    int mark;
+                    if (i < footprintWidth)                { edge = PlatformSocketSystem.Edge.North; mark = i; }
+                    else if (i < 2 * footprintWidth)       { edge = PlatformSocketSystem.Edge.South; mark = i - footprintWidth; }
+                    else if (i < 2 * footprintWidth + footprintLength)   { edge = PlatformSocketSystem.Edge.East;  mark = i - 2 * footprintWidth; }
+                    else                      { edge = PlatformSocketSystem.Edge.West;  mark = i - (2 * footprintWidth + footprintLength); }
+
+                    string label = $"#{i} [{edge}:{mark}] {s.Status}";
                     UnityEditor.Handles.Label(wp + Vector3.up * 0.05f, label);
                 }
             }

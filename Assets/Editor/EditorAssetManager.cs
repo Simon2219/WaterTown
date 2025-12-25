@@ -379,7 +379,9 @@ namespace Editor
             }
 
             // ---- POSTS: corner + intermediate posts; bind to nearest 1–2 sockets ----
-            
+            List<int> tmpSockets = new();
+
+            // Corner + edge post positions (same layout as old code, but we compute neighbors via nearest sockets)
             // North edge posts: z=+hz, x=-hx..+hx
             for (int i = 0; i <= wCells; i++)
             {
@@ -401,8 +403,9 @@ namespace Editor
                 t.localPosition = new Vector3(x, yLocal, z);
 
                 // Bind to up to 2 nearest sockets
-                var postSockets = EditorPlatformTools.GetNearestSocketIndices(gp, t.localPosition, 2, 1.5f);
-                CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, postSockets.ToArray());
+                tmpSockets.Clear();
+                EditorPlatformTools.FindNearestSocketIndicesLocal(gp, t.localPosition, maxCount: 2, maxDistance: 1.5f, result: tmpSockets);
+                CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, tmpSockets.ToArray());
             }
 
             // South edge posts: z=-hz
@@ -425,8 +428,9 @@ namespace Editor
                 var t = go.transform;
                 t.localPosition = new Vector3(x, yLocal, z);
 
-                var postSockets = EditorPlatformTools.GetNearestSocketIndices(gp, t.localPosition, 2, 1.5f);
-                CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, postSockets.ToArray());
+                tmpSockets.Clear();
+                EditorPlatformTools.FindNearestSocketIndicesLocal(gp, t.localPosition, maxCount: 2, maxDistance: 1.5f, result: tmpSockets);
+                CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, tmpSockets.ToArray());
             }
 
             // East edge intermediate posts (skip corners)
@@ -444,8 +448,9 @@ namespace Editor
                 var t = go.transform;
                 t.localPosition = new Vector3(x, yLocal, z);
 
-                var postSockets = EditorPlatformTools.GetNearestSocketIndices(gp, t.localPosition, 2, 1.5f);
-                CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, postSockets.ToArray());
+                tmpSockets.Clear();
+                EditorPlatformTools.FindNearestSocketIndicesLocal(gp, t.localPosition, maxCount: 2, maxDistance: 1.5f, result: tmpSockets);
+                CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, tmpSockets.ToArray());
             }
 
             // West edge intermediate posts (skip corners)
@@ -463,8 +468,9 @@ namespace Editor
                 var t = go.transform;
                 t.localPosition = new Vector3(x, yLocal, z);
 
-                var postSockets = EditorPlatformTools.GetNearestSocketIndices(gp, t.localPosition, 2, 1.5f);
-                CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, postSockets.ToArray());
+                tmpSockets.Clear();
+                EditorPlatformTools.FindNearestSocketIndicesLocal(gp, t.localPosition, maxCount: 2, maxDistance: 1.5f, result: tmpSockets);
+                CreateRailingComponent(go, gp, PlatformRailing.RailingType.Post, tmpSockets.ToArray());
             }
 
             EditorGUIUtility.PingObject(railingsParent);
