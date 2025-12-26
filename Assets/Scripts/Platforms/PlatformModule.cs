@@ -189,11 +189,9 @@ namespace Platforms
             int startSegmentIndex = Mathf.Clamp(centerSegmentIndex - moduleSizeInSegments / 2, 0, Mathf.Max(0, totalEdgeSegments - moduleSizeInSegments));
             int endSegmentIndex = startSegmentIndex + (moduleSizeInSegments - 1); // inclusive
 
-            // Get socket range for the selected edge and compute indices
-            platform.GetSocketIndexRangeForEdge(selectedEdge, out int edgeStartSocket, out int _);
             for (int segmentIndex = startSegmentIndex; segmentIndex <= endSegmentIndex; segmentIndex++)
             {
-                int socketIndex = edgeStartSocket + segmentIndex;
+                int socketIndex = platform.GetSocketIndexByEdgeMark(selectedEdge, segmentIndex);
                 if (!socketIndices.Contains(socketIndex)) socketIndices.Add(socketIndex);
             }
 

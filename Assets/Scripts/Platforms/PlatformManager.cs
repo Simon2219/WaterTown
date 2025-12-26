@@ -600,8 +600,9 @@ public class PlatformManager : MonoBehaviour
         _isRecomputingAdjacency = true;
 
         // Update socket statuses for all affected platforms (for railing visibility, etc.)
-        foreach (var platform in _platformsNeedingUpdate.Where(platform => platform && platform.isActiveAndEnabled))
+        foreach (var platform in _platformsNeedingUpdate)
         {
+            if (!platform || !platform.isActiveAndEnabled) continue;
             platform.RefreshSocketStatuses();
         }
 

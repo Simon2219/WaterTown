@@ -266,7 +266,9 @@ public class GamePlatform : MonoBehaviour, IPickupable
     
     private void OnSocketsChanged()
     {
+        // Refresh railing visibility when socket connections change
         _railingSystem?.RefreshAllRailingsVisibility();
+        
         ConnectionsChanged?.Invoke(this);
     }
     
@@ -304,10 +306,8 @@ public class GamePlatform : MonoBehaviour, IPickupable
         => _socketSystem?.IsSocketConnected(socketIndex) ?? false;
 
 
-    public int EdgeLengthMeters(Edge edge)
-    {
-        return edge is Edge.North or Edge.South ? footprintSize.x : footprintSize.y;
-    }
+    public int EdgeLengthMeters(Edge edge) 
+        => _socketSystem?.EdgeLengthMeters((PlatformSocketSystem.Edge)(int)edge) ?? 0;
 
 
     public void GetSocketIndexRangeForEdge(Edge edge, out int startIndex, out int endIndex)
@@ -316,16 +316,20 @@ public class GamePlatform : MonoBehaviour, IPickupable
     }
 
 
+    public int GetSocketIndexByEdgeMark(Edge edge, int mark) 
+        => _socketSystem?.GetSocketIndexByEdgeMark((PlatformSocketSystem.Edge)(int)edge, mark) ?? 0;
+
+
     public int FindNearestSocketIndexLocal(Vector3 localPos) 
-        => _socketSystem?.FindNearestSocketIndex(transform.TransformPoint(localPos)) ?? -1;
+        => _socketSystem?.FindNearestSocketIndexLocal(localPos) ?? -1;
 
 
-    public List<int> FindNearestSocketIndices(Vector3 worldPos, int maxCount, float maxDistance)
-        => _socketSystem?.FindNearestSocketIndices(worldPos, maxCount, maxDistance);
+    public void FindNearestSocketIndicesLocal(Vector3 localPos, int maxCount, float maxDistance, List<int> result)
+        => _socketSystem?.FindNearestSocketIndicesLocal(localPos, maxCount, maxDistance, result);
 
 
-    public int FindNearestSocketIndex(Vector3 worldPos) 
-        => _socketSystem?.FindNearestSocketIndex(worldPos) ?? -1;
+    public int FindNearestSocketIndexWorld(Vector3 worldPos) 
+        => _socketSystem?.FindNearestSocketIndexWorld(worldPos) ?? -1;
 
 
     public Vector3 GetSocketWorldOutwardDirection(int socketIndex) 
@@ -334,7 +338,10 @@ public class GamePlatform : MonoBehaviour, IPickupable
 
     public Vector2Int GetAdjacentCellForSocket(int socketIndex) 
         => _socketSystem?.GetAdjacentCellForSocket(socketIndex) ?? Vector2Int.zero;
-    
+
+
+    public List<int> GetSocketsConnectedToNeighbor(GamePlatform neighbor) 
+        => _socketSystem?.GetSocketsConnectedToNeighbor(neighbor) ?? new List<int>();
 
 
     public void ResetConnections() 

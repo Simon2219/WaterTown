@@ -154,35 +154,32 @@ namespace Editor
                         {
                             if (GUILayout.Button("Run Platform Setup (GamePlatform + Posts & Rails)"))
                             {
-                                try
+                                Undo.RegisterFullObjectHierarchyUndo(root.gameObject, "Platform Setup");
+
+                                var gp = root.GetComponent<GamePlatform>();
+                                if (!gp) gp = Undo.AddComponent<GamePlatform>(root.gameObject);
+
+                                var so = new SerializedObject(gp);
+                                so.FindProperty("footprintSize").vector2IntValue = new Vector2Int(_wCells, _lCells);
+                                so.ApplyModifiedProperties();
+
+                                EditorPlatformTools.BuildSockets(gp);
+                                // Note: RefreshSocketStatuses is NOT called here - it requires runtime dependencies
+                                // (WorldGrid, PlatformManager) that don't exist in editor prefab mode.
+                                // Socket statuses will be calculated at runtime when the platform is placed.
+
+                                SpawnRailingsAndRegister(root, gp, _wCells, _lCells, _railY, _inset,
+                                    _postPrefab, _railPrefab, _railForwardAxis);
+
+                                // Generate A* NavMesh floor geometry
+                                if (_generateNavMeshFloor)
                                 {
-                                    Undo.RegisterFullObjectHierarchyUndo(root.gameObject, "Platform Setup");
-
-                                    var gp = root.GetComponent<GamePlatform>();
-                                    if (!gp) gp = Undo.AddComponent<GamePlatform>(root.gameObject);
-
-                                    var so = new SerializedObject(gp);
-                                    so.FindProperty("footprintSize").vector2IntValue = new Vector2Int(_wCells, _lCells);
-                                    so.ApplyModifiedProperties();
-
-                                    EditorPlatformTools.BuildSockets(gp);
-
-                                    SpawnRailingsAndRegister(root, gp, _wCells, _lCells, _railY, _inset,
-                                        _postPrefab, _railPrefab, _railForwardAxis);
-
-                                    if (_generateNavMeshFloor)
-                                    {
-                                        GenerateNavMeshFloorGeometry(root, _wCells, _lCells,
-                                            _navMeshFloorThickness, _navMeshFloorYOffset, _navMeshFloorExtraExtension);
-                                    }
-
-                                    EditorSceneManager.MarkSceneDirty(root.gameObject.scene);
-                                    EditorGUIUtility.PingObject(root);
+                                    GenerateNavMeshFloorGeometry(root, _wCells, _lCells,
+                                        _navMeshFloorThickness, _navMeshFloorYOffset, _navMeshFloorExtraExtension);
                                 }
-                                catch (System.Exception e)
-                                {
-                                    Debug.LogError($"[EditorAssetManager] Platform Setup failed: {e.Message}\n{e.StackTrace}");
-                                }
+
+                                EditorSceneManager.MarkSceneDirty(root.gameObject.scene);
+                                EditorGUIUtility.PingObject(root);
                             }
                         }
 
@@ -345,7 +342,6 @@ namespace Editor
 
                 pr.type = type;
                 pr._platform = platform;
-                pr._railingSystem = EditorPlatformTools.GetRailingSystem(platform);
                 pr.SetSocketIndices(socketIndices);
 
                 pr.EnsureRegistered();
