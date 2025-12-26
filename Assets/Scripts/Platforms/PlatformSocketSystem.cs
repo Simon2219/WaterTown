@@ -178,7 +178,6 @@ public class PlatformSocketSystem : MonoBehaviour
     
     private void OnPlatformMoved(GamePlatform platform)
     {
-        Debug.Log($"[PlatformSocketSystem] {gameObject.name}: OnPlatformMoved - updating socket world positions");
         UpdateSocketPositions();
     }
     
@@ -354,26 +353,46 @@ public class PlatformSocketSystem : MonoBehaviour
     
     public bool AllSocketsConnected(int[] socketIndices)
     {
-        if (socketIndices.Length == 0 || socketIndices.Length >= _platformSockets.Count)
+        if (socketIndices == null || socketIndices.Length == 0)
             return false;
         
-        bool isVisible = socketIndices
-            .All(socketIndex => _platformSockets[socketIndex].Status == SocketStatus.Connected);
+        int socketCount = _platformSockets.Count;
         
-        return isVisible;
+        foreach (int idx in socketIndices)
+        {
+            // Validate index is in bounds
+            if (idx < 0 || idx >= socketCount)
+                return false;
+            
+            // Check if this socket is connected
+            if (_platformSockets[idx].Status != SocketStatus.Connected)
+                return false;
+        }
+        
+        return true;
     }
     
     
     
     public bool AnySocketsConnected(int[] socketIndices)
     {
-        if (socketIndices.Length == 0 || socketIndices.Length >= _platformSockets.Count)
+        if (socketIndices == null || socketIndices.Length == 0)
             return false;
 
-        bool anyConnected = socketIndices
-            .Any(socketIndex => _platformSockets[socketIndex].Status == SocketStatus.Connected);
+        int socketCount = _platformSockets.Count;
         
-        return anyConnected;
+        foreach (int idx in socketIndices)
+        {
+            // Skip invalid indices
+            if (idx < 0 || idx >= socketCount)
+                continue;
+            
+            // Return true as soon as we find a connected socket
+            if (_platformSockets[idx].Status == SocketStatus.Connected)
+                return true;
+        }
+        
+        return false;
     }
 
 
@@ -680,11 +699,8 @@ public class PlatformSocketSystem : MonoBehaviour
                 anyChanged = true;
         }
         
-        Debug.Log($"[PlatformSocketSystem] {gameObject.name}: RefreshAllSocketStatuses - {connectedCount} connected, anyChanged={anyChanged}");
-        
         if (anyChanged)
         {
-            Debug.Log($"[PlatformSocketSystem] {gameObject.name}: Invoking SocketsChanged event");
             SocketsChanged?.Invoke();
         }
     }
@@ -709,12 +725,7 @@ public class PlatformSocketSystem : MonoBehaviour
             return SocketStatus.Occupied;
 
         if (cellData == null)
-        {
-            // Only log for a sample of sockets to avoid spam
-            if (socketIndex == 0)
-                Debug.Log($"[PlatformSocketSystem] {gameObject.name} Socket 0: Adjacent cell {adjacentCell} is null → Linkable");
             return SocketStatus.Linkable;
-        }
 
         // Check flags in priority order using HasFlag() for proper [Flags] enum handling
         // Priority: Locked > ModuleBlocked > Occupied/Preview > default (Linkable)
@@ -725,11 +736,7 @@ public class PlatformSocketSystem : MonoBehaviour
             return SocketStatus.Occupied;
         
         if (cellData.HasFlag(CellFlag.Occupied) || cellData.HasFlag(CellFlag.OccupyPreview))
-        {
-            // Log when we find a connection
-            Debug.Log($"[PlatformSocketSystem] {gameObject.name} Socket {socketIndex}: Adjacent cell {adjacentCell} has {cellData.Flags} → Connected");
             return SocketStatus.Connected;
-        }
         
         // Empty or Buildable only = Linkable
         return SocketStatus.Linkable;

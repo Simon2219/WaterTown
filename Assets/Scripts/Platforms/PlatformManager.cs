@@ -93,7 +93,6 @@ public class PlatformManager : MonoBehaviour
         // Batch adjacency recomputation to once per frame for affected platforms only
         if (_platformsNeedingUpdate.Count > 0 && !_isRecomputingAdjacency)
         {
-            Debug.Log($"[PlatformManager] LateUpdate: Processing {_platformsNeedingUpdate.Count} dirty platforms");
             RecomputeAdjacencyForAffectedPlatforms();
         }
     }
@@ -117,7 +116,7 @@ public class PlatformManager : MonoBehaviour
     {
         // Initialize & Inject Dependencies
         platform.InitializePlatform(this, _worldGrid);
-        Debug.Log("OnPlatformCreated");
+        
         // Subscribe to all instance events for this platform
         platform.HasMoved += OnPlatformHasMoved;
         platform.Enabled += OnPlatformEnabled;
@@ -172,13 +171,10 @@ public class PlatformManager : MonoBehaviour
     ///
     private void OnPlatformPlaced(GamePlatform platform)
     {
-        Debug.Log($"[PlatformManager] OnPlatformPlaced: {platform.name} with {platform.occupiedCells?.Count ?? 0} cells, previousCells={platform.previousOccupiedCells?.Count ?? 0}");
-        
         // Clear any leftover preview cells from the last movement (e.g. when placement is cancelled)
         // previousOccupiedCells contains the cells from the last move frame
         if (platform.previousOccupiedCells?.Count > 0)
         {
-            int clearedCount = 0;
             foreach (Vector2Int cell in platform.previousOccupiedCells)
             {
                 // Only clear if this platform still owns the cell
@@ -186,11 +182,8 @@ public class PlatformManager : MonoBehaviour
                 {
                     _worldGrid.GetCell(cell)?.Clear();
                     _cellToPlatform.Remove(cell);
-                    clearedCount++;
                 }
             }
-            if (clearedCount > 0)
-                Debug.Log($"[PlatformManager] Cleared {clearedCount} leftover preview cells");
             platform.previousOccupiedCells.Clear();
         }
         
@@ -209,7 +202,6 @@ public class PlatformManager : MonoBehaviour
     ///
     private void OnPlatformPickedUp(GamePlatform platform)
     {
-        Debug.Log($"[PlatformManager] OnPlatformPickedUp: {platform.name} - clearing cells");
         ClearCellsForPlatform(platform, false);
         
         // Mark affected platforms (neighbors at old position) for adjacency update
@@ -224,7 +216,6 @@ public class PlatformManager : MonoBehaviour
     ///
     private void OnPlatformHasMoved(GamePlatform platform)
     {
-        Debug.Log($"[PlatformManager] OnPlatformHasMoved: {platform.name}");
         UpdateCellsForPlatform(platform);
 
         // Mark this platform and affected neighbors for adjacency update
@@ -555,8 +546,6 @@ public class PlatformManager : MonoBehaviour
             }
         }
 
-        Debug.Log($"[PlatformManager] ClearCellsForPlatform({platform.name}): Cleared {clearedCount} cells, clearOccupation={clearOccupation}");
-
         if (clearOccupation)  
             platform.occupiedCells.Clear();
     }
@@ -584,8 +573,6 @@ public class PlatformManager : MonoBehaviour
                 _cellToPlatform[cell] = platform;
             }
         }
-        
-        Debug.Log($"[PlatformManager] UpdateCellsForPlatform({platform.name}): Set {platform.occupiedCells.Count} cells to {flagToUse}, _cellToPlatform has {_cellToPlatform.Count} entries");
     }
     
     
@@ -629,7 +616,6 @@ public class PlatformManager : MonoBehaviour
             }
         }
 
-        Debug.Log($"[PlatformManager] GetAffectedPlatforms({platform.name}): Found {affected.Count} affected platforms: [{string.Join(", ", affected.Select(p => p.name))}]");
         return affected;
     }
 
@@ -645,8 +631,6 @@ public class PlatformManager : MonoBehaviour
         // Prevent recursive calls during adjacency computation
         if (_isRecomputingAdjacency) return;
         _isRecomputingAdjacency = true;
-
-        Debug.Log($"[PlatformManager] RecomputeAdjacencyForAffectedPlatforms: Updating {_platformsNeedingUpdate.Count} platforms: [{string.Join(", ", _platformsNeedingUpdate.Where(p => p).Select(p => p.name))}]");
 
         // Update socket statuses for all affected platforms (for railing visibility, etc.)
         foreach (var platform in _platformsNeedingUpdate.Where(platform => platform && platform.isActiveAndEnabled))

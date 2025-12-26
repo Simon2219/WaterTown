@@ -61,6 +61,10 @@ public class GamePlatform : MonoBehaviour, IPickupable
     private Quaternion _lastRot;
     private Vector3 _lastScale;
     
+    // Deferred railing update - processes one frame after socket status changes
+    // This eliminates race conditions where railings read socket status before all updates complete
+    private bool _railingUpdatePending;
+    
     
     #endregion
     
@@ -199,7 +203,16 @@ public class GamePlatform : MonoBehaviour, IPickupable
 
     private void LateUpdate()
     {
+        // Check for movement first
         if(CheckPlatformMoved()) HasMoved?.Invoke(this);
+        
+        // Process deferred railing update (one frame after socket status changes)
+        // This ensures all platform socket statuses are fully updated before railings read them
+        if (_railingUpdatePending)
+        {
+            _railingUpdatePending = false;
+            _railingSystem?.RefreshAllRailingsVisibility();
+        }
     }
     
     
@@ -236,7 +249,6 @@ public class GamePlatform : MonoBehaviour, IPickupable
         
         occupiedCells = _platformManager.GetCellsForPlatform(this);
         
-        Debug.Log($"[GamePlatform] {gameObject.name}: Place() at {transform.position}, {occupiedCells.Count} cells");
         Placed?.Invoke(this);
     }
     
@@ -247,7 +259,6 @@ public class GamePlatform : MonoBehaviour, IPickupable
     /// For existing objects: fires PlacementCancelled (handler restores position), then Place() is called
     public void CancelPlacement()
     {
-        Debug.Log($"[GamePlatform] {gameObject.name}: CancelPlacement() at {transform.position}");
         IsPickedUp = false;
         
         // PickupHandler restores position (existing) or marks for destroy (new)
@@ -268,8 +279,9 @@ public class GamePlatform : MonoBehaviour, IPickupable
     
     private void OnSocketsChanged()
     {
-        Debug.Log($"[GamePlatform] {gameObject.name}: OnSocketsChanged triggered, _railingSystem={(_railingSystem != null ? "exists" : "NULL")}");
-        _railingSystem?.RefreshAllRailingsVisibility();
+        // Defer railing update to next frame to ensure all socket statuses are fully updated
+        // This eliminates race conditions where railings read status before all platforms are processed
+        _railingUpdatePending = true;
         ConnectionsChanged?.Invoke(this);
     }
     

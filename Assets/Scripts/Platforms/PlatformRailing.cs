@@ -52,6 +52,8 @@ public class PlatformRailing : MonoBehaviour
     
     private void OnEnable()
     {
+        // Sync IsVisible with actual GameObject state on enable
+        IsVisible = gameObject.activeSelf;
         EnsureRegistered();
     }
 
@@ -113,18 +115,14 @@ public class PlatformRailing : MonoBehaviour
     /// 
     private void SetVisibility(bool isVisible)
     {
-        if (IsVisible == isVisible) return;
+        // Check actual GameObject state, not just cached IsVisible
+        // This prevents issues when IsVisible defaults to false but GameObject is active
+        bool currentlyActive = gameObject.activeSelf;
         
-        if (isVisible)
-        {
-            IsVisible = true;
-            gameObject.SetActive(true);
-        }
-        else
-        {
-            IsVisible = false;
-            gameObject.SetActive(false);
-        }
+        if (IsVisible == isVisible && currentlyActive == isVisible) return;
+        
+        IsVisible = isVisible;
+        gameObject.SetActive(isVisible);
     }
     
 
@@ -143,7 +141,6 @@ public class PlatformRailing : MonoBehaviour
         }
 
         bool allConnected = _railingSystem.AllSocketsConnected(indices);
-        Debug.Log($"[PlatformRailing] {gameObject.name}: UpdateVisibility - socketIndices=[{string.Join(",", indices)}], allConnected={allConnected}, setting visible={!allConnected}");
         
         // If all sockets connected, hide railing (neighbor platform present)
         SetVisibility(!allConnected);
