@@ -706,43 +706,26 @@ public class PlatformSocketSystem : MonoBehaviour
         Vector2Int adjacentCell = GetAdjacentCellForSocket(socketIndex);
         var cellData = _worldGrid.GetCell(adjacentCell);
         
-        
         // Check if this socket has a blocking module
         if (IsSocketBlockedByModule(socketIndex))
             return SocketStatus.Occupied;
 
-        if (cellData == null) return SocketStatus.Linkable;
-
-        
-        SocketStatus newStatus = cellData.Flags switch
-        {
-            CellFlag.Empty => SocketStatus.Linkable,
-            CellFlag.Locked => SocketStatus.Locked,
-            CellFlag.Buildable => SocketStatus.Linkable,
-            CellFlag.Occupied => SocketStatus.Connected,      // Neighbor platform present
-            CellFlag.OccupyPreview => SocketStatus.Connected, // Neighbor platform (preview)
-            CellFlag.ModuleBlocked => SocketStatus.Occupied,  // Blocked by module
-            
-            _ => throw new ArgumentOutOfRangeException()
-        };
-        
-        return newStatus;
-
-        /*// Check if adjacent cell is occupied by a platform (including preview/moving platforms)
-        if (cellData == null || !cellData.HasFlag(CellFlag.Occupied | CellFlag.OccupyPreview))
+        if (cellData == null) 
             return SocketStatus.Linkable;
 
-        // Verify it's actually a neighbor platform (not self or non-platform)
-        if (!_platformManager.GetPlatformAtCell(adjacentCell, out var neighbor)
-            || !neighbor
-            || neighbor == _platform)
-            return SocketStatus.Linkable;
-
-        // Check if neighbor has a blocking module facing us
+        // Check flags in priority order using HasFlag() for proper [Flags] enum handling
+        // Priority: Locked > ModuleBlocked > Occupied/Preview > default (Linkable)
+        if (cellData.HasFlag(CellFlag.Locked))
+            return SocketStatus.Locked;
+        
         if (cellData.HasFlag(CellFlag.ModuleBlocked))
             return SocketStatus.Occupied;
-
-        return SocketStatus.Connected;*/
+        
+        if (cellData.HasFlag(CellFlag.Occupied) || cellData.HasFlag(CellFlag.OccupyPreview))
+            return SocketStatus.Connected;
+        
+        // Empty or Buildable only = Linkable
+        return SocketStatus.Linkable;
     }
 
 
