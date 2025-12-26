@@ -491,54 +491,6 @@ public class PlatformSocketSystem : MonoBehaviour
     }
     
     
-    /// Checks sockets on a specific edge, only checking the 1-3 nearest based on position
-    private void CheckEdgeForNearest(Edge edge, Vector3 localPos, Vector2Int footprint, ref int best, ref float bestDistSqr)
-    {
-        GetSocketIndexRangeForEdge(edge, out int start, out int end);
-        
-        float cellSize = WorldGrid.CellSize;
-        float halfWidth = footprint.x * cellSize * 0.5f;
-        float halfLength = footprint.y * cellSize * 0.5f;
-        
-        // Calculate approximate socket index based on position along edge
-        float t;
-        switch (edge)
-        {
-            case Edge.North: // Left to right (increasing X)
-                t = (localPos.x + halfWidth - cellSize * 0.5f) / cellSize;
-                break;
-            case Edge.East: // Top to bottom (decreasing Z)
-                t = (halfLength - cellSize * 0.5f - localPos.z) / cellSize;
-                break;
-            case Edge.South: // Right to left (decreasing X)
-                t = (halfWidth - cellSize * 0.5f - localPos.x) / cellSize;
-                break;
-            case Edge.West: // Bottom to top (increasing Z)
-            default:
-                t = (localPos.z + halfLength - cellSize * 0.5f) / cellSize;
-                break;
-        }
-        
-        int approxIdx = Mathf.RoundToInt(t);
-        int edgeLength = end - start + 1;
-        
-        // Check socket at approx position and its neighbors (at most 3 sockets)
-        for (int offset = -1; offset <= 1; offset++)
-        {
-            int idx = approxIdx + offset;
-            if (idx < 0 || idx >= edgeLength) continue;
-            
-            int socketIdx = start + idx;
-            float distSqr = Vector3.SqrMagnitude(localPos - _platformSockets[socketIdx].LocalPos);
-            if (distSqr < bestDistSqr)
-            {
-                bestDistSqr = distSqr;
-                best = socketIdx;
-            }
-        }
-    }
-    
-    
     
     /// Finds up to maxCount nearest socket indices within maxDistance
     /// Walks outward from nearest socket using perimeter order
@@ -603,6 +555,55 @@ public class PlatformSocketSystem : MonoBehaviour
         return result;
     }
 
+    
+    
+    /// Checks sockets on a specific edge, only checking the 1-3 nearest based on position
+    private void CheckEdgeForNearest(Edge edge, Vector3 localPos, Vector2Int footprint, ref int best, ref float bestDistSqr)
+    {
+        GetSocketIndexRangeForEdge(edge, out int start, out int end);
+        
+        float cellSize = WorldGrid.CellSize;
+        float halfWidth = footprint.x * cellSize * 0.5f;
+        float halfLength = footprint.y * cellSize * 0.5f;
+        
+        // Calculate approximate socket index based on position along edge
+        float t;
+        switch (edge)
+        {
+            case Edge.North: // Left to right (increasing X)
+                t = (localPos.x + halfWidth - cellSize * 0.5f) / cellSize;
+                break;
+            case Edge.East: // Top to bottom (decreasing Z)
+                t = (halfLength - cellSize * 0.5f - localPos.z) / cellSize;
+                break;
+            case Edge.South: // Right to left (decreasing X)
+                t = (halfWidth - cellSize * 0.5f - localPos.x) / cellSize;
+                break;
+            case Edge.West: // Bottom to top (increasing Z)
+            default:
+                t = (localPos.z + halfLength - cellSize * 0.5f) / cellSize;
+                break;
+        }
+        
+        int approxIdx = Mathf.RoundToInt(t);
+        int edgeLength = end - start + 1;
+        
+        // Check socket at approx position and its neighbors (at most 3 sockets)
+        for (int offset = -1; offset <= 1; offset++)
+        {
+            int idx = approxIdx + offset;
+            if (idx < 0 || idx >= edgeLength) continue;
+            
+            int socketIdx = start + idx;
+            float distSqr = Vector3.SqrMagnitude(localPos - _platformSockets[socketIdx].LocalPos);
+            if (distSqr < bestDistSqr)
+            {
+                bestDistSqr = distSqr;
+                best = socketIdx;
+            }
+        }
+    }
+    
     
     
     /// Gets the next socket index in clockwise direction (with wrap-around)

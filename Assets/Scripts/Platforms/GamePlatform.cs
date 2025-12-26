@@ -63,7 +63,7 @@ public class GamePlatform : MonoBehaviour, IPickupable
     
     // Deferred railing update - processes one frame after socket status changes
     // This eliminates race conditions where railings read socket status before all updates complete
-    private bool _railingUpdatePending;
+    private bool _updatePending;
     
     
     #endregion
@@ -208,9 +208,9 @@ public class GamePlatform : MonoBehaviour, IPickupable
         
         // Process deferred railing update (one frame after socket status changes)
         // This ensures all platform socket statuses are fully updated before railings read them
-        if (_railingUpdatePending)
+        if (_updatePending)
         {
-            _railingUpdatePending = false;
+            _updatePending = false;
             _railingSystem?.RefreshAllRailingsVisibility();
         }
     }
@@ -279,9 +279,8 @@ public class GamePlatform : MonoBehaviour, IPickupable
     
     private void OnSocketsChanged()
     {
-        // Defer railing update to next frame to ensure all socket statuses are fully updated
-        // This eliminates race conditions where railings read status before all platforms are processed
-        _railingUpdatePending = true;
+        // Defer railing update to next frame to ensure everything is fully updated
+        _updatePending = true;
         ConnectionsChanged?.Invoke(this);
     }
     
