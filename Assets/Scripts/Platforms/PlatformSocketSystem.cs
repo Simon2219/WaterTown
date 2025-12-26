@@ -683,7 +683,10 @@ public class PlatformSocketSystem : MonoBehaviour
         Debug.Log($"[PlatformSocketSystem] {gameObject.name}: RefreshAllSocketStatuses - {connectedCount} connected, anyChanged={anyChanged}");
         
         if (anyChanged)
+        {
+            Debug.Log($"[PlatformSocketSystem] {gameObject.name}: Invoking SocketsChanged event");
             SocketsChanged?.Invoke();
+        }
     }
 
 

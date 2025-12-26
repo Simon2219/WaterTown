@@ -268,6 +268,7 @@ public class GamePlatform : MonoBehaviour, IPickupable
     
     private void OnSocketsChanged()
     {
+        Debug.Log($"[GamePlatform] {gameObject.name}: OnSocketsChanged triggered, _railingSystem={(_railingSystem != null ? "exists" : "NULL")}");
         _railingSystem?.RefreshAllRailingsVisibility();
         ConnectionsChanged?.Invoke(this);
     }

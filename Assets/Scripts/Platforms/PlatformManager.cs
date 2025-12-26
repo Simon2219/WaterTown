@@ -172,7 +172,27 @@ public class PlatformManager : MonoBehaviour
     ///
     private void OnPlatformPlaced(GamePlatform platform)
     {
-        Debug.Log($"[PlatformManager] OnPlatformPlaced: {platform.name} with {platform.occupiedCells?.Count ?? 0} cells");
+        Debug.Log($"[PlatformManager] OnPlatformPlaced: {platform.name} with {platform.occupiedCells?.Count ?? 0} cells, previousCells={platform.previousOccupiedCells?.Count ?? 0}");
+        
+        // Clear any leftover preview cells from the last movement (e.g. when placement is cancelled)
+        // previousOccupiedCells contains the cells from the last move frame
+        if (platform.previousOccupiedCells?.Count > 0)
+        {
+            int clearedCount = 0;
+            foreach (Vector2Int cell in platform.previousOccupiedCells)
+            {
+                // Only clear if this platform still owns the cell
+                if (_cellToPlatform.TryGetValue(cell, out var owner) && owner == platform)
+                {
+                    _worldGrid.GetCell(cell)?.Clear();
+                    _cellToPlatform.Remove(cell);
+                    clearedCount++;
+                }
+            }
+            if (clearedCount > 0)
+                Debug.Log($"[PlatformManager] Cleared {clearedCount} leftover preview cells");
+            platform.previousOccupiedCells.Clear();
+        }
         
         // Register platform in grid
         RegisterPlatform(platform);
