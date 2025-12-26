@@ -48,11 +48,8 @@ public class PlatformSocketSystem : MonoBehaviour
     
     
     #region Events
-    /// Fired when socket statuses change - passes list of changed socket indices (list is reused, do not cache)
+    /// Fired when socket statuses change - passes list of changed socket indices
     public event Action<IReadOnlyList<int>> SocketsChanged;
-    
-    // Reusable list for changed socket indices to avoid allocations
-    private readonly List<int> _changedSocketIndices = new();
     
     
     #endregion
@@ -706,7 +703,7 @@ public class PlatformSocketSystem : MonoBehaviour
     /// Refreshes all socket statuses by querying the grid.
     public void RefreshAllSocketStatuses()
     {
-        _changedSocketIndices.Clear();
+        List<int> changed = null;
         
         for (int i = 0; i < _platformSockets.Count; i++)
         {
@@ -715,11 +712,11 @@ public class PlatformSocketSystem : MonoBehaviour
             
             SocketStatus newStatus = DetermineSocketStatus(i);
             if (SetSocketStatus(i, newStatus))
-                _changedSocketIndices.Add(i);
+                (changed ??= new List<int>()).Add(i);
         }
         
-        if (_changedSocketIndices.Count > 0)
-            SocketsChanged?.Invoke(_changedSocketIndices);
+        if (changed != null)
+            SocketsChanged?.Invoke(changed);
     }
 
 
@@ -772,7 +769,7 @@ public class PlatformSocketSystem : MonoBehaviour
             }
         }
 
-        _changedSocketIndices.Clear();
+        List<int> changed = null;
         
         // Reset all socket statuses to Linkable/Occupied (no neighbors)
         for (int i = 0; i < _platformSockets.Count; i++)
@@ -786,12 +783,12 @@ public class PlatformSocketSystem : MonoBehaviour
             {
                 socket.SetStatus(newStatus);
                 _platformSockets[i] = socket;
-                _changedSocketIndices.Add(i);
+                (changed ??= new List<int>()).Add(i);
             }
         }
         
-        if (_changedSocketIndices.Count > 0)
-            SocketsChanged?.Invoke(_changedSocketIndices);
+        if (changed != null)
+            SocketsChanged?.Invoke(changed);
     }
     
     

@@ -111,11 +111,9 @@ namespace Platforms
         
         
         /// Triggers visibility update only for railings attached to the changed sockets
+        /// Note: May call UpdateVisibility multiple times on same railing if attached to multiple changed sockets
         public void RefreshRailingsVisibility(IReadOnlyList<int> changedSocketIndices)
         {
-            // Use HashSet to avoid updating the same railing multiple times
-            _railingsToUpdate.Clear();
-            
             foreach (int socketIndex in changedSocketIndices)
             {
                 if (_socketToRailings.TryGetValue(socketIndex, out var railings))
@@ -123,17 +121,11 @@ namespace Platforms
                     foreach (var railing in railings)
                     {
                         if (railing)
-                            _railingsToUpdate.Add(railing);
+                            railing.UpdateVisibility();
                     }
                 }
             }
-            
-            foreach (var railing in _railingsToUpdate)
-                railing.UpdateVisibility();
         }
-        
-        // Reusable set to avoid allocations during refresh
-        private readonly HashSet<PlatformRailing> _railingsToUpdate = new();
         
         /// Triggers visibility update on all railings
         /// IMPORTANT: Rails must update FIRST so counters are correct when Posts check visibility
