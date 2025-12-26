@@ -710,8 +710,11 @@ public class PlatformSocketSystem : MonoBehaviour
         if (IsSocketBlockedByModule(socketIndex))
             return SocketStatus.Occupied;
 
-        if (cellData == null) 
+        if (cellData == null)
+        {
+            Debug.Log($"[PlatformSocketSystem] {gameObject.name} Socket {socketIndex}: Adjacent cell {adjacentCell} is null/out of bounds → Linkable");
             return SocketStatus.Linkable;
+        }
 
         // Check flags in priority order using HasFlag() for proper [Flags] enum handling
         // Priority: Locked > ModuleBlocked > Occupied/Preview > default (Linkable)
@@ -722,9 +725,13 @@ public class PlatformSocketSystem : MonoBehaviour
             return SocketStatus.Occupied;
         
         if (cellData.HasFlag(CellFlag.Occupied) || cellData.HasFlag(CellFlag.OccupyPreview))
+        {
+            Debug.Log($"[PlatformSocketSystem] {gameObject.name} Socket {socketIndex}: Adjacent cell {adjacentCell} has flags {cellData.Flags} → Connected");
             return SocketStatus.Connected;
+        }
         
         // Empty or Buildable only = Linkable
+        Debug.Log($"[PlatformSocketSystem] {gameObject.name} Socket {socketIndex}: Adjacent cell {adjacentCell} has flags {cellData.Flags} → Linkable");
         return SocketStatus.Linkable;
     }
 
