@@ -344,6 +344,7 @@ public class PlatformSocketSystem : MonoBehaviour
 
     
     /// Updates world positions for all sockets and rebuilds cell-to-socket mapping
+    /// Cell mapping requires WorldGrid - call SetWorldGrid first in editor mode
     private void UpdateSocketPositions()
     {
         _cellToSockets.Clear();
@@ -352,15 +353,19 @@ public class PlatformSocketSystem : MonoBehaviour
         {
             var socket = _platformSockets[i];
             socket.SetWorldPosition(transform.TransformPoint(socket.LocalPos));
-            
-            // Get the cell this socket is attached to (cell behind the socket, inside the platform)
+        }
+        
+        // Cell mapping requires WorldGrid (not available in prefab mode)
+        if (_worldGrid == null) return;
+        
+        for (int i = 0; i < _platformSockets.Count; i++)
+        {
             Vector2Int cellBehind = GetCellBehindSocket(i);
-            socket.SetCurrentGridCell(cellBehind);
+            _platformSockets[i].SetCurrentGridCell(cellBehind);
             
-            // Map cell to socket
             if (!_cellToSockets.TryGetValue(cellBehind, out var list))
             {
-                list = new List<int>(4); // Max 4 sockets per cell (1x1 platform)
+                list = new List<int>(4);
                 _cellToSockets[cellBehind] = list;
             }
             list.Add(i);
