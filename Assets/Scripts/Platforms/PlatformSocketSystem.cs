@@ -48,12 +48,9 @@ public class PlatformSocketSystem : MonoBehaviour
     
     
     #region Events
-    /// Fired when socket statuses change - passes list of changed socket indices
-    public event Action<IReadOnlyList<int>> SocketsChanged;
     
-    // Batched changes - fired once per frame via LateUpdate
-    private List<int> _pendingChanges;
-    private bool _changesPending;
+    /// Fired when any socket status changes
+    public event Action SocketsChanged;
     
     
     #endregion
@@ -185,19 +182,6 @@ public class PlatformSocketSystem : MonoBehaviour
         RefreshAllSocketStatuses();
     }
     
-    
-    
-    private void LateUpdate()
-    {
-        
-        
-        
-        if (!_changesPending) return;
-        
-        SocketsChanged?.Invoke(_pendingChanges);
-        _pendingChanges.Clear();
-        _changesPending = false;
-    }
     
     
     private void OnDestroy()
@@ -686,9 +670,10 @@ public class PlatformSocketSystem : MonoBehaviour
     
     
     /// Refreshes all socket statuses by querying the grid.
-    /// Disabled Performance Analysis because of .Invoke() 
     public void RefreshAllSocketStatuses()
     {
+        bool anyChanged = false;
+        
         for (int i = 0; i < _platformSockets.Count; i++)
         {
             if (_platformSockets[i].Status is SocketStatus.Locked or SocketStatus.Disabled)
@@ -696,11 +681,13 @@ public class PlatformSocketSystem : MonoBehaviour
             
             SocketStatus newStatus = DetermineSocketStatus(i);
             if (SetSocketStatus(i, newStatus))
-            {
-                _pendingChanges ??= new List<int>();
-                _pendingChanges.Add(i);
-                _changesPending = true;
-            }
+                anyChanged = true;
+        }
+        
+        if (anyChanged)
+        {
+            Debug.Log($"[PlatformSocketSystem] {gameObject.name}: Sockets changed, invoking SocketsChanged");
+            SocketsChanged?.Invoke();
         }
     }
 
@@ -771,6 +758,8 @@ public class PlatformSocketSystem : MonoBehaviour
             }
         }
 
+        bool anyChanged = false;
+        
         // Reset all socket statuses to Linkable/Occupied (no neighbors)
         for (int i = 0; i < _platformSockets.Count; i++)
         {
@@ -783,13 +772,15 @@ public class PlatformSocketSystem : MonoBehaviour
             {
                 socket.SetStatus(newStatus);
                 _platformSockets[i] = socket;
-                _pendingChanges ??= new List<int>();
-                _pendingChanges.Add(i);
-                _changesPending = true;
+                anyChanged = true;
             }
         }
         
-        
+        if (anyChanged)
+        {
+            Debug.Log($"[PlatformSocketSystem] {gameObject.name}: Connections reset, invoking SocketsChanged");
+            SocketsChanged?.Invoke();
+        }
     }
     
     

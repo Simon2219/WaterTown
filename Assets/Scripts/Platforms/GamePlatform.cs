@@ -264,12 +264,10 @@ public class GamePlatform : MonoBehaviour, IPickupable
     #region Event Handlers
     
     
-    // ReSharper disable Unity.PerformanceAnalysis
-    private void OnSocketsChanged(IReadOnlyList<int> changedSocketIndices)
+    private void OnSocketsChanged()
     {
-        // Refresh railing visibility only for changed sockets
-        _railingSystem?.RefreshRailingsVisibility(changedSocketIndices);
-        
+        Debug.Log($"[GamePlatform] {gameObject.name}: OnSocketsChanged received, refreshing all railings");
+        _railingSystem?.RefreshAllRailingsVisibility();
         ConnectionsChanged?.Invoke(this);
     }
     
