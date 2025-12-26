@@ -51,10 +51,6 @@ public class PlatformSocketSystem : MonoBehaviour
     /// Fired when socket statuses change - passes list of changed socket indices
     public event Action<IReadOnlyList<int>> SocketsChanged;
     
-    // Batched changes - fired once per frame via LateUpdate
-    private List<int> _pendingChanges;
-    private bool _changesPending;
-    
     
     #endregion
     
@@ -183,20 +179,6 @@ public class PlatformSocketSystem : MonoBehaviour
         ReBuildSockets();
         EnsureChildrenModulesRegistered();
         RefreshAllSocketStatuses();
-    }
-    
-    
-    
-    private void LateUpdate()
-    {
-        
-        
-        
-        if (!_changesPending) return;
-        
-        SocketsChanged?.Invoke(_pendingChanges);
-        _pendingChanges.Clear();
-        _changesPending = false;
     }
     
     
@@ -686,9 +668,10 @@ public class PlatformSocketSystem : MonoBehaviour
     
     
     /// Refreshes all socket statuses by querying the grid.
-    /// Disabled Performance Analysis because of .Invoke() 
     public void RefreshAllSocketStatuses()
     {
+        List<int> changed = null;
+        
         for (int i = 0; i < _platformSockets.Count; i++)
         {
             if (_platformSockets[i].Status is SocketStatus.Locked or SocketStatus.Disabled)
@@ -696,12 +679,11 @@ public class PlatformSocketSystem : MonoBehaviour
             
             SocketStatus newStatus = DetermineSocketStatus(i);
             if (SetSocketStatus(i, newStatus))
-            {
-                _pendingChanges ??= new List<int>();
-                _pendingChanges.Add(i);
-                _changesPending = true;
-            }
+                (changed ??= new List<int>()).Add(i);
         }
+        
+        if (changed != null)
+            SocketsChanged?.Invoke(changed);
     }
 
 
@@ -771,6 +753,8 @@ public class PlatformSocketSystem : MonoBehaviour
             }
         }
 
+        List<int> changed = null;
+        
         // Reset all socket statuses to Linkable/Occupied (no neighbors)
         for (int i = 0; i < _platformSockets.Count; i++)
         {
@@ -783,11 +767,12 @@ public class PlatformSocketSystem : MonoBehaviour
             {
                 socket.SetStatus(newStatus);
                 _platformSockets[i] = socket;
-                _pendingChanges ??= new List<int>();
-                _pendingChanges.Add(i);
-                _changesPending = true;
+                (changed ??= new List<int>()).Add(i);
             }
         }
+        
+        if (changed != null)
+            SocketsChanged?.Invoke(changed);
     }
     
     
