@@ -103,17 +103,32 @@ namespace Editor
         
         
         /// Finds nearest socket indices to a local position in editor mode
-        /// Converts to world position for the new socket lookup API
+        /// Uses simple linear search - no WorldGrid required
         ///
         public static void FindNearestSocketIndicesLocal(GamePlatform platform, Vector3 localPos, int maxCount, float maxDistance, List<int> result)
         {
+            result.Clear();
             var socketSystem = GetSocketSystem(platform);
-            if (socketSystem == null) return;
-            
-            SetWorldGridReference(socketSystem);
+            if (socketSystem == null || socketSystem.SocketCount == 0) return;
             
             Vector3 worldPos = ((Component)platform).transform.TransformPoint(localPos);
-            socketSystem.FindNearestSocketIndices(worldPos, maxCount, maxDistance, result);
+            float maxDistSqr = maxDistance * maxDistance;
+            
+            // Simple linear search - collect all within distance, sorted by distance
+            var candidates = new List<(int idx, float distSqr)>();
+            var sockets = socketSystem.PlatformSockets;
+            
+            for (int i = 0; i < sockets.Count; i++)
+            {
+                float distSqr = Vector3.SqrMagnitude(worldPos - sockets[i].WorldPos);
+                if (distSqr <= maxDistSqr)
+                    candidates.Add((i, distSqr));
+            }
+            
+            candidates.Sort((a, b) => a.distSqr.CompareTo(b.distSqr));
+            
+            for (int i = 0; i < candidates.Count && i < maxCount; i++)
+                result.Add(candidates[i].idx);
         }
         
         

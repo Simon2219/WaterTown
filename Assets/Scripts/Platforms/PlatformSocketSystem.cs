@@ -507,8 +507,8 @@ public class PlatformSocketSystem : MonoBehaviour
     }
     
     
-    /// Finds the nearest socket to worldPos
-    /// Handles boundary positions by checking adjacent cells
+    /// Finds the nearest socket to worldPos using cell-based lookup
+    /// Requires WorldGrid - use EditorPlatformTools for editor prefab mode
     ///
     public int FindNearestSocketIndex(Vector3 worldPos)
     {
@@ -517,7 +517,6 @@ public class PlatformSocketSystem : MonoBehaviour
         Vector2Int primaryCell = _worldGrid.WorldToCell(worldPos);
         Vector3 cellCenter = _worldGrid.GetCellCenter(primaryCell);
         
-        // Check if position is on a cell boundary
         const float boundaryTolerance = 0.01f;
         float halfCell = WorldGrid.CellSize * 0.5f;
         
