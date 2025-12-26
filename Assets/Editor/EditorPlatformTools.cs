@@ -8,22 +8,19 @@ using UnityEngine;
 
 namespace Editor
 {
-    /// <summary>
-    /// Editor-only utility class for platform operations during prefab editing.
-    /// Provides direct access to platform sub-components when runtime dependency injection hasn't occurred.
-    /// 
+    /// Editor-only utility class for platform operations during prefab editing
+    /// Provides direct access to platform sub-components when runtime dependency injection hasn't occurred
     /// Use this class from EditorAssetManager and other editor tools instead of going through
-    /// GamePlatform facade methods, which require runtime initialization.
-    /// </summary>
+    /// GamePlatform facade methods, which require runtime initialization
+    ///
     public static class EditorPlatformTools
     {
         #region Component Access
         
         
-        /// <summary>
-        /// Gets the PlatformSocketSystem component directly from a GamePlatform.
-        /// Use this in editor when the runtime dependency injection hasn't occurred.
-        /// </summary>
+        /// Gets the PlatformSocketSystem component directly from a GamePlatform
+        /// Use this in editor when the runtime dependency injection hasn't occurred
+        ///
         public static PlatformSocketSystem GetSocketSystem(GamePlatform platform)
         {
             if (!platform) return null;
@@ -32,10 +29,9 @@ namespace Editor
         }
         
         
-        /// <summary>
-        /// Gets the PlatformRailingSystem component directly from a GamePlatform.
-        /// Use this in editor when the runtime dependency injection hasn't occurred.
-        /// </summary>
+        /// Gets the PlatformRailingSystem component directly from a GamePlatform
+        /// Use this in editor when the runtime dependency injection hasn't occurred
+        ///
         public static PlatformRailingSystem GetRailingSystem(GamePlatform platform)
         {
             if (!platform) return null;
@@ -44,13 +40,16 @@ namespace Editor
         }
 
 
-
+        /// Gets the PlatformEditorUtility component directly from a GamePlatform
+        ///
         public static PlatformEditorUtility GetEditorUtility(GamePlatform platform)
         {
             if (!platform) return null;
             platform.TryGetComponent(out PlatformEditorUtility editorUtility);
             return editorUtility;
         }
+        
+        
         #endregion
         
         
@@ -67,9 +66,7 @@ namespace Editor
             var socketSystem = GetSocketSystem(platform);
             if (!socketSystem) return;
             
-            // Try to set WorldGrid reference for cell mapping (only works in scene, not prefab mode)
             SetWorldGridReference(socketSystem);
-            
             socketSystem.ReBuildSockets(platform.Footprint);
         }
         
@@ -87,9 +84,8 @@ namespace Editor
         }
         
         
-        /// <summary>
-        /// Gets the socket list from a platform in editor mode.
-        /// </summary>
+        /// Gets the socket list from a platform in editor mode
+        ///
         public static IReadOnlyList<PlatformSocketSystem.SocketData> GetSockets(GamePlatform platform)
         {
             var socketSystem = GetSocketSystem(platform);
@@ -97,20 +93,13 @@ namespace Editor
         }
         
         
-        /// <summary>
-        /// Gets the socket count from a platform in editor mode.
-        /// </summary>
+        /// Gets the socket count from a platform in editor mode
+        ///
         public static int GetSocketCount(GamePlatform platform)
         {
             var socketSystem = GetSocketSystem(platform);
             return socketSystem?.SocketCount ?? 0;
         }
-        
-        
-        // Note: RefreshSocketStatuses is intentionally NOT provided here.
-        // It requires runtime dependencies (WorldGrid, PlatformManager) that don't exist
-        // in editor prefab mode. Socket statuses are calculated at runtime.
-        
         
         
         /// Finds nearest socket indices to a local position in editor mode
@@ -121,7 +110,6 @@ namespace Editor
             var socketSystem = GetSocketSystem(platform);
             if (socketSystem == null) return;
             
-            // Ensure WorldGrid is set for cell lookup
             SetWorldGridReference(socketSystem);
             
             Vector3 worldPos = ((Component)platform).transform.TransformPoint(localPos);
@@ -137,9 +125,8 @@ namespace Editor
         #region Module Operations
         
         
-        /// <summary>
-        /// Registers a module on sockets in editor mode.
-        /// </summary>
+        /// Registers a module on sockets in editor mode
+        ///
         public static void RegisterModuleOnSockets(GamePlatform platform, PlatformModule module, bool occupiesSockets, IEnumerable<int> socketIndices)
         {
             var socketSystem = GetSocketSystem(platform);
@@ -155,9 +142,8 @@ namespace Editor
         #region Railing Operations
         
         
-        /// <summary>
-        /// Ensures all child railings are registered with a platform in editor mode.
-        /// </summary>
+        /// Ensures all child railings are registered with a platform in editor mode
+        ///
         public static void EnsureChildrenRailingsRegistered(GamePlatform platform)
         {
             if (!platform) return;
@@ -170,9 +156,8 @@ namespace Editor
         }
         
         
-        /// <summary>
-        /// Ensures all child modules are registered with a platform in editor mode.
-        /// </summary>
+        /// Ensures all child modules are registered with a platform in editor mode
+        ///
         public static void EnsureChildrenModulesRegistered(GamePlatform platform)
         {
             if (!platform) return;
