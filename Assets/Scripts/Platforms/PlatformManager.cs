@@ -93,6 +93,7 @@ public class PlatformManager : MonoBehaviour
         // Batch adjacency recomputation to once per frame for affected platforms only
         if (_platformsNeedingUpdate.Count > 0 && !_isRecomputingAdjacency)
         {
+            Debug.Log($"[PlatformManager] LateUpdate: Processing {_platformsNeedingUpdate.Count} dirty platforms");
             RecomputeAdjacencyForAffectedPlatforms();
         }
     }
@@ -171,6 +172,8 @@ public class PlatformManager : MonoBehaviour
     ///
     private void OnPlatformPlaced(GamePlatform platform)
     {
+        Debug.Log($"[PlatformManager] OnPlatformPlaced: {platform.name} with {platform.occupiedCells?.Count ?? 0} cells");
+        
         // Register platform in grid
         RegisterPlatform(platform);
 
@@ -186,6 +189,7 @@ public class PlatformManager : MonoBehaviour
     ///
     private void OnPlatformPickedUp(GamePlatform platform)
     {
+        Debug.Log($"[PlatformManager] OnPlatformPickedUp: {platform.name} - clearing cells");
         ClearCellsForPlatform(platform, false);
         
         // Mark affected platforms (neighbors at old position) for adjacency update
@@ -200,6 +204,7 @@ public class PlatformManager : MonoBehaviour
     ///
     private void OnPlatformHasMoved(GamePlatform platform)
     {
+        Debug.Log($"[PlatformManager] OnPlatformHasMoved: {platform.name}");
         UpdateCellsForPlatform(platform);
 
         // Mark this platform and affected neighbors for adjacency update
@@ -254,24 +259,40 @@ public class PlatformManager : MonoBehaviour
     
     private void SpawnStartupPlatforms()
     {
-        // Later implementation for an Asset defining Starting Setups for the Town
-
-        // Ensure all existing platforms in the scene are registered into the grid
-        foreach (GamePlatform platform in _allPlatforms)
+        // Find ALL platforms in scene - don't rely on _allPlatforms which may be empty
+        // due to race condition between GamePlatform.Awake and PlatformManager.OnEnable
+        var allScenePlatforms = FindObjectsByType<GamePlatform>(FindObjectsSortMode.None);
+        
+        foreach (GamePlatform platform in allScenePlatforms)
         {
             if (!platform) continue;
             if (!platform.isActiveAndEnabled) continue;
 
+            // Ensure platform is in our registry
+            if (!_allPlatforms.Contains(platform))
+            {
+                // Platform missed the Created event - manually initialize
+                platform.InitializePlatform(this, _worldGrid);
+                platform.HasMoved += OnPlatformHasMoved;
+                platform.Enabled += OnPlatformEnabled;
+                platform.Disabled += OnPlatformDisabled;
+                platform.Placed += OnPlatformPlaced;
+                platform.PickedUp += OnPlatformPickedUp;
+                _allPlatforms.Add(platform);
+            }
+
             List<Vector2Int> tmpCells = GetCellsForPlatform(platform);
             platform.occupiedCells = tmpCells;
 
-
             if (tmpCells.Count > 0)
             {
-                // Registers occupancy AND triggers adjacency for all platforms
                 RegisterPlatform(platform);
             }
         }
+        
+        // Trigger initial adjacency computation for all platforms
+        MarkAllPlatformsAdjacencyDirty();
+        RecomputeAdjacencyForAffectedPlatforms();
     }
     
 
@@ -501,6 +522,7 @@ public class PlatformManager : MonoBehaviour
             platform.previousOccupiedCells.AddRange(platform.occupiedCells);
         }
         
+        int clearedCount = 0;
         // Clear old preview/occupied flags for this platform's old cells
         foreach (Vector2Int cell in platform.occupiedCells)
         {
@@ -509,8 +531,11 @@ public class PlatformManager : MonoBehaviour
             {
                 _worldGrid.GetCell(cell)?.Clear();
                 _cellToPlatform.Remove(cell);
+                clearedCount++;
             }
         }
+
+        Debug.Log($"[PlatformManager] ClearCellsForPlatform({platform.name}): Cleared {clearedCount} cells, clearOccupation={clearOccupation}");
 
         if (clearOccupation)  
             platform.occupiedCells.Clear();
@@ -540,6 +565,7 @@ public class PlatformManager : MonoBehaviour
             }
         }
         
+        Debug.Log($"[PlatformManager] UpdateCellsForPlatform({platform.name}): Set {platform.occupiedCells.Count} cells to {flagToUse}, _cellToPlatform has {_cellToPlatform.Count} entries");
     }
     
     
@@ -583,6 +609,7 @@ public class PlatformManager : MonoBehaviour
             }
         }
 
+        Debug.Log($"[PlatformManager] GetAffectedPlatforms({platform.name}): Found {affected.Count} affected platforms: [{string.Join(", ", affected.Select(p => p.name))}]");
         return affected;
     }
 
@@ -598,6 +625,8 @@ public class PlatformManager : MonoBehaviour
         // Prevent recursive calls during adjacency computation
         if (_isRecomputingAdjacency) return;
         _isRecomputingAdjacency = true;
+
+        Debug.Log($"[PlatformManager] RecomputeAdjacencyForAffectedPlatforms: Updating {_platformsNeedingUpdate.Count} platforms: [{string.Join(", ", _platformsNeedingUpdate.Where(p => p).Select(p => p.name))}]");
 
         // Update socket statuses for all affected platforms (for railing visibility, etc.)
         foreach (var platform in _platformsNeedingUpdate.Where(platform => platform && platform.isActiveAndEnabled))

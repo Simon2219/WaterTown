@@ -236,6 +236,7 @@ public class GamePlatform : MonoBehaviour, IPickupable
         
         occupiedCells = _platformManager.GetCellsForPlatform(this);
         
+        Debug.Log($"[GamePlatform] {gameObject.name}: Place() at {transform.position}, {occupiedCells.Count} cells");
         Placed?.Invoke(this);
     }
     
@@ -246,6 +247,7 @@ public class GamePlatform : MonoBehaviour, IPickupable
     /// For existing objects: fires PlacementCancelled (handler restores position), then Place() is called
     public void CancelPlacement()
     {
+        Debug.Log($"[GamePlatform] {gameObject.name}: CancelPlacement() at {transform.position}");
         IsPickedUp = false;
         
         // PickupHandler restores position (existing) or marks for destroy (new)

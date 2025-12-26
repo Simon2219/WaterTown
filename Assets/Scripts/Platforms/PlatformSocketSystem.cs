@@ -178,6 +178,7 @@ public class PlatformSocketSystem : MonoBehaviour
     
     private void OnPlatformMoved(GamePlatform platform)
     {
+        Debug.Log($"[PlatformSocketSystem] {gameObject.name}: OnPlatformMoved - updating socket world positions");
         UpdateSocketPositions();
     }
     
@@ -664,6 +665,7 @@ public class PlatformSocketSystem : MonoBehaviour
     public void RefreshAllSocketStatuses()
     {
         bool anyChanged = false;
+        int connectedCount = 0;
         
         for (int i = 0; i < _platformSockets.Count; i++)
         {
@@ -671,9 +673,14 @@ public class PlatformSocketSystem : MonoBehaviour
                 continue;
             
             SocketStatus newStatus = DetermineSocketStatus(i);
+            if (newStatus == SocketStatus.Connected)
+                connectedCount++;
+            
             if (SetSocketStatus(i, newStatus))
                 anyChanged = true;
         }
+        
+        Debug.Log($"[PlatformSocketSystem] {gameObject.name}: RefreshAllSocketStatuses - {connectedCount} connected, anyChanged={anyChanged}");
         
         if (anyChanged)
             SocketsChanged?.Invoke();
@@ -699,7 +706,12 @@ public class PlatformSocketSystem : MonoBehaviour
             return SocketStatus.Occupied;
 
         if (cellData == null)
+        {
+            // Only log for a sample of sockets to avoid spam
+            if (socketIndex == 0)
+                Debug.Log($"[PlatformSocketSystem] {gameObject.name} Socket 0: Adjacent cell {adjacentCell} is null → Linkable");
             return SocketStatus.Linkable;
+        }
 
         // Check flags in priority order using HasFlag() for proper [Flags] enum handling
         // Priority: Locked > ModuleBlocked > Occupied/Preview > default (Linkable)
@@ -710,7 +722,11 @@ public class PlatformSocketSystem : MonoBehaviour
             return SocketStatus.Occupied;
         
         if (cellData.HasFlag(CellFlag.Occupied) || cellData.HasFlag(CellFlag.OccupyPreview))
+        {
+            // Log when we find a connection
+            Debug.Log($"[PlatformSocketSystem] {gameObject.name} Socket {socketIndex}: Adjacent cell {adjacentCell} has {cellData.Flags} → Connected");
             return SocketStatus.Connected;
+        }
         
         // Empty or Buildable only = Linkable
         return SocketStatus.Linkable;
