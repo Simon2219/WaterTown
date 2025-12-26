@@ -48,8 +48,8 @@ public class PlatformSocketSystem : MonoBehaviour
     
     
     #region Events
-    /// Fired when socket statuses change - passes list of changed socket indices
-    public event Action<IReadOnlyList<int>> SocketsChanged;
+    /// Fired when any socket status changes
+    public event Action SocketsChanged;
     
     
     #endregion
@@ -670,7 +670,7 @@ public class PlatformSocketSystem : MonoBehaviour
     /// Refreshes all socket statuses by querying the grid.
     public void RefreshAllSocketStatuses()
     {
-        List<int> changed = null;
+        bool anyChanged = false;
         
         for (int i = 0; i < _platformSockets.Count; i++)
         {
@@ -679,11 +679,11 @@ public class PlatformSocketSystem : MonoBehaviour
             
             SocketStatus newStatus = DetermineSocketStatus(i);
             if (SetSocketStatus(i, newStatus))
-                (changed ??= new List<int>()).Add(i);
+                anyChanged = true;
         }
         
-        if (changed != null)
-            SocketsChanged?.Invoke(changed);
+        if (anyChanged)
+            SocketsChanged?.Invoke();
     }
 
 
@@ -753,7 +753,7 @@ public class PlatformSocketSystem : MonoBehaviour
             }
         }
 
-        List<int> changed = null;
+        bool anyChanged = false;
         
         // Reset all socket statuses to Linkable/Occupied (no neighbors)
         for (int i = 0; i < _platformSockets.Count; i++)
@@ -767,12 +767,12 @@ public class PlatformSocketSystem : MonoBehaviour
             {
                 socket.SetStatus(newStatus);
                 _platformSockets[i] = socket;
-                (changed ??= new List<int>()).Add(i);
+                anyChanged = true;
             }
         }
         
-        if (changed != null)
-            SocketsChanged?.Invoke(changed);
+        if (anyChanged)
+            SocketsChanged?.Invoke();
     }
     
     
