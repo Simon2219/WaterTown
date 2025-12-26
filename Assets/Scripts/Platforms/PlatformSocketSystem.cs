@@ -48,8 +48,11 @@ public class PlatformSocketSystem : MonoBehaviour
     
     
     #region Events
-    /// Fired when socket connection state changes (sockets connected/disconnected)
-    public event Action SocketsChanged;
+    /// Fired when socket statuses change - passes list of changed socket indices (list is reused, do not cache)
+    public event Action<IReadOnlyList<int>> SocketsChanged;
+    
+    // Reusable list for changed socket indices to avoid allocations
+    private readonly List<int> _changedSocketIndices = new();
     
     
     #endregion
@@ -703,7 +706,7 @@ public class PlatformSocketSystem : MonoBehaviour
     /// Refreshes all socket statuses by querying the grid.
     public void RefreshAllSocketStatuses()
     {
-        bool anyChanged = false;
+        _changedSocketIndices.Clear();
         
         for (int i = 0; i < _platformSockets.Count; i++)
         {
@@ -712,11 +715,11 @@ public class PlatformSocketSystem : MonoBehaviour
             
             SocketStatus newStatus = DetermineSocketStatus(i);
             if (SetSocketStatus(i, newStatus))
-                anyChanged = true;
+                _changedSocketIndices.Add(i);
         }
         
-        if (anyChanged)
-            SocketsChanged?.Invoke();
+        if (_changedSocketIndices.Count > 0)
+            SocketsChanged?.Invoke(_changedSocketIndices);
     }
 
 
@@ -769,6 +772,8 @@ public class PlatformSocketSystem : MonoBehaviour
             }
         }
 
+        _changedSocketIndices.Clear();
+        
         // Reset all socket statuses to Linkable/Occupied (no neighbors)
         for (int i = 0; i < _platformSockets.Count; i++)
         {
@@ -776,11 +781,17 @@ public class PlatformSocketSystem : MonoBehaviour
             if (socket.Status == SocketStatus.Locked || socket.Status == SocketStatus.Disabled)
                 continue;
             
-            socket.SetStatus(IsSocketBlockedByModule(i) ? SocketStatus.Occupied : SocketStatus.Linkable);
-            _platformSockets[i] = socket;
+            var newStatus = IsSocketBlockedByModule(i) ? SocketStatus.Occupied : SocketStatus.Linkable;
+            if (socket.Status != newStatus)
+            {
+                socket.SetStatus(newStatus);
+                _platformSockets[i] = socket;
+                _changedSocketIndices.Add(i);
+            }
         }
         
-        SocketsChanged?.Invoke();
+        if (_changedSocketIndices.Count > 0)
+            SocketsChanged?.Invoke(_changedSocketIndices);
     }
     
     

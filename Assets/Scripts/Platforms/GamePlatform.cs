@@ -264,10 +264,10 @@ public class GamePlatform : MonoBehaviour, IPickupable
     #region Event Handlers
     
     
-    private void OnSocketsChanged()
+    private void OnSocketsChanged(IReadOnlyList<int> changedSocketIndices)
     {
-        // Refresh railing visibility when socket connections change
-        _railingSystem?.RefreshAllRailingsVisibility();
+        // Refresh railing visibility only for changed sockets
+        _railingSystem?.RefreshRailingsVisibility(changedSocketIndices);
         
         ConnectionsChanged?.Invoke(this);
     }
