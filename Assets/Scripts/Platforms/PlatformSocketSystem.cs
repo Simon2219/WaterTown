@@ -28,10 +28,6 @@ public class PlatformSocketSystem : MonoBehaviour
     private readonly Dictionary<PlatformModule, ModuleReg> _moduleRegs = new();
     private readonly Dictionary<int, PlatformModule> _socketToModules = new();
     
-    /// Maps grid cells to their associated socket indices
-    /// Each cell has at most 4 sockets (1x1 platform), typically 1-2 (edge/corner cells)
-    private readonly Dictionary<Vector2Int, List<int>> _cellToSockets = new();
-    
     
     [Header("Sockets")]
     [SerializeField] private List<SocketData> _platformSockets = new();
@@ -78,8 +74,7 @@ public class PlatformSocketSystem : MonoBehaviour
     public class SocketData
     {
         [SerializeField, HideInInspector] private int index;
-        [SerializeField, HideInInspector] private Vector2Int currentGridCell;
-        [SerializeField, HideInInspector] private Vector3 localPos; //Only gets set on Initialization, then stays
+        [SerializeField, HideInInspector] private Vector3 localPos; // Fixed relative to platform center
         [SerializeField, HideInInspector] private Vector2Int outwardOffset;
         [SerializeField] private SocketStatus status;
         
@@ -90,18 +85,11 @@ public class PlatformSocketSystem : MonoBehaviour
         public bool IsLocked => status == SocketStatus.Locked;
         public bool IsDisabled => status == SocketStatus.Disabled;
         
-        
 
         public int Index
         { 
             get => index; 
             private set => index = value;
-        }
-
-        public Vector2Int CurrentGridCell
-        {
-            get => currentGridCell;
-            private set => currentGridCell = value;
         }
 
         public Vector3 LocalPos
@@ -144,8 +132,6 @@ public class PlatformSocketSystem : MonoBehaviour
         public SocketStatus GetStatus() => Status;
         
         internal void SetWorldPosition(Vector3 pos) => WorldPos = pos;
-        
-        internal void SetCurrentGridCell(Vector2Int cell) => CurrentGridCell = cell;
     }
     
     
@@ -343,32 +329,12 @@ public class PlatformSocketSystem : MonoBehaviour
 
 
     
-    /// Updates world positions for all sockets and rebuilds cell-to-socket mapping
-    /// Cell mapping requires WorldGrid - call SetWorldGrid first in editor mode
+    /// Updates world positions for all sockets based on current platform transform
     private void UpdateSocketPositions()
     {
-        _cellToSockets.Clear();
-        
         for (int i = 0; i < _platformSockets.Count; i++)
         {
-            var socket = _platformSockets[i];
-            socket.SetWorldPosition(transform.TransformPoint(socket.LocalPos));
-        }
-        
-        // Cell mapping requires WorldGrid (not available in prefab mode)
-        if (_worldGrid == null) return;
-        
-        for (int i = 0; i < _platformSockets.Count; i++)
-        {
-            Vector2Int cellBehind = GetCellBehindSocket(i);
-            _platformSockets[i].SetCurrentGridCell(cellBehind);
-            
-            if (!_cellToSockets.TryGetValue(cellBehind, out var list))
-            {
-                list = new List<int>(4);
-                _cellToSockets[cellBehind] = list;
-            }
-            list.Add(i);
+            _platformSockets[i].SetWorldPosition(transform.TransformPoint(_platformSockets[i].LocalPos));
         }
     }
     
@@ -463,31 +429,93 @@ public class PlatformSocketSystem : MonoBehaviour
     
     
     
-    /// Finds the nearest socket to worldPos using cell-based lookup
-    /// Requires WorldGrid - use EditorPlatformTools for editor prefab mode
+    /// Finds the nearest socket to a world position using edge-based lookup
+    /// Only checks sockets on the closest edge(s) - O(1) for edge, O(k) for corner where k ≤ 6
     ///
     public int FindNearestSocketIndex(Vector3 worldPos)
     {
-        Vector2Int primaryCell = _worldGrid.WorldToCell(worldPos);
+        if (_platformSockets.Count == 0) return -1;
+        
+        // Transform to local space - socket local positions are constant
+        Vector3 localPos = transform.InverseTransformPoint(worldPos);
+        var footprint = GetFootprint();
+        
+        float cellSize = WorldGrid.CellSize;
+        float halfWidth = footprint.x * cellSize * 0.5f;
+        float halfLength = footprint.y * cellSize * 0.5f;
+        
+        // Distance to each edge (negative = inside platform)
+        float distToNorth = localPos.z - halfLength;
+        float distToSouth = -halfLength - localPos.z;
+        float distToEast = localPos.x - halfWidth;
+        float distToWest = -halfWidth - localPos.x;
+        
+        // Find which edge(s) are closest
+        float minDist = Mathf.Max(distToNorth, distToSouth, distToEast, distToWest);
+        float threshold = cellSize * 0.5f; // Check adjacent edge if near corner
         
         int best = -1;
         float bestDistSqr = float.MaxValue;
-        CheckCellForNearest(primaryCell, worldPos, ref best, ref bestDistSqr);
         
-        // Check adjacent cells if near boundary - compute direction from cell center
-        Vector3 offset = worldPos - _worldGrid.GetCellCenter(primaryCell);
-        float boundaryThreshold = WorldGrid.CellSize * 0.49f;
-
-        // Step is ±1 if near boundary in that axis, 0 otherwise
-        int stepX = Mathf.Abs(offset.x) > boundaryThreshold ? (int)Mathf.Sign(offset.x) : 0;
-        int stepZ = Mathf.Abs(offset.z) > boundaryThreshold ? (int)Mathf.Sign(offset.z) : 0;
-        
-        if (stepX != 0)
-            CheckCellForNearest(new Vector2Int(primaryCell.x + stepX, primaryCell.y), worldPos, ref best, ref bestDistSqr);
-        if (stepZ != 0)
-            CheckCellForNearest(new Vector2Int(primaryCell.x, primaryCell.y + stepZ), worldPos, ref best, ref bestDistSqr);
+        // Check each edge that's within threshold of closest
+        if (distToNorth >= minDist - threshold)
+            CheckEdgeForNearest(Edge.North, localPos, footprint, ref best, ref bestDistSqr);
+        if (distToSouth >= minDist - threshold)
+            CheckEdgeForNearest(Edge.South, localPos, footprint, ref best, ref bestDistSqr);
+        if (distToEast >= minDist - threshold)
+            CheckEdgeForNearest(Edge.East, localPos, footprint, ref best, ref bestDistSqr);
+        if (distToWest >= minDist - threshold)
+            CheckEdgeForNearest(Edge.West, localPos, footprint, ref best, ref bestDistSqr);
         
         return best;
+    }
+    
+    
+    /// Checks sockets on a specific edge, only checking the 1-3 nearest based on position
+    private void CheckEdgeForNearest(Edge edge, Vector3 localPos, Vector2Int footprint, ref int best, ref float bestDistSqr)
+    {
+        GetSocketIndexRangeForEdge(edge, out int start, out int end);
+        
+        float cellSize = WorldGrid.CellSize;
+        float halfWidth = footprint.x * cellSize * 0.5f;
+        float halfLength = footprint.y * cellSize * 0.5f;
+        
+        // Calculate approximate socket index based on position along edge
+        float t;
+        switch (edge)
+        {
+            case Edge.North: // Left to right (increasing X)
+                t = (localPos.x + halfWidth - cellSize * 0.5f) / cellSize;
+                break;
+            case Edge.East: // Top to bottom (decreasing Z)
+                t = (halfLength - cellSize * 0.5f - localPos.z) / cellSize;
+                break;
+            case Edge.South: // Right to left (decreasing X)
+                t = (halfWidth - cellSize * 0.5f - localPos.x) / cellSize;
+                break;
+            case Edge.West: // Bottom to top (increasing Z)
+            default:
+                t = (localPos.z + halfLength - cellSize * 0.5f) / cellSize;
+                break;
+        }
+        
+        int approxIdx = Mathf.RoundToInt(t);
+        int edgeLength = end - start + 1;
+        
+        // Check socket at approx position and its neighbors (at most 3 sockets)
+        for (int offset = -1; offset <= 1; offset++)
+        {
+            int idx = approxIdx + offset;
+            if (idx < 0 || idx >= edgeLength) continue;
+            
+            int socketIdx = start + idx;
+            float distSqr = Vector3.SqrMagnitude(localPos - _platformSockets[socketIdx].LocalPos);
+            if (distSqr < bestDistSqr)
+            {
+                bestDistSqr = distSqr;
+                best = socketIdx;
+            }
+        }
     }
     
     
@@ -557,25 +585,6 @@ public class PlatformSocketSystem : MonoBehaviour
 
     
     
-    /// Helper Method - Check Sockets in a given cell and return closest
-    /// 
-    private void CheckCellForNearest(Vector2Int cell, Vector3 worldPos, ref int best, ref float bestDistSqr)
-    {
-        if (!_cellToSockets.TryGetValue(cell, out List<int> socketsInCell)) return;
-        
-        foreach (int socketIdx in socketsInCell)
-        {
-            float distSqr = Vector3.SqrMagnitude(worldPos - _platformSockets[socketIdx].WorldPos);
-            if (distSqr < bestDistSqr)
-            {
-                bestDistSqr = distSqr;
-                best = socketIdx;
-            }
-        }
-    }
-    
-    
-    
     /// Gets the next socket index in clockwise direction (with wrap-around)
     ///
     private int GetNextSocketIndex(int socketIndex)
@@ -642,17 +651,6 @@ public class PlatformSocketSystem : MonoBehaviour
         Vector3 cellBehindPos = socketWorldPos - worldOutward * 0.5f;
         
         return _worldGrid.WorldToCell(cellBehindPos);
-    }
-    
-    
-    
-    
-    /// Returns socket indices associated with a cell (max 4 for 1x1, typically 1-2)
-    /// Returns empty list if cell has no sockets (interior cell or not on platform)
-    ///
-    private List<int> GetCellSockets(Vector2Int cell)
-    {
-        return _cellToSockets.TryGetValue(cell, out List<int> sockets) ? sockets : new List<int>();
     }
     
     
