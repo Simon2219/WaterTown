@@ -732,9 +732,9 @@ public class PlatformSocketSystem : MonoBehaviour
             CellFlag.Empty => SocketStatus.Linkable,
             CellFlag.Locked => SocketStatus.Locked,
             CellFlag.Buildable => SocketStatus.Linkable,
-            CellFlag.Occupied => SocketStatus.Occupied,
-            CellFlag.OccupyPreview => SocketStatus.Occupied,
-            CellFlag.ModuleBlocked => SocketStatus.Occupied,
+            CellFlag.Occupied => SocketStatus.Connected,      // Neighbor platform present
+            CellFlag.OccupyPreview => SocketStatus.Connected, // Neighbor platform (preview)
+            CellFlag.ModuleBlocked => SocketStatus.Occupied,  // Blocked by module
             
             _ => throw new ArgumentOutOfRangeException()
         };
