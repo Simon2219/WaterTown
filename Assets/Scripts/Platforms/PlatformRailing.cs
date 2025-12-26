@@ -138,17 +138,14 @@ public class PlatformRailing : MonoBehaviour
         var indices = socketIndices ?? Array.Empty<int>();
         if (indices.Length == 0)
         {
-            Debug.Log($"[PlatformRailing] {gameObject.name}: No socket indices, showing");
             SetVisibility(true);
             return;
         }
 
-        bool railingSocketsConnected = _railingSystem.AllSocketsConnected(indices);
+        bool allConnected = _railingSystem.AllSocketsConnected(indices);
         
-        Debug.Log($"[PlatformRailing] {gameObject.name}: Sockets [{string.Join(",", indices)}] allConnected={railingSocketsConnected}, setting visible={!railingSocketsConnected}");
-
-        //Invert - if all connected, call with false
-        SetVisibility(!railingSocketsConnected);
+        // If all sockets connected, hide railing (neighbor platform present)
+        SetVisibility(!allConnected);
     }
     
     

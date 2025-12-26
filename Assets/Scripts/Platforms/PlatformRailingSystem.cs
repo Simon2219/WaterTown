@@ -132,8 +132,6 @@ namespace Platforms
         /// IMPORTANT: Rails must update FIRST so counters are correct when Posts check visibility
         public void RefreshAllRailingsVisibility()
         {
-            Debug.Log($"[PlatformRailingSystem] {gameObject.name}: RefreshAllRailingsVisibility called, updating {_platform.PlatformRailings.Count} railings");
-            
             foreach (var platformRailing in _platform.PlatformRailings)
             {
                 if (platformRailing)

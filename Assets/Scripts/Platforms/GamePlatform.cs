@@ -266,7 +266,6 @@ public class GamePlatform : MonoBehaviour, IPickupable
     
     private void OnSocketsChanged()
     {
-        Debug.Log($"[GamePlatform] {gameObject.name}: OnSocketsChanged received, refreshing all railings");
         _railingSystem?.RefreshAllRailingsVisibility();
         ConnectionsChanged?.Invoke(this);
     }

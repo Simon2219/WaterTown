@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using Grid;
 using UnityEngine;
-using UnityEngine.Serialization;
 
 namespace Platforms
 {
@@ -598,12 +597,6 @@ public class PlatformSocketSystem : MonoBehaviour
     
     #endregion
     
-    /// Gets both neighbor socket indices (previous and next in perimeter order)
-    ///
-    private (int previous, int next) GetNeighborSocketIndices(int socketIndex)
-    {
-        return (GetPreviousSocketIndex(socketIndex), GetNextSocketIndex(socketIndex));
-    }
     
     #region Grid Adjacency
     
@@ -685,10 +678,7 @@ public class PlatformSocketSystem : MonoBehaviour
         }
         
         if (anyChanged)
-        {
-            Debug.Log($"[PlatformSocketSystem] {gameObject.name}: Sockets changed, invoking SocketsChanged");
             SocketsChanged?.Invoke();
-        }
     }
 
 
@@ -711,10 +701,7 @@ public class PlatformSocketSystem : MonoBehaviour
             return SocketStatus.Occupied;
 
         if (cellData == null)
-        {
-            Debug.Log($"[PlatformSocketSystem] {gameObject.name} Socket {socketIndex}: Adjacent cell {adjacentCell} is null/out of bounds → Linkable");
             return SocketStatus.Linkable;
-        }
 
         // Check flags in priority order using HasFlag() for proper [Flags] enum handling
         // Priority: Locked > ModuleBlocked > Occupied/Preview > default (Linkable)
@@ -725,13 +712,9 @@ public class PlatformSocketSystem : MonoBehaviour
             return SocketStatus.Occupied;
         
         if (cellData.HasFlag(CellFlag.Occupied) || cellData.HasFlag(CellFlag.OccupyPreview))
-        {
-            Debug.Log($"[PlatformSocketSystem] {gameObject.name} Socket {socketIndex}: Adjacent cell {adjacentCell} has flags {cellData.Flags} → Connected");
             return SocketStatus.Connected;
-        }
         
         // Empty or Buildable only = Linkable
-        Debug.Log($"[PlatformSocketSystem] {gameObject.name} Socket {socketIndex}: Adjacent cell {adjacentCell} has flags {cellData.Flags} → Linkable");
         return SocketStatus.Linkable;
     }
 
@@ -761,16 +744,12 @@ public class PlatformSocketSystem : MonoBehaviour
             if (socket.Status != newStatus)
             {
                 socket.SetStatus(newStatus);
-                _platformSockets[i] = socket;
                 anyChanged = true;
             }
         }
         
         if (anyChanged)
-        {
-            Debug.Log($"[PlatformSocketSystem] {gameObject.name}: Connections reset, invoking SocketsChanged");
             SocketsChanged?.Invoke();
-        }
     }
     
     
