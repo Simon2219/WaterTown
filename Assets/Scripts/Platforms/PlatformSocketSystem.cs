@@ -515,34 +515,23 @@ public class PlatformSocketSystem : MonoBehaviour
         if (_platformSockets.Count == 0) return -1;
         
         Vector2Int primaryCell = _worldGrid.WorldToCell(worldPos);
-        Vector3 cellCenter = _worldGrid.GetCellCenter(primaryCell);
-        
-        const float boundaryTolerance = 0.01f;
-        float halfCell = WorldGrid.CellSize * 0.5f;
-        
-        float offsetX = worldPos.x - cellCenter.x;
-        float offsetZ = worldPos.z - cellCenter.z;
-        
-        bool onXBoundary = Mathf.Abs(Mathf.Abs(offsetX) - halfCell) < boundaryTolerance;
-        bool onZBoundary = Mathf.Abs(Mathf.Abs(offsetZ) - halfCell) < boundaryTolerance;
         
         int best = -1;
         float bestDistSqr = float.MaxValue;
-        
-        // Check primary cell
         CheckCellForNearest(primaryCell, worldPos, ref best, ref bestDistSqr);
         
-        // Check adjacent cells if on boundary
-        if (onXBoundary)
-        {
-            int adjacentX = offsetX > 0 ? primaryCell.x + 1 : primaryCell.x - 1;
-            CheckCellForNearest(new Vector2Int(adjacentX, primaryCell.y), worldPos, ref best, ref bestDistSqr);
-        }
-        if (onZBoundary)
-        {
-            int adjacentZ = offsetZ > 0 ? primaryCell.y + 1 : primaryCell.y - 1;
-            CheckCellForNearest(new Vector2Int(primaryCell.x, adjacentZ), worldPos, ref best, ref bestDistSqr);
-        }
+        // Check adjacent cells if near boundary - compute direction from cell center
+        Vector3 offset = worldPos - _worldGrid.GetCellCenter(primaryCell);
+        float boundaryThreshold = WorldGrid.CellSize * 0.49f;
+        
+        // Step is ±1 if near boundary in that axis, 0 otherwise
+        int stepX = Mathf.Abs(offset.x) > boundaryThreshold ? (int)Mathf.Sign(offset.x) : 0;
+        int stepZ = Mathf.Abs(offset.z) > boundaryThreshold ? (int)Mathf.Sign(offset.z) : 0;
+        
+        if (stepX != 0)
+            CheckCellForNearest(new Vector2Int(primaryCell.x + stepX, primaryCell.y), worldPos, ref best, ref bestDistSqr);
+        if (stepZ != 0)
+            CheckCellForNearest(new Vector2Int(primaryCell.x, primaryCell.y + stepZ), worldPos, ref best, ref bestDistSqr);
         
         return best;
     }
