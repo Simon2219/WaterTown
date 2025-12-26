@@ -449,45 +449,97 @@ public class PlatformSocketSystem : MonoBehaviour
     
     
     
-    /// Finds the nearest socket to a world position using edge-based lookup
-    /// Only checks sockets on the closest edge(s) - O(1) for edge, O(k) for corner where k ≤ 6
+    /// Finds the nearest socket to a world position
+    /// Uses platform-local cell coordinates for O(1) lookup
+    /// For corner cases, checks both adjacent edges (max 2 socket comparisons)
     ///
     public int FindNearestSocketIndex(Vector3 worldPos)
     {
         if (_platformSockets.Count == 0) return -1;
         
-        // Transform to local space - socket local positions are constant
-        Vector3 localPos = transform.InverseTransformPoint(worldPos);
         var footprint = GetFootprint();
-        
+        int width = footprint.x;
+        int length = footprint.y;
         float cellSize = WorldGrid.CellSize;
-        float halfWidth = footprint.x * cellSize * 0.5f;
-        float halfLength = footprint.y * cellSize * 0.5f;
         
-        // Distance to each edge (negative = inside platform)
-        float distToNorth = localPos.z - halfLength;
-        float distToSouth = -halfLength - localPos.z;
-        float distToEast = localPos.x - halfWidth;
-        float distToWest = -halfWidth - localPos.x;
+        // Transform to platform-local cell coordinates
+        // Platform center is at local (0,0), convert to cell space where (0,0) is SW corner
+        Vector3 localPos = transform.InverseTransformPoint(worldPos);
+        float cellX = (localPos.x / cellSize) + (width * 0.5f);
+        float cellZ = (localPos.z / cellSize) + (length * 0.5f);
         
-        // Find which edge(s) are closest
-        float minDist = Mathf.Max(distToNorth, distToSouth, distToEast, distToWest);
-        float threshold = cellSize * 0.5f; // Check adjacent edge if near corner
+        // Clamp to platform bounds
+        cellX = Mathf.Clamp(cellX, 0f, width);
+        cellZ = Mathf.Clamp(cellZ, 0f, length);
         
-        int best = -1;
-        float bestDistSqr = float.MaxValue;
+        // Distance to each edge (in cell units)
+        float dNorth = length - cellZ;
+        float dSouth = cellZ;
+        float dEast = width - cellX;
+        float dWest = cellX;
         
-        // Check each edge that's within threshold of closest
-        if (distToNorth >= minDist - threshold)
-            CheckEdgeForNearest(Edge.North, localPos, footprint, ref best, ref bestDistSqr);
-        if (distToSouth >= minDist - threshold)
-            CheckEdgeForNearest(Edge.South, localPos, footprint, ref best, ref bestDistSqr);
-        if (distToEast >= minDist - threshold)
-            CheckEdgeForNearest(Edge.East, localPos, footprint, ref best, ref bestDistSqr);
-        if (distToWest >= minDist - threshold)
-            CheckEdgeForNearest(Edge.West, localPos, footprint, ref best, ref bestDistSqr);
+        // Find the two smallest distances (for corner handling)
+        float minDist = Mathf.Min(dNorth, dSouth, dEast, dWest);
+        const float cornerThreshold = 0.5f; // Within half a cell of corner
         
-        return best;
+        // Get primary socket (on closest edge)
+        int primarySocket = GetSocketOnEdge(minDist == dNorth ? Edge.North :
+                                            minDist == dEast ? Edge.East :
+                                            minDist == dSouth ? Edge.South : Edge.West,
+                                            cellX, cellZ, width, length);
+        
+        // Check if near a corner - if so, compare with secondary edge socket
+        float secondMinDist = float.MaxValue;
+        Edge secondEdge = Edge.North;
+        
+        if (dNorth > minDist && dNorth < secondMinDist) { secondMinDist = dNorth; secondEdge = Edge.North; }
+        if (dEast > minDist && dEast < secondMinDist) { secondMinDist = dEast; secondEdge = Edge.East; }
+        if (dSouth > minDist && dSouth < secondMinDist) { secondMinDist = dSouth; secondEdge = Edge.South; }
+        if (dWest > minDist && dWest < secondMinDist) { secondMinDist = dWest; secondEdge = Edge.West; }
+        
+        // If near corner, compare primary vs secondary socket distance
+        if (secondMinDist - minDist < cornerThreshold)
+        {
+            int secondarySocket = GetSocketOnEdge(secondEdge, cellX, cellZ, width, length);
+            
+            float primaryDistSqr = Vector3.SqrMagnitude(localPos - _platformSockets[primarySocket].LocalPos);
+            float secondaryDistSqr = Vector3.SqrMagnitude(localPos - _platformSockets[secondarySocket].LocalPos);
+            
+            return secondaryDistSqr < primaryDistSqr ? secondarySocket : primarySocket;
+        }
+        
+        return primarySocket;
+    }
+    
+    
+    /// Gets the socket index on a specific edge based on cell coordinates
+    /// Socket order: North (0 to W-1), East (W to W+L-1), South (W+L to 2W+L-1), West (2W+L to 2W+2L-1)
+    private int GetSocketOnEdge(Edge edge, float cellX, float cellZ, int width, int length)
+    {
+        int idx;
+        switch (edge)
+        {
+            case Edge.North:
+                // North: left to right (increasing cellX)
+                idx = Mathf.Clamp(Mathf.FloorToInt(cellX), 0, width - 1);
+                return idx;
+                
+            case Edge.East:
+                // East: top to bottom (decreasing cellZ)
+                idx = Mathf.Clamp(Mathf.FloorToInt(length - cellZ), 0, length - 1);
+                return width + idx;
+                
+            case Edge.South:
+                // South: right to left (decreasing cellX)
+                idx = Mathf.Clamp(Mathf.FloorToInt(width - cellX), 0, width - 1);
+                return width + length + idx;
+                
+            case Edge.West:
+            default:
+                // West: bottom to top (increasing cellZ)
+                idx = Mathf.Clamp(Mathf.FloorToInt(cellZ), 0, length - 1);
+                return 2 * width + length + idx;
+        }
     }
     
     
@@ -555,54 +607,6 @@ public class PlatformSocketSystem : MonoBehaviour
         return result;
     }
 
-    
-    
-    /// Checks sockets on a specific edge, only checking the 1-3 nearest based on position
-    private void CheckEdgeForNearest(Edge edge, Vector3 localPos, Vector2Int footprint, ref int best, ref float bestDistSqr)
-    {
-        GetSocketIndexRangeForEdge(edge, out int start, out int end);
-        
-        float cellSize = WorldGrid.CellSize;
-        float halfWidth = footprint.x * cellSize * 0.5f;
-        float halfLength = footprint.y * cellSize * 0.5f;
-        
-        // Calculate approximate socket index based on position along edge
-        float t;
-        switch (edge)
-        {
-            case Edge.North: // Left to right (increasing X)
-                t = (localPos.x + halfWidth - cellSize * 0.5f) / cellSize;
-                break;
-            case Edge.East: // Top to bottom (decreasing Z)
-                t = (halfLength - cellSize * 0.5f - localPos.z) / cellSize;
-                break;
-            case Edge.South: // Right to left (decreasing X)
-                t = (halfWidth - cellSize * 0.5f - localPos.x) / cellSize;
-                break;
-            case Edge.West: // Bottom to top (increasing Z)
-            default:
-                t = (localPos.z + halfLength - cellSize * 0.5f) / cellSize;
-                break;
-        }
-        
-        int approxIdx = Mathf.RoundToInt(t);
-        int edgeLength = end - start + 1;
-        
-        // Check socket at approx position and its neighbors (at most 3 sockets)
-        for (int offset = -1; offset <= 1; offset++)
-        {
-            int idx = approxIdx + offset;
-            if (idx < 0 || idx >= edgeLength) continue;
-            
-            int socketIdx = start + idx;
-            float distSqr = Vector3.SqrMagnitude(localPos - _platformSockets[socketIdx].LocalPos);
-            if (distSqr < bestDistSqr)
-            {
-                bestDistSqr = distSqr;
-                best = socketIdx;
-            }
-        }
-    }
     
     
     
