@@ -59,8 +59,7 @@ namespace Platforms
             if (indices == null || indices.Length == 0)
             {
                 // Fallback: bind to nearest socket
-                int nearest = _socketSystem.FindNearestSocketIndexLocal
-                    (transform.InverseTransformPoint(railing.transform.position));
+                int nearest = _platform.FindNearestSocketIndex(railing.transform.position);
                 
                 if (nearest < 0) return;
                 
@@ -110,6 +109,24 @@ namespace Platforms
         }
 
         
+        
+        /// Triggers visibility update only for railings attached to the changed sockets
+        /// Note: May call UpdateVisibility multiple times on same railing if attached to multiple changed sockets
+        public void RefreshRailingsVisibility(IReadOnlyList<int> changedSocketIndices)
+        {
+            foreach (int socketIndex in changedSocketIndices)
+            {
+                if (_socketToRailings.TryGetValue(socketIndex, out List<PlatformRailing> railings))
+                {
+                    for (var index = 0; index < railings.Count; index++)
+                    {
+                        var railing = railings[index];
+                        if (railing)
+                            railing.UpdateVisibility();
+                    }
+                }
+            }
+        }
         
         /// Triggers visibility update on all railings
         /// IMPORTANT: Rails must update FIRST so counters are correct when Posts check visibility

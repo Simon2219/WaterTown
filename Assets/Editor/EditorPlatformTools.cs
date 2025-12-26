@@ -1,27 +1,26 @@
 #if UNITY_EDITOR
 using System.Collections.Generic;
+using System.Reflection;
+using Grid;
 using Platforms;
 using UnityEditor;
 using UnityEngine;
 
 namespace Editor
 {
-    /// <summary>
-    /// Editor-only utility class for platform operations during prefab editing.
-    /// Provides direct access to platform sub-components when runtime dependency injection hasn't occurred.
-    /// 
+    /// Editor-only utility class for platform operations during prefab editing
+    /// Provides direct access to platform sub-components when runtime dependency injection hasn't occurred
     /// Use this class from EditorAssetManager and other editor tools instead of going through
-    /// GamePlatform facade methods, which require runtime initialization.
-    /// </summary>
+    /// GamePlatform facade methods, which require runtime initialization
+    ///
     public static class EditorPlatformTools
     {
         #region Component Access
         
         
-        /// <summary>
-        /// Gets the PlatformSocketSystem component directly from a GamePlatform.
-        /// Use this in editor when the runtime dependency injection hasn't occurred.
-        /// </summary>
+        /// Gets the PlatformSocketSystem component directly from a GamePlatform
+        /// Use this in editor when the runtime dependency injection hasn't occurred
+        ///
         public static PlatformSocketSystem GetSocketSystem(GamePlatform platform)
         {
             if (!platform) return null;
@@ -30,10 +29,9 @@ namespace Editor
         }
         
         
-        /// <summary>
-        /// Gets the PlatformRailingSystem component directly from a GamePlatform.
-        /// Use this in editor when the runtime dependency injection hasn't occurred.
-        /// </summary>
+        /// Gets the PlatformRailingSystem component directly from a GamePlatform
+        /// Use this in editor when the runtime dependency injection hasn't occurred
+        ///
         public static PlatformRailingSystem GetRailingSystem(GamePlatform platform)
         {
             if (!platform) return null;
@@ -42,13 +40,16 @@ namespace Editor
         }
 
 
-
+        /// Gets the PlatformEditorUtility component directly from a GamePlatform
+        ///
         public static PlatformEditorUtility GetEditorUtility(GamePlatform platform)
         {
             if (!platform) return null;
             platform.TryGetComponent(out PlatformEditorUtility editorUtility);
             return editorUtility;
         }
+        
+        
         #endregion
         
         
@@ -57,22 +58,34 @@ namespace Editor
         #region Socket Operations
         
         
-        /// <summary>
-        /// Builds sockets for a platform in editor mode.
-        /// </summary>
+        /// Builds sockets for a platform in editor mode
+        /// Sets WorldGrid reference if available (scene mode)
+        ///
         public static void BuildSockets(GamePlatform platform)
         {
             var socketSystem = GetSocketSystem(platform);
-            if (socketSystem)
-            {
-                socketSystem.ReBuildSockets(platform.Footprint);
-            }
+            if (!socketSystem) return;
+            
+            SetWorldGridReference(socketSystem);
+            socketSystem.ReBuildSockets(platform.Footprint);
         }
         
         
-        /// <summary>
-        /// Gets the socket list from a platform in editor mode.
-        /// </summary>
+        /// Sets the WorldGrid reference on a socket system via reflection
+        /// Required for cell-to-socket mapping to work in editor
+        ///
+        private static void SetWorldGridReference(PlatformSocketSystem socketSystem)
+        {
+            var worldGrid = Object.FindFirstObjectByType<WorldGrid>();
+            if (!worldGrid) return;
+            
+            var field = typeof(PlatformSocketSystem).GetField("_worldGrid", BindingFlags.NonPublic | BindingFlags.Instance);
+            field?.SetValue(socketSystem, worldGrid);
+        }
+        
+        
+        /// Gets the socket list from a platform in editor mode
+        ///
         public static IReadOnlyList<PlatformSocketSystem.SocketData> GetSockets(GamePlatform platform)
         {
             var socketSystem = GetSocketSystem(platform);
@@ -80,9 +93,8 @@ namespace Editor
         }
         
         
-        /// <summary>
-        /// Gets the socket count from a platform in editor mode.
-        /// </summary>
+        /// Gets the socket count from a platform in editor mode
+        ///
         public static int GetSocketCount(GamePlatform platform)
         {
             var socketSystem = GetSocketSystem(platform);
@@ -90,28 +102,33 @@ namespace Editor
         }
         
         
-        // Note: RefreshSocketStatuses is intentionally NOT provided here.
-        // It requires runtime dependencies (WorldGrid, PlatformManager) that don't exist
-        // in editor prefab mode. Socket statuses are calculated at runtime.
-        
-        
-        /// <summary>
-        /// Finds the nearest socket index to a local position in editor mode.
-        /// </summary>
-        public static int FindNearestSocketIndexLocal(GamePlatform platform, Vector3 localPos)
-        {
-            var socketSystem = GetSocketSystem(platform);
-            return socketSystem?.FindNearestSocketIndexLocal(localPos) ?? -1;
-        }
-        
-        
-        /// <summary>
-        /// Finds nearest socket indices to a local position in editor mode.
-        /// </summary>
+        /// Finds nearest socket indices to a local position in editor mode
+        /// Uses simple linear search - no WorldGrid required
+        ///
         public static void FindNearestSocketIndicesLocal(GamePlatform platform, Vector3 localPos, int maxCount, float maxDistance, List<int> result)
         {
+            result.Clear();
             var socketSystem = GetSocketSystem(platform);
-            socketSystem?.FindNearestSocketIndicesLocal(localPos, maxCount, maxDistance, result);
+            if (socketSystem == null || socketSystem.SocketCount == 0) return;
+            
+            Vector3 worldPos = ((Component)platform).transform.TransformPoint(localPos);
+            float maxDistSqr = maxDistance * maxDistance;
+            
+            // Simple linear search - collect all within distance, sorted by distance
+            var candidates = new List<(int idx, float distSqr)>();
+            var sockets = socketSystem.PlatformSockets;
+            
+            for (int i = 0; i < sockets.Count; i++)
+            {
+                float distSqr = Vector3.SqrMagnitude(worldPos - sockets[i].WorldPos);
+                if (distSqr <= maxDistSqr)
+                    candidates.Add((i, distSqr));
+            }
+            
+            candidates.Sort((a, b) => a.distSqr.CompareTo(b.distSqr));
+            
+            for (int i = 0; i < candidates.Count && i < maxCount; i++)
+                result.Add(candidates[i].idx);
         }
         
         
@@ -123,9 +140,8 @@ namespace Editor
         #region Module Operations
         
         
-        /// <summary>
-        /// Registers a module on sockets in editor mode.
-        /// </summary>
+        /// Registers a module on sockets in editor mode
+        ///
         public static void RegisterModuleOnSockets(GamePlatform platform, PlatformModule module, bool occupiesSockets, IEnumerable<int> socketIndices)
         {
             var socketSystem = GetSocketSystem(platform);
@@ -141,9 +157,8 @@ namespace Editor
         #region Railing Operations
         
         
-        /// <summary>
-        /// Ensures all child railings are registered with a platform in editor mode.
-        /// </summary>
+        /// Ensures all child railings are registered with a platform in editor mode
+        ///
         public static void EnsureChildrenRailingsRegistered(GamePlatform platform)
         {
             if (!platform) return;
@@ -151,14 +166,14 @@ namespace Editor
             var railings = platform.GetComponentsInChildren<PlatformRailing>(true);
             foreach (var r in railings)
             {
+                r._railingSystem = platform.GetComponent<PlatformRailingSystem>();
                 if (r) r.EnsureRegistered();
             }
         }
         
         
-        /// <summary>
-        /// Ensures all child modules are registered with a platform in editor mode.
-        /// </summary>
+        /// Ensures all child modules are registered with a platform in editor mode
+        ///
         public static void EnsureChildrenModulesRegistered(GamePlatform platform)
         {
             if (!platform) return;
