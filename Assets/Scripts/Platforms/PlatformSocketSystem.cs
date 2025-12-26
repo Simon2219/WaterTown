@@ -51,6 +51,10 @@ public class PlatformSocketSystem : MonoBehaviour
     /// Fired when socket statuses change - passes list of changed socket indices
     public event Action<IReadOnlyList<int>> SocketsChanged;
     
+    // Batched changes - fired once per frame via LateUpdate
+    private List<int> _pendingChanges;
+    private bool _changesPending;
+    
     
     #endregion
     
@@ -700,11 +704,9 @@ public class PlatformSocketSystem : MonoBehaviour
     
     
     // ReSharper disable Unity.PerformanceAnalysis
-    /// Refreshes all socket statuses by querying the grid.
+    /// Refreshes all socket statuses by querying the grid. Changes are batched and fired in LateUpdate.
     public void RefreshAllSocketStatuses()
     {
-        List<int> changed = null;
-        
         for (int i = 0; i < _platformSockets.Count; i++)
         {
             if (_platformSockets[i].Status is SocketStatus.Locked or SocketStatus.Disabled)
@@ -712,11 +714,21 @@ public class PlatformSocketSystem : MonoBehaviour
             
             SocketStatus newStatus = DetermineSocketStatus(i);
             if (SetSocketStatus(i, newStatus))
-                (changed ??= new List<int>()).Add(i);
+            {
+                _pendingChanges ??= new List<int>();
+                _pendingChanges.Add(i);
+                _changesPending = true;
+            }
         }
+    }
+    
+    private void LateUpdate()
+    {
+        if (!_changesPending) return;
         
-        if (changed != null)
-            SocketsChanged?.Invoke(changed);
+        SocketsChanged?.Invoke(_pendingChanges);
+        _pendingChanges.Clear();
+        _changesPending = false;
     }
 
 
@@ -769,8 +781,6 @@ public class PlatformSocketSystem : MonoBehaviour
             }
         }
 
-        List<int> changed = null;
-        
         // Reset all socket statuses to Linkable/Occupied (no neighbors)
         for (int i = 0; i < _platformSockets.Count; i++)
         {
@@ -783,12 +793,11 @@ public class PlatformSocketSystem : MonoBehaviour
             {
                 socket.SetStatus(newStatus);
                 _platformSockets[i] = socket;
-                (changed ??= new List<int>()).Add(i);
+                _pendingChanges ??= new List<int>();
+                _pendingChanges.Add(i);
+                _changesPending = true;
             }
         }
-        
-        if (changed != null)
-            SocketsChanged?.Invoke(changed);
     }
     
     
