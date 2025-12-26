@@ -59,7 +59,7 @@ namespace Platforms
             if (indices == null || indices.Length == 0)
             {
                 // Fallback: bind to nearest socket
-                int nearest = _socketSystem.FindNearestSocketIndex(railing.transform.position);
+                int nearest = _platform.FindNearestSocketIndex(railing.transform.position);
                 
                 if (nearest < 0) return;
                 
@@ -116,10 +116,11 @@ namespace Platforms
         {
             foreach (int socketIndex in changedSocketIndices)
             {
-                if (_socketToRailings.TryGetValue(socketIndex, out var railings))
+                if (_socketToRailings.TryGetValue(socketIndex, out List<PlatformRailing> railings))
                 {
-                    foreach (var railing in railings)
+                    for (var index = 0; index < railings.Count; index++)
                     {
+                        var railing = railings[index];
                         if (railing)
                             railing.UpdateVisibility();
                     }

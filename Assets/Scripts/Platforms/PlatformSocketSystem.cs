@@ -187,6 +187,19 @@ public class PlatformSocketSystem : MonoBehaviour
     
     
     
+    private void LateUpdate()
+    {
+        
+        
+        
+        if (!_changesPending) return;
+        
+        SocketsChanged?.Invoke(_pendingChanges);
+        _pendingChanges.Clear();
+        _changesPending = false;
+    }
+    
+    
     private void OnDestroy()
     {
         _platform.HasMoved -= OnPlatformMoved;
@@ -428,16 +441,8 @@ public class PlatformSocketSystem : MonoBehaviour
     #endregion
     
     
-    #region Edge & Socket Index Helpers
+    #region Edge & Socket Helpers
     
-    
-    /// Length in whole meters along the given edge (number of segments)
-    public int EdgeLengthMeters(Edge edge)
-    {
-        var footprintSize = GetFootprint();
-        
-        return edge is Edge.North or Edge.South ? footprintSize.x : footprintSize.y;
-    }
 
 
     /// Gets the socket index range (start, end inclusive) for a given edge
@@ -474,50 +479,12 @@ public class PlatformSocketSystem : MonoBehaviour
     }
     
     
-    /// Gets the next socket index in clockwise direction (with wrap-around)
-    ///
-    public int GetNextSocketIndex(int socketIndex)
-    {
-        if (_platformSockets.Count == 0) return -1;
-        return (socketIndex + 1) % _platformSockets.Count;
-    }
-    
-    
-    /// Gets the previous socket index in counter-clockwise direction (with wrap-around)
-    ///
-    public int GetPreviousSocketIndex(int socketIndex)
-    {
-        if (_platformSockets.Count == 0) return -1;
-        return (socketIndex - 1 + _platformSockets.Count) % _platformSockets.Count;
-    }
-    
-    
-    /// Gets both neighbor socket indices (previous and next in perimeter order)
-    ///
-    public (int previous, int next) GetNeighborSocketIndices(int socketIndex)
-    {
-        return (GetPreviousSocketIndex(socketIndex), GetNextSocketIndex(socketIndex));
-    }
-    
-    
-    /// Returns socket indices associated with a cell (max 4 for 1x1, typically 1-2)
-    /// Returns empty list if cell has no sockets (interior cell or not on platform)
-    ///
-    public List<int> GetCellSockets(Vector2Int cell)
-    {
-        if (_cellToSockets.TryGetValue(cell, out var sockets))
-            return sockets;
-        return new List<int>();
-    }
-    
     
     /// Finds the nearest socket to worldPos using cell-based lookup
     /// Requires WorldGrid - use EditorPlatformTools for editor prefab mode
     ///
     public int FindNearestSocketIndex(Vector3 worldPos)
     {
-        if (_platformSockets.Count == 0) return -1;
-        
         Vector2Int primaryCell = _worldGrid.WorldToCell(worldPos);
         
         int best = -1;
@@ -527,7 +494,7 @@ public class PlatformSocketSystem : MonoBehaviour
         // Check adjacent cells if near boundary - compute direction from cell center
         Vector3 offset = worldPos - _worldGrid.GetCellCenter(primaryCell);
         float boundaryThreshold = WorldGrid.CellSize * 0.49f;
-        
+
         // Step is ±1 if near boundary in that axis, 0 otherwise
         int stepX = Mathf.Abs(offset.x) > boundaryThreshold ? (int)Mathf.Sign(offset.x) : 0;
         int stepZ = Mathf.Abs(offset.z) > boundaryThreshold ? (int)Mathf.Sign(offset.z) : 0;
@@ -541,38 +508,23 @@ public class PlatformSocketSystem : MonoBehaviour
     }
     
     
-    /// Helper to check sockets in a cell and update best match
-    private void CheckCellForNearest(Vector2Int cell, Vector3 worldPos, ref int best, ref float bestDistSqr)
-    {
-        if (!_cellToSockets.TryGetValue(cell, out var socketsInCell)) return;
-        
-        foreach (int socketIdx in socketsInCell)
-        {
-            float distSqr = Vector3.SqrMagnitude(worldPos - _platformSockets[socketIdx].WorldPos);
-            if (distSqr < bestDistSqr)
-            {
-                bestDistSqr = distSqr;
-                best = socketIdx;
-            }
-        }
-    }
-    
     
     /// Finds up to maxCount nearest socket indices within maxDistance
     /// Walks outward from nearest socket using perimeter order
     ///
-    public void FindNearestSocketIndices(Vector3 worldPos, int maxCount, float maxDistance, List<int> result)
+    public List<int> FindNearestSocketIndices(Vector3 worldPos, int maxCount, float maxDistance)
     {
-        result.Clear();
-        if (maxCount <= 0 || _platformSockets.Count == 0) return;
+        List<int> result = new();
+        
+        if (maxCount <= 0 || _platformSockets.Count == 0) return result;
         
         int startIdx = FindNearestSocketIndex(worldPos);
-        if (startIdx < 0) return;
+        if (startIdx < 0) return result;
         
         float maxDistSqr = maxDistance * maxDistance;
         float startDistSqr = Vector3.SqrMagnitude(worldPos - _platformSockets[startIdx].WorldPos);
         
-        if (startDistSqr > maxDistSqr) return;
+        if (startDistSqr > maxDistSqr) return result;
         result.Add(startIdx);
         
         // Walk outward in both directions using the clockwise ordering
@@ -616,17 +568,64 @@ public class PlatformSocketSystem : MonoBehaviour
             if (!addedAny) break;
             if (prev == next) break; // Wrapped around
         }
+        
+        return result;
     }
 
     
     
+    /// Helper Method - Check Sockets in a given cell and return closest
+    /// 
+    private void CheckCellForNearest(Vector2Int cell, Vector3 worldPos, ref int best, ref float bestDistSqr)
+    {
+        if (!_cellToSockets.TryGetValue(cell, out List<int> socketsInCell)) return;
+        
+        foreach (int socketIdx in socketsInCell)
+        {
+            float distSqr = Vector3.SqrMagnitude(worldPos - _platformSockets[socketIdx].WorldPos);
+            if (distSqr < bestDistSqr)
+            {
+                bestDistSqr = distSqr;
+                best = socketIdx;
+            }
+        }
+    }
+    
+    
+    
+    /// Gets the next socket index in clockwise direction (with wrap-around)
+    ///
+    private int GetNextSocketIndex(int socketIndex)
+    {
+        if (_platformSockets.Count == 0) return -1;
+        return (socketIndex + 1) % _platformSockets.Count;
+    }
+    
+    
+    /// Gets the previous socket index in counter-clockwise direction (with wrap-around)
+    ///
+    private int GetPreviousSocketIndex(int socketIndex)
+    {
+        if (_platformSockets.Count == 0) return -1;
+        return (socketIndex - 1 + _platformSockets.Count) % _platformSockets.Count;
+    }
+    
+    
+    
     #endregion
     
+    /// Gets both neighbor socket indices (previous and next in perimeter order)
+    ///
+    private (int previous, int next) GetNeighborSocketIndices(int socketIndex)
+    {
+        return (GetPreviousSocketIndex(socketIndex), GetNextSocketIndex(socketIndex));
+    }
     
     #region Grid Adjacency
     
     
     /// Gets the world-space outward direction for a socket (accounts for platform rotation)
+    /// 
     public Vector3 GetSocketWorldOutwardDirection(int socketIndex)
     {
         if (socketIndex < 0 || socketIndex >= _platformSockets.Count)
@@ -667,33 +666,16 @@ public class PlatformSocketSystem : MonoBehaviour
         
         return _worldGrid.WorldToCell(cellBehindPos);
     }
-
-
-    /// Gets all sockets that are connected to a specific neighbor platform
-    /// Uses neighbor's occupiedCells for efficient O(1) lookup per socket
-    public List<int> GetSocketsConnectedToNeighbor(GamePlatform neighbor)
+    
+    
+    
+    
+    /// Returns socket indices associated with a cell (max 4 for 1x1, typically 1-2)
+    /// Returns empty list if cell has no sockets (interior cell or not on platform)
+    ///
+    private List<int> GetCellSockets(Vector2Int cell)
     {
-        var result = new List<int>();
-        if (!neighbor || neighbor.occupiedCells == null || neighbor.occupiedCells.Count == 0) 
-            return result;
-
-        // Create HashSet from neighbor's cells for O(1) lookup
-        var neighborCells = new HashSet<Vector2Int>(neighbor.occupiedCells);
-
-        for (int i = 0; i < _platformSockets.Count; i++)
-        {
-            var socket = _platformSockets[i];
-            if (socket.Status != SocketStatus.Connected) continue;
-
-            // Check if this socket's adjacent cell is one of the neighbor's cells
-            Vector2Int adjacentCell = GetAdjacentCellForSocket(i);
-            if (neighborCells.Contains(adjacentCell))
-            {
-                result.Add(i);
-            }
-        }
-
-        return result;
+        return _cellToSockets.TryGetValue(cell, out List<int> sockets) ? sockets : new List<int>();
     }
     
     
@@ -703,8 +685,8 @@ public class PlatformSocketSystem : MonoBehaviour
     #region Connection Management
     
     
-    // ReSharper disable Unity.PerformanceAnalysis
-    /// Refreshes all socket statuses by querying the grid. Changes are batched and fired in LateUpdate.
+    /// Refreshes all socket statuses by querying the grid.
+    /// Disabled Performance Analysis because of .Invoke() 
     public void RefreshAllSocketStatuses()
     {
         for (int i = 0; i < _platformSockets.Count; i++)
@@ -721,51 +703,59 @@ public class PlatformSocketSystem : MonoBehaviour
             }
         }
     }
-    
-    private void LateUpdate()
-    {
-        if (!_changesPending) return;
-        
-        SocketsChanged?.Invoke(_pendingChanges);
-        _pendingChanges.Clear();
-        _changesPending = false;
-    }
 
 
     
-
-    /// <summary>
+    
     /// Determines a socket's status by querying the grid.
     /// Rules:
     /// - Blocked by own module → Occupied
     /// - No neighbor platform → Linkable
     /// - Neighbor has blocking module → Occupied  
     /// - Otherwise → Connected
-    /// </summary>
+    ///
     private SocketStatus DetermineSocketStatus(int socketIndex)
     {
-        // Check if this socket has a blocking module
-        if (IsSocketBlockedByModule(socketIndex))
-            return SocketStatus.Occupied;
-        
         Vector2Int adjacentCell = GetAdjacentCellForSocket(socketIndex);
         var cellData = _worldGrid.GetCell(adjacentCell);
         
-        // Check if adjacent cell is occupied by a platform (including preview/moving platforms)
+        
+        // Check if this socket has a blocking module
+        if (IsSocketBlockedByModule(socketIndex))
+            return SocketStatus.Occupied;
+
+        if (cellData == null) return SocketStatus.Linkable;
+
+        
+        SocketStatus newStatus = cellData.Flags switch
+        {
+            CellFlag.Empty => SocketStatus.Linkable,
+            CellFlag.Locked => SocketStatus.Locked,
+            CellFlag.Buildable => SocketStatus.Linkable,
+            CellFlag.Occupied => SocketStatus.Occupied,
+            CellFlag.OccupyPreview => SocketStatus.Occupied,
+            CellFlag.ModuleBlocked => SocketStatus.Occupied,
+            
+            _ => throw new ArgumentOutOfRangeException()
+        };
+        
+        return newStatus;
+
+        /*// Check if adjacent cell is occupied by a platform (including preview/moving platforms)
         if (cellData == null || !cellData.HasFlag(CellFlag.Occupied | CellFlag.OccupyPreview))
             return SocketStatus.Linkable;
-        
+
         // Verify it's actually a neighbor platform (not self or non-platform)
-        if (!_platformManager.GetPlatformAtCell(adjacentCell, out var neighbor) 
-            || !neighbor 
+        if (!_platformManager.GetPlatformAtCell(adjacentCell, out var neighbor)
+            || !neighbor
             || neighbor == _platform)
             return SocketStatus.Linkable;
-        
+
         // Check if neighbor has a blocking module facing us
         if (cellData.HasFlag(CellFlag.ModuleBlocked))
             return SocketStatus.Occupied;
-        
-        return SocketStatus.Connected;
+
+        return SocketStatus.Connected;*/
     }
 
 

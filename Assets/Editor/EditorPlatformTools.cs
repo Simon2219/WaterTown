@@ -166,6 +166,7 @@ namespace Editor
             var railings = platform.GetComponentsInChildren<PlatformRailing>(true);
             foreach (var r in railings)
             {
+                r._railingSystem = platform.GetComponent<PlatformRailingSystem>();
                 if (r) r.EnsureRegistered();
             }
         }

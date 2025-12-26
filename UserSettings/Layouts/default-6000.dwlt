@@ -43,7 +43,7 @@ MonoBehaviour:
     width: 1536
     height: 813.60004
   m_ShowMode: 0
-  m_Title: Hierarchy
+  m_Title: Console
   m_RootView: {fileID: 9}
   m_MinSize: {x: 300, y: 112}
   m_MaxSize: {x: 24288, y: 16192}
@@ -1071,6 +1071,9 @@ MonoBehaviour:
       m_LastClickedID:
         m_Data: 0
       m_ExpandedIDs:
+      - m_Data: -84778
+      - m_Data: -84774
+      - m_Data: -84676
       - m_Data: -1304
       m_RenameOverlay:
         m_UserAcceptedRename: 0
@@ -1762,9 +1765,9 @@ MonoBehaviour:
   m_AudioPlay: 0
   m_DebugDrawModesUseInteractiveLightBakingData: 0
   m_Position:
-    m_Target: {x: 44.28373, y: 0, z: 55.720524}
+    m_Target: {x: 42.775345, y: 3.1975513, z: 60.109215}
     speed: 2
-    m_Value: {x: 44.28373, y: 0, z: 55.720524}
+    m_Value: {x: 42.775345, y: 3.1975513, z: 60.109215}
   m_RenderMode: 0
   m_CameraMode:
     drawMode: 0
@@ -1814,9 +1817,9 @@ MonoBehaviour:
     speed: 2
     m_Value: {x: -0.36820787, y: -0.22529832, z: 0.09245445, w: -0.89730006}
   m_Size:
-    m_Target: 6.4681096
+    m_Target: 10.732689
     speed: 2
-    m_Value: 6.4681096
+    m_Value: 10.732689
   m_Ortho:
     m_Target: 0
     speed: 2
@@ -2064,14 +2067,14 @@ MonoBehaviour:
       m_Data: 60970
     m_ExpandedIDs:
     - m_Data: 0
-    - m_Data: 60956
-    - m_Data: 60958
-    - m_Data: 60960
-    - m_Data: 60962
-    - m_Data: 60964
-    - m_Data: 60966
-    - m_Data: 60968
-    - m_Data: 60970
+    - m_Data: 60796
+    - m_Data: 60798
+    - m_Data: 60800
+    - m_Data: 60802
+    - m_Data: 60804
+    - m_Data: 60806
+    - m_Data: 60808
+    - m_Data: 60810
     m_RenameOverlay:
       m_UserAcceptedRename: 0
       m_Name: 
@@ -2104,14 +2107,14 @@ MonoBehaviour:
       m_Data: 0
     m_ExpandedIDs:
     - m_Data: 0
-    - m_Data: 60956
-    - m_Data: 60958
-    - m_Data: 60960
-    - m_Data: 60962
-    - m_Data: 60964
-    - m_Data: 60966
-    - m_Data: 60968
-    - m_Data: 60970
+    - m_Data: 60796
+    - m_Data: 60798
+    - m_Data: 60800
+    - m_Data: 60802
+    - m_Data: 60804
+    - m_Data: 60806
+    - m_Data: 60808
+    - m_Data: 60810
     m_RenameOverlay:
       m_UserAcceptedRename: 0
       m_Name: 
@@ -2141,7 +2144,7 @@ MonoBehaviour:
     m_SelectedInstanceIDs:
     - m_Data: 54040
     m_LastClickedInstanceID: 54040
-    m_HadKeyboardFocusLastEvent: 0
+    m_HadKeyboardFocusLastEvent: 1
     m_ExpandedInstanceIDs: []
     m_RenameOverlay:
       m_UserAcceptedRename: 0

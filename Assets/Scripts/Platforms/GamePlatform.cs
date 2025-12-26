@@ -264,6 +264,7 @@ public class GamePlatform : MonoBehaviour, IPickupable
     #region Event Handlers
     
     
+    // ReSharper disable Unity.PerformanceAnalysis
     private void OnSocketsChanged(IReadOnlyList<int> changedSocketIndices)
     {
         // Refresh railing visibility only for changed sockets
@@ -306,8 +307,10 @@ public class GamePlatform : MonoBehaviour, IPickupable
         => _socketSystem?.IsSocketConnected(socketIndex) ?? false;
 
 
-    public int EdgeLengthMeters(Edge edge) 
-        => _socketSystem?.EdgeLengthMeters((PlatformSocketSystem.Edge)(int)edge) ?? 0;
+    public int EdgeLengthMeters(Edge edge)
+    {
+        return edge is Edge.North or Edge.South ? footprintSize.x : footprintSize.y;
+    }
 
 
     public void GetSocketIndexRangeForEdge(Edge edge, out int startIndex, out int endIndex)
@@ -320,11 +323,11 @@ public class GamePlatform : MonoBehaviour, IPickupable
         => _socketSystem?.FindNearestSocketIndex(transform.TransformPoint(localPos)) ?? -1;
 
 
-    public void FindNearestSocketIndices(Vector3 worldPos, int maxCount, float maxDistance, List<int> result)
-        => _socketSystem?.FindNearestSocketIndices(worldPos, maxCount, maxDistance, result);
+    public List<int> FindNearestSocketIndices(Vector3 worldPos, int maxCount, float maxDistance)
+        => _socketSystem?.FindNearestSocketIndices(worldPos, maxCount, maxDistance);
 
 
-    public int FindNearestSocketIndexWorld(Vector3 worldPos) 
+    public int FindNearestSocketIndex(Vector3 worldPos) 
         => _socketSystem?.FindNearestSocketIndex(worldPos) ?? -1;
 
 
@@ -334,10 +337,7 @@ public class GamePlatform : MonoBehaviour, IPickupable
 
     public Vector2Int GetAdjacentCellForSocket(int socketIndex) 
         => _socketSystem?.GetAdjacentCellForSocket(socketIndex) ?? Vector2Int.zero;
-
-
-    public List<int> GetSocketsConnectedToNeighbor(GamePlatform neighbor) 
-        => _socketSystem?.GetSocketsConnectedToNeighbor(neighbor) ?? new List<int>();
+    
 
 
     public void ResetConnections() 
