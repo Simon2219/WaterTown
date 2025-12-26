@@ -13,8 +13,13 @@ namespace Platforms
 /// Manages all platform-specific logic: registration, adjacency, and socket connections
 /// Separated from TownManager to isolate platform concerns from town-level orchestration
 ///
-/// EXECUTION ORDER: This runs after GamePlatform to ensure all platforms have processed
-/// their HasMoved events and updated occupiedCells BEFORE we process adjacency updates.
+/// EXECUTION ORDER & UPDATE FLOW:
+/// 1. GamePlatform.LateUpdate (-10): Detects movement, fires HasMoved -> handlers QUEUE changes
+/// 2. PlatformManager.LateUpdate (10): APPLIES queued cell changes, then processes adjacency
+/// 3. Socket changes trigger _updatePending on affected platforms
+/// 4. Next frame: GamePlatform.LateUpdate refreshes railing visibility
+///
+/// This batched approach eliminates race conditions from immediate cell modifications.
 ///
 [DisallowMultipleComponent]
 [DefaultExecutionOrder(10)] // Run after GamePlatform (which is at -10)
@@ -48,11 +53,17 @@ public class PlatformManager : MonoBehaviour
     /// Reverse lookup: which platform occupies a given cell
     private readonly Dictionary<Vector2Int, GamePlatform> _cellToPlatform = new();
 
-    /// Update batching
-    /// Track each platform in need of an update
+    /// Update batching - platforms needing adjacency recomputation
     private readonly HashSet<GamePlatform> _platformsNeedingUpdate = new();
+    
+    /// Cells that need to be cleared (accumulated during frame, processed in LateUpdate)
+    private readonly HashSet<Vector2Int> _cellsPendingClear = new();
+    
+    /// Cell updates pending (platform -> cells to set)
+    private readonly Dictionary<GamePlatform, List<Vector2Int>> _cellUpdatesPending = new();
 
     private bool _isRecomputingAdjacency = false;
+    private bool _hasPendingCellUpdates = false;
 
     #endregion
 
@@ -90,11 +101,54 @@ public class PlatformManager : MonoBehaviour
 
     private void LateUpdate()
     {
-        // Batch adjacency recomputation to once per frame for affected platforms only
+        // Phase 1: Process all pending cell updates (clears and sets)
+        if (_hasPendingCellUpdates)
+        {
+            ProcessPendingCellUpdates();
+        }
+        
+        // Phase 2: Batch adjacency recomputation for affected platforms
         if (_platformsNeedingUpdate.Count > 0 && !_isRecomputingAdjacency)
         {
             RecomputeAdjacencyForAffectedPlatforms();
         }
+    }
+    
+    
+    /// Processes all pending cell clears and updates in one batch
+    /// This ensures consistent state before adjacency computation
+    private void ProcessPendingCellUpdates()
+    {
+        _hasPendingCellUpdates = false;
+        
+        // First, clear all pending cells
+        foreach (Vector2Int cell in _cellsPendingClear)
+        {
+            _worldGrid.GetCell(cell)?.Clear();
+            _cellToPlatform.Remove(cell);
+        }
+        _cellsPendingClear.Clear();
+        
+        // Then, apply all pending cell updates
+        foreach (var kvp in _cellUpdatesPending)
+        {
+            GamePlatform platform = kvp.Key;
+            List<Vector2Int> cells = kvp.Value;
+            
+            if (!platform || !platform.isActiveAndEnabled) continue;
+            
+            CellFlag flagToUse = platform.IsPickedUp ? CellFlag.OccupyPreview : CellFlag.Occupied;
+            
+            foreach (Vector2Int cell in cells)
+            {
+                var cellData = _worldGrid.GetCell(cell);
+                if (cellData != null && cellData.AddFlags(flagToUse))
+                {
+                    _cellToPlatform[cell] = platform;
+                }
+            }
+        }
+        _cellUpdatesPending.Clear();
     }
 
 
@@ -167,42 +221,67 @@ public class PlatformManager : MonoBehaviour
 
     /// GamePlatform Event - Platform Placed
     /// Either after getting spawned - or moved
-    /// Registers platform in grid and triggers adjacency update
+    /// Queues cell updates and triggers adjacency update (processed in LateUpdate)
     ///
     private void OnPlatformPlaced(GamePlatform platform)
     {
-        // Clear any leftover preview cells from the last movement (e.g. when placement is cancelled)
-        // previousOccupiedCells contains the cells from the last move frame
+        // Queue cleanup of any leftover preview cells from movement
         if (platform.previousOccupiedCells?.Count > 0)
         {
             foreach (Vector2Int cell in platform.previousOccupiedCells)
             {
-                // Only clear if this platform still owns the cell
+                // Only queue clear if this platform owns the cell
                 if (_cellToPlatform.TryGetValue(cell, out var owner) && owner == platform)
                 {
-                    _worldGrid.GetCell(cell)?.Clear();
-                    _cellToPlatform.Remove(cell);
+                    _cellsPendingClear.Add(cell);
                 }
             }
             platform.previousOccupiedCells.Clear();
         }
         
-        // Register platform in grid
-        RegisterPlatform(platform);
-
-        // Force immediate adjacency computation so connections are known
+        // Also clear any current occupied cells (they'll be re-added with Occupied flag)
+        foreach (Vector2Int cell in platform.occupiedCells)
+        {
+            if (_cellToPlatform.TryGetValue(cell, out var owner) && owner == platform)
+            {
+                _cellsPendingClear.Add(cell);
+            }
+        }
+        
+        // Queue the placement cells to be set with Occupied flag
+        List<Vector2Int> newCells = GetCellsForPlatform(platform);
+        platform.occupiedCells.Clear();
+        platform.occupiedCells.AddRange(newCells);
+        
+        // Queue cell updates (will be applied in LateUpdate)
+        _cellUpdatesPending[platform] = new List<Vector2Int>(newCells);
+        _hasPendingCellUpdates = true;
+        
+        // Mark for adjacency update (processed after cell updates)
         MarkAdjacencyDirtyForPlatform(platform);
-        RecomputeAdjacencyForAffectedPlatforms();
     }
 
 
 
     /// GamePlatform Event - Platform Picked Up
-    /// Clears Cell flags, cell ownership, and marks adjacency dirty
+    /// Queues cell clears and marks adjacency dirty (processed in LateUpdate)
     ///
     private void OnPlatformPickedUp(GamePlatform platform)
     {
-        ClearCellsForPlatform(platform, false);
+        // Queue clearing of all cells this platform currently occupies
+        foreach (Vector2Int cell in platform.occupiedCells)
+        {
+            if (_cellToPlatform.TryGetValue(cell, out var owner) && owner == platform)
+            {
+                _cellsPendingClear.Add(cell);
+            }
+        }
+        
+        // Save current cells as previous (for neighbor detection)
+        platform.previousOccupiedCells.Clear();
+        platform.previousOccupiedCells.AddRange(platform.occupiedCells);
+        
+        _hasPendingCellUpdates = true;
         
         // Mark affected platforms (neighbors at old position) for adjacency update
         MarkAdjacencyDirtyForPlatform(platform);
@@ -210,13 +289,32 @@ public class PlatformManager : MonoBehaviour
 
 
 
-    // ReSharper disable Unity.PerformanceAnalysis
     /// Called when a platform reports its transform changed
-    /// Lightweight update for runtime platform movement
+    /// Queues cell updates for batched processing in LateUpdate
     ///
     private void OnPlatformHasMoved(GamePlatform platform)
     {
-        UpdateCellsForPlatform(platform);
+        // Queue clearing of old cells
+        foreach (Vector2Int cell in platform.occupiedCells)
+        {
+            if (_cellToPlatform.TryGetValue(cell, out var owner) && owner == platform)
+            {
+                _cellsPendingClear.Add(cell);
+            }
+        }
+        
+        // Save current as previous for adjacency detection
+        platform.previousOccupiedCells.Clear();
+        platform.previousOccupiedCells.AddRange(platform.occupiedCells);
+        
+        // Calculate and queue new cells
+        List<Vector2Int> newCells = GetCellsForPlatform(platform);
+        platform.occupiedCells.Clear();
+        platform.occupiedCells.AddRange(newCells);
+        
+        // Queue cell updates
+        _cellUpdatesPending[platform] = new List<Vector2Int>(newCells);
+        _hasPendingCellUpdates = true;
 
         // Mark this platform and affected neighbors for adjacency update
         MarkAdjacencyDirtyForPlatform(platform);
@@ -523,57 +621,10 @@ public class PlatformManager : MonoBehaviour
 
     
     #region Adjacency System (Grid-Based)
-
     
-    private void ClearCellsForPlatform(GamePlatform platform, bool clearOccupation = false)
-    {
-        if (platform.occupiedCells.Count > 0)
-        {
-            platform.previousOccupiedCells.Clear();
-            platform.previousOccupiedCells.AddRange(platform.occupiedCells);
-        }
-        
-        int clearedCount = 0;
-        // Clear old preview/occupied flags for this platform's old cells
-        foreach (Vector2Int cell in platform.occupiedCells)
-        {
-            // Only clear if this platform owns the cell
-            if (_cellToPlatform.TryGetValue(cell, out var owner) && owner == platform)
-            {
-                _worldGrid.GetCell(cell)?.Clear();
-                _cellToPlatform.Remove(cell);
-                clearedCount++;
-            }
-        }
-
-        if (clearOccupation)  
-            platform.occupiedCells.Clear();
-    }
-
-
-
-    private void UpdateCellsForPlatform(GamePlatform platform)
-    {
-        ClearCellsForPlatform(platform, true);
-        
-        // Compute new footprint cells from current transform (rotation-aware)
-        List<Vector2Int> newCells = GetCellsForPlatform(platform);
-        platform.occupiedCells.AddRange(newCells);
-        
-        // Different Flag based on if Preview or Placed
-        CellFlag flagToUse = platform.IsPickedUp ? CellFlag.OccupyPreview : CellFlag.Occupied;
-
-        // Update grid occupancy with proper flags
-        foreach (Vector2Int cell in platform.occupiedCells)
-        {
-            // AddFlags enforces priority (won't overwrite Occupied with OccupyPreview)
-            var cellData = _worldGrid.GetCell(cell);
-            if (cellData != null && cellData.AddFlags(flagToUse))
-            {
-                _cellToPlatform[cell] = platform;
-            }
-        }
-    }
+    // NOTE: Cell updates are now batched via _cellsPendingClear and _cellUpdatesPending
+    // and processed in LateUpdate via ProcessPendingCellUpdates()
+    // This eliminates race conditions from immediate cell modifications
     
     
     

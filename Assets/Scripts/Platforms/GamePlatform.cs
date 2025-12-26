@@ -14,7 +14,7 @@ namespace Platforms
 /// EXECUTION ORDER: This runs before PlatformManager to ensure Platform Updates finished
 
 [DisallowMultipleComponent]
-[DefaultExecutionOrder(-10)] // Run before PlatformManager (which is at 0)
+[DefaultExecutionOrder(-10)] // Run before PlatformManager (which is at 10)
 
 [RequireComponent(typeof(PlatformSocketSystem))]
 [RequireComponent(typeof(PlatformRailingSystem))]
