@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
-using UnityEngine.AI;
 using UnityEngine.InputSystem;
+using Navigation;
 
 namespace Agents
 {
@@ -12,6 +12,8 @@ namespace Agents
     /// 1. Click anywhere → raycast
     /// 2. If raycast hits an Agent → select it
     /// 3. If agent is already selected AND click on ground → move agent there
+    /// 
+    /// Uses PathfindingManager for position validation.
     /// </summary>
     [DisallowMultipleComponent]
     public class NPCAgentSpawner : MonoBehaviour
@@ -26,19 +28,25 @@ namespace Agents
         [SerializeField] private InputActionReference selectMoveAction;
         
         [Header("Spawn Settings")]
-        [Tooltip("NavMesh Agent Type for spawned agents. Must match the NavMeshSurface baking type.")]
-        [SerializeField] private NavMeshAgentType agentType;
-        
         [Tooltip("Optional fixed spawn point. If set and enabled, agents spawn here.")]
         [SerializeField] private Transform spawnPoint;
         [SerializeField] private bool useSpawnPoint = false;
         
         [Header("Ground Detection")]
-        [Tooltip("Y coordinate of your NavMesh/platforms for plane raycasting.")]
-        [SerializeField] private float groundPlaneHeight = 0f;
+        [Tooltip("Layer mask for ground/platform raycasting (what surfaces agents can spawn/move on).")]
+        [SerializeField] private LayerMask groundLayerMask = ~0;
         
-        [Tooltip("Search radius for finding NavMesh from click point.")]
-        [SerializeField] private float navMeshSearchRadius = 5f;
+        [Tooltip("Height offset above the raycast hit point to spawn agents.")]
+        [SerializeField] private float spawnHeightOffset = 0.1f;
+        
+        [Tooltip("Whether to require a walkable navmesh position for spawning.")]
+        [SerializeField] private bool requireWalkableForSpawn = true;
+        
+        [Tooltip("Whether to require a walkable navmesh position for movement.")]
+        [SerializeField] private bool requireWalkableForMove = true;
+        
+        [Tooltip("Maximum distance to search for walkable position from raycast hit.")]
+        [SerializeField] private float walkableSearchRadius = 5f;
         
         [Header("Raycasting")]
         [Tooltip("Maximum raycast distance.")]
@@ -75,6 +83,7 @@ namespace Agents
         #region Private
         
         private NPCManager _manager;
+        private PathfindingManager _pathfindingManager;
         private NPCAgent _selectedAgent;
         
         #endregion
@@ -93,6 +102,13 @@ namespace Agents
             {
                 Debug.LogError("[NPCAgentSpawner] NPCManager not found!");
                 enabled = false;
+                return;
+            }
+            
+            _pathfindingManager = PathfindingManager.Instance;
+            if (!_pathfindingManager && debugLogs)
+            {
+                Debug.LogWarning("[NPCAgentSpawner] PathfindingManager not found. Position validation disabled.");
             }
         }
         
@@ -160,7 +176,7 @@ namespace Agents
                 return;
             }
             
-            var agent = _manager.SpawnAgent(pos, agentType.AgentTypeID);
+            var agent = _manager.SpawnAgent(pos);
             if (agent)
             {
                 if (debugLogs) Debug.Log($"[Spawner] ✓ Spawned agent #{agent.AgentId}");
@@ -209,10 +225,14 @@ namespace Agents
             // Step 2: Didn't click agent - if we have one selected, move it
             if (_selectedAgent != null)
             {
-                if (GetGroundPosition(out Vector3 destination))
+                if (GetMoveDestination(out Vector3 destination))
                 {
                     if (debugLogs) Debug.Log($"[Spawner] → Moving agent #{_selectedAgent.AgentId} to {destination}");
                     MoveSelectedAgent(destination);
+                }
+                else
+                {
+                    if (debugLogs) Debug.LogWarning("[Spawner] ✗ Could not find valid move destination");
                 }
             }
             else
@@ -264,6 +284,18 @@ namespace Agents
         {
             if (_selectedAgent == null) return;
             
+            // Check if destination is actually reachable from agent's current position
+            if (requireWalkableForMove && _pathfindingManager && _pathfindingManager.IsReady)
+            {
+                Vector3 agentPos = _selectedAgent.transform.position;
+                
+                if (!_pathfindingManager.CanReach(agentPos, destination))
+                {
+                    if (debugLogs) Debug.LogWarning($"[Spawner] ✗ Destination unreachable from agent position");
+                    return;
+                }
+            }
+            
             bool success = _selectedAgent.SetDestination(destination);
             
             if (success)
@@ -282,10 +314,27 @@ namespace Agents
         #region Ground Position
         
         /// <summary>
-        /// Get world position from mouse cursor, then snap to nearest NavMesh point.
-        /// Uses plane raycast at groundPlaneHeight (same as WorldGrid.RaycastToCell).
+        /// Get spawn position from mouse cursor.
+        /// Raycasts against ground layers and validates against navmesh.
         /// </summary>
         private bool GetGroundPosition(out Vector3 position)
+        {
+            return GetGroundPositionInternal(out position, requireWalkableForSpawn);
+        }
+        
+        /// <summary>
+        /// Get movement destination from mouse cursor.
+        /// Raycasts against ground layers and validates against navmesh.
+        /// </summary>
+        private bool GetMoveDestination(out Vector3 position)
+        {
+            return GetGroundPositionInternal(out position, requireWalkableForMove);
+        }
+        
+        /// <summary>
+        /// Core raycast logic for getting ground position.
+        /// </summary>
+        private bool GetGroundPositionInternal(out Vector3 position, bool requireWalkable)
         {
             position = Vector3.zero;
             
@@ -301,42 +350,86 @@ namespace Agents
             Vector2 mouseScreenPos = Mouse.current.position.ReadValue();
             Ray ray = mainCamera.ScreenPointToRay(mouseScreenPos);
             
-            // Plane raycast at ground height (same approach as WorldGrid.RaycastToCell)
-            var plane = new Plane(Vector3.up, new Vector3(0f, groundPlaneHeight, 0f));
-            
-            if (!plane.Raycast(ray, out float dist))
+            // Physics raycast against ground layers
+            if (!Physics.Raycast(ray, out RaycastHit hit, maxRaycastDistance, groundLayerMask))
             {
+                if (debugLogs) Debug.LogWarning("[Spawner] Raycast didn't hit any ground geometry");
                 return false;
             }
             
-            // Calculate hit point
-            Vector3 hitPoint = ray.origin + ray.direction * dist;
+            // Get the exact hit point
+            Vector3 hitPoint = hit.point;
             
             if (drawDebugVisuals)
             {
-                Debug.DrawRay(ray.origin, ray.direction * dist, Color.cyan, 2f);
+                Debug.DrawRay(ray.origin, ray.direction * hit.distance, Color.cyan, 2f);
                 Debug.DrawRay(hitPoint, Vector3.up * 2f, Color.yellow, 2f);
-            }
-            
-            // Find nearest NavMesh point
-            if (NavMesh.SamplePosition(hitPoint, out NavMeshHit navHit, navMeshSearchRadius, NavMesh.AllAreas))
-            {
-                position = navHit.position;
-                
-                if (drawDebugVisuals)
-                {
-                    Debug.DrawRay(position, Vector3.up * 3f, Color.green, 2f);
-                }
-                
-                return true;
+                Debug.DrawRay(hitPoint, hit.normal * 1f, Color.magenta, 2f);
             }
             
             if (debugLogs)
             {
-                Debug.LogWarning($"[Spawner] No NavMesh within {navMeshSearchRadius}m of {hitPoint}");
+                Debug.Log($"[Spawner] Raycast hit '{hit.collider.name}' at {hitPoint} (layer: {LayerMask.LayerToName(hit.collider.gameObject.layer)})");
             }
             
-            return false;
+            // Check/snap to walkable navmesh position
+            if (requireWalkable)
+            {
+                if (!_pathfindingManager)
+                {
+                    if (debugLogs) Debug.LogWarning("[Spawner] PathfindingManager not found - skipping walkable check");
+                    // Fall through to use raw position
+                }
+                else if (!_pathfindingManager.IsReady)
+                {
+                    if (debugLogs) Debug.LogWarning("[Spawner] PathfindingManager not ready - skipping walkable check");
+                    // Fall through to use raw position
+                }
+                else if (_pathfindingManager.GetNearestWalkablePosition(hitPoint, out Vector3 walkablePos, walkableSearchRadius))
+                {
+                    // Use the walkable position but keep original Y if very close (to avoid floating)
+                    float yDiff = Mathf.Abs(walkablePos.y - hitPoint.y);
+                    if (yDiff < 0.5f)
+                    {
+                        // Keep XZ from navmesh, Y from raycast hit (more accurate ground height)
+                        position = new Vector3(walkablePos.x, hitPoint.y + spawnHeightOffset, walkablePos.z);
+                    }
+                    else
+                    {
+                        position = walkablePos + Vector3.up * spawnHeightOffset;
+                    }
+                    
+                    if (drawDebugVisuals)
+                    {
+                        Debug.DrawRay(position, Vector3.up * 3f, Color.green, 2f);
+                    }
+                    
+                    if (debugLogs)
+                    {
+                        Debug.Log($"[Spawner] ✓ Walkable position found: {position}");
+                    }
+                    
+                    return true;
+                }
+                else
+                {
+                    if (debugLogs)
+                    {
+                        Debug.LogWarning($"[Spawner] ✗ No walkable navmesh within {walkableSearchRadius}m of {hitPoint}");
+                    }
+                    return false; // Require walkable but none found
+                }
+            }
+            
+            // Not requiring walkable, or pathfinding not ready - use raw hit point
+            position = hitPoint + Vector3.up * spawnHeightOffset;
+            
+            if (drawDebugVisuals)
+            {
+                Debug.DrawRay(position, Vector3.up * 3f, Color.green, 2f);
+            }
+            
+            return true;
         }
         
         #endregion
@@ -349,7 +442,7 @@ namespace Agents
         public NPCAgent SpawnAt(Vector3 position)
         {
             if (!_manager) return null;
-            var agent = _manager.SpawnAgent(position, agentType.AgentTypeID);
+            var agent = _manager.SpawnAgent(position);
             if (agent) OnAgentSpawned?.Invoke(agent);
             return agent;
         }
@@ -360,6 +453,15 @@ namespace Agents
         public void MoveSelectedTo(Vector3 destination)
         {
             MoveSelectedAgent(destination);
+        }
+        
+        /// <summary>
+        /// Check if a position is walkable.
+        /// </summary>
+        public bool IsPositionWalkable(Vector3 position)
+        {
+            if (!_pathfindingManager || !_pathfindingManager.IsReady) return true;
+            return _pathfindingManager.IsPositionWalkable(position);
         }
         
         #endregion

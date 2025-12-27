@@ -3,20 +3,22 @@ Shader "WaterCity/Grid/URPGrid"
     Properties
     {
         _LineColor("Line Color", Color) = (0,0,0,0.7)
+        _LineOpacity("Line Opacity", Range(0,1)) = 0.7
+        _LineColorMode("Line Color Mode", Float) = 0.0
+        _LineNeighborFade("Line Neighbor Fade", Range(0,1)) = 0.0
+        _LineBlendFalloff("Line Blend Falloff", Range(0.1,3)) = 1.0
         _LineWidth("Line Width (m)", Float) = 0.05
         _CellSize("Cell Size (m)", Float) = 1.0
         _EnableFill("Enable Cell Fill", Float) = 1.0
+        _CellOpacity("Cell Opacity", Range(0,1)) = 0.35
         _NeighborFade("Neighbor Fade", Range(0,1)) = 0.0
         _CellMap("Cell Map (sizeX x sizeY)", 2D) = "white" {}
         _GridOrigin("World Origin", Vector) = (0,0,0,0)
         _SizeXY("Grid Size (X,Y)", Vector) = (16,16,0,0)
         _LevelY("Level World Y", Float) = 0.0
 
-        // Tube look
-        _TubeLook("Tube Look (0/1)", Float) = 0.0
-        _JoinSmooth("Join Smooth (m)", Float) = 0.05
-        _TubeLightStrength("Tube Light Strength", Range(0,1)) = 0.35
-        _TubeRimStrength("Tube Rim Strength", Range(0,1)) = 0.15
+        // Line intersection rounding
+        _CornerRadius("Corner Radius (m)", Float) = 0.05
 
         // Depth helpers
         _YBias("Vertical Bias (m)", Float) = 0.005
@@ -61,18 +63,20 @@ Shader "WaterCity/Grid/URPGrid"
             SAMPLER(sampler_CellMap);
 
             float4 _LineColor;
+            float  _LineOpacity;
+            float  _LineColorMode;
+            float  _LineNeighborFade;
+            float  _LineBlendFalloff;
             float  _LineWidth;
             float  _CellSize;
             float4 _GridOrigin;
             float4 _SizeXY;
             float  _LevelY;
             float  _EnableFill;
+            float  _CellOpacity;
             float  _NeighborFade;
 
-            float  _TubeLook;
-            float  _JoinSmooth;
-            float  _TubeLightStrength;
-            float  _TubeRimStrength;
+            float  _CornerRadius;
 
             float  _YBias;
 
@@ -96,79 +100,155 @@ Shader "WaterCity/Grid/URPGrid"
                 return OUT;
             }
 
-            float4 SampleCellColor(int2 cell)
+            // Sample cell: rgb = color, a = priority (0 = Empty)
+            float4 SampleCellData(int2 cell, int2 size)
             {
-                float2 size = _SizeXY.xy;
-                float2 uv = (float2(cell) + 0.5) / size;
+                cell = clamp(cell, int2(0, 0), size - int2(1, 1));
+                float2 uv = (float2(cell) + 0.5) / float2(size);
                 return SAMPLE_TEXTURE2D(_CellMap, sampler_CellMap, uv);
             }
 
             float4 frag(Varyings IN) : SV_Target
             {
-                float2 size = _SizeXY.xy;
-                float2 uv01 = saturate(IN.uv);
-                float2 gridPos = uv01 * size;   // [0..size)
-                float2 cellUV  = frac(gridPos); // 0..1 in cell
+                int2   size    = (int2)_SizeXY.xy;
+                float2 uv01    = saturate(IN.uv);
+                float2 gridPos = uv01 * float2(size);
+                float2 cellUV  = frac(gridPos);
                 int2   cell    = (int2)floor(gridPos);
 
-                float2 distFrac  = min(cellUV, 1.0 - cellUV);   // distance to cell edges (0..0.5)
-                float2 distM     = distFrac * _CellSize;        // meters
-                float  halfW     = 0.5 * _LineWidth;
-                float  dv        = distM.x - halfW;
-                float  dh        = distM.y - halfW;
+                float2 distFrac = min(cellUV, 1.0 - cellUV);
+                float2 distM    = distFrac * _CellSize;
+                float  halfW    = 0.5 * _LineWidth;
+                float  dv       = distM.x - halfW;
+                float  dh       = distM.y - halfW;
 
-                float  d         = smin(dv, dh, max(_JoinSmooth, 0.0));
-                float  aa        = max(fwidth(d), 1e-4);
-                float  lineMask  = saturate(0.5 - d / aa);
+                // Smooth min creates rounded corners at line intersections
+                float d        = smin(dv, dh, max(_CornerRadius, 0.0));
+                float aa       = max(fwidth(d), 1e-4);
+                float lineMask = saturate(0.5 - d / aa);
 
-                float4 cellCol = SampleCellColor(cell);
+                // Sample current cell
+                float4 cellData = SampleCellData(cell, size);
+
+                // Apply neighbor fade to fill color (includes diagonals)
+                float3 fillRgb = cellData.rgb;
                 if (_NeighborFade > 0.001)
                 {
-                    int2 sz = (int2)size;
-                    int2 cx = cell;
-                    int2 left  = int2(max(cx.x - 1, 0), cx.y);
-                    int2 right = int2(min(cx.x + 1, sz.x - 1), cx.y);
-                    int2 down  = int2(cx.x, max(cx.y - 1, 0));
-                    int2 up    = int2(cx.x, min(cx.y + 1, sz.y - 1));
-                    float4 avgN = (SampleCellColor(left)+SampleCellColor(right)+SampleCellColor(down)+SampleCellColor(up))*0.25;
-                    cellCol = lerp(cellCol, avgN, _NeighborFade);
+                    float4 n0 = SampleCellData(cell + int2(-1, 0), size);
+                    float4 n1 = SampleCellData(cell + int2( 1, 0), size);
+                    float4 n2 = SampleCellData(cell + int2( 0,-1), size);
+                    float4 n3 = SampleCellData(cell + int2( 0, 1), size);
+                    float4 n4 = SampleCellData(cell + int2(-1,-1), size);
+                    float4 n5 = SampleCellData(cell + int2( 1,-1), size);
+                    float4 n6 = SampleCellData(cell + int2(-1, 1), size);
+                    float4 n7 = SampleCellData(cell + int2( 1, 1), size);
+                    float3 avgN = (n0.rgb + n1.rgb + n2.rgb + n3.rgb + n4.rgb + n5.rgb + n6.rgb + n7.rgb) * 0.125;
+                    fillRgb = lerp(fillRgb, avgN, _NeighborFade);
                 }
 
-                float4 fillCol = cellCol;
-                fillCol.a *= (_EnableFill > 0.5) ? 1.0 : 0.0;
-
-                float4 lineCol = _LineColor;
-
-                // Fake tube lighting on the lines
-                if (_TubeLook > 0.5)
+                // Compute line color
+                float3 lineRgb = _LineColor.rgb;
+                
+                if (_LineColorMode > 0.5)
                 {
-                    float r = max(halfW + _JoinSmooth, 1e-4);
-                    float wv = saturate(1.0 - dv / r);
-                    float wh = saturate(1.0 - dh / r);
-                    float sum = max(wv + wh, 1e-4);
-                    wv /= sum; wh /= sum;
-
-                    float sx = (cellUV.x <= 0.5) ? -1.0 : 1.0;
-                    float sz = (cellUV.y <= 0.5) ? -1.0 : 1.0;
-                    float3 nx = float3(sx, 0, 0);
-                    float3 nz = float3(0, 0, sz);
-                    float3 n  = normalize(nx * wv + nz * wh + float3(1e-5, 0, 1e-5));
-
-                    float3 L  = normalize(float3(0.4, 1.0, 0.3));
-                    float  ndotl = saturate(dot(n, L));
-                    float  rim   = pow(1.0 - saturate(dot(n, float3(0,1,0))), 1.0);
-
-                    float shade = ndotl * _TubeLightStrength + rim * _TubeRimStrength;
-                    lineCol.rgb = saturate(lineCol.rgb * (0.75 + shade));
+                    // Priority mode with neighbor bleeding
+                    float2 relPos = cellUV - 0.5;
+                    
+                    // Sample all 9 cells
+                    float4 cells[9];
+                    float2 offsets[9];
+                    
+                    cells[0] = cellData;                                    offsets[0] = float2(0, 0);
+                    cells[1] = SampleCellData(cell + int2(-1, 0), size);    offsets[1] = float2(-1, 0);
+                    cells[2] = SampleCellData(cell + int2( 1, 0), size);    offsets[2] = float2( 1, 0);
+                    cells[3] = SampleCellData(cell + int2( 0,-1), size);    offsets[3] = float2( 0,-1);
+                    cells[4] = SampleCellData(cell + int2( 0, 1), size);    offsets[4] = float2( 0, 1);
+                    cells[5] = SampleCellData(cell + int2(-1,-1), size);    offsets[5] = float2(-1,-1);
+                    cells[6] = SampleCellData(cell + int2( 1,-1), size);    offsets[6] = float2( 1,-1);
+                    cells[7] = SampleCellData(cell + int2(-1, 1), size);    offsets[7] = float2(-1, 1);
+                    cells[8] = SampleCellData(cell + int2( 1, 1), size);    offsets[8] = float2( 1, 1);
+                    
+                    // Find closest status cell
+                    float minDistToStatus = 999.0;
+                    for (int k = 0; k < 9; k++)
+                    {
+                        if (cells[k].a < 0.01) continue;
+                        float dist = length(relPos - offsets[k]);
+                        minDistToStatus = min(minDistToStatus, dist);
+                    }
+                    
+                    // Solid zone: within 0.5 of any status cell (lines directly beside status cells)
+                    bool inSolidZone = (minDistToStatus <= 0.5);
+                    
+                    // Bleed extends from 0.5 to (0.5 + 1.5 * fade) so fade=1 reaches full next cell
+                    float bleedStart = 0.5;
+                    float bleedEnd = bleedStart + _LineNeighborFade * 1.5;
+                    
+                    if (inSolidZone)
+                    {
+                        // Blend colors of all cells within solid zone by inverse distance
+                        float3 colorSum = float3(0, 0, 0);
+                        float weightSum = 0;
+                        
+                        for (int i = 0; i < 9; i++)
+                        {
+                            if (cells[i].a < 0.01) continue;
+                            float dist = length(relPos - offsets[i]);
+                            if (dist <= 0.5)
+                            {
+                                float weight = 1.0 / max(dist, 0.01);
+                                colorSum += cells[i].rgb * weight;
+                                weightSum += weight;
+                            }
+                        }
+                        lineRgb = (weightSum > 0.001) ? (colorSum / weightSum) : _LineColor.rgb;
+                    }
+                    else if (_LineNeighborFade > 0.001 && minDistToStatus < bleedEnd)
+                    {
+                        // Beyond solid zone: blend colors together, then fade to default
+                        float3 colorSum = float3(0, 0, 0);
+                        float weightSum = 0;
+                        
+                        for (int i = 0; i < 9; i++)
+                        {
+                            if (cells[i].a < 0.01) continue;
+                            float dist = length(relPos - offsets[i]);
+                            if (dist < bleedEnd)
+                            {
+                                // Weight by inverse distance (closer = stronger)
+                                float weight = 1.0 / max(dist, 0.01);
+                                colorSum += cells[i].rgb * weight;
+                                weightSum += weight;
+                            }
+                        }
+                        
+                        if (weightSum > 0.001)
+                        {
+                            float3 blendedColor = colorSum / weightSum;
+                            
+                            // Fade to default based on distance from nearest status cell
+                            float fadeRange = bleedEnd - bleedStart;
+                            float t = saturate((minDistToStatus - bleedStart) / fadeRange);
+                            // Invert falloff: higher value = color stays stronger longer
+                            t = pow(t, 1.0 / _LineBlendFalloff);
+                            lineRgb = lerp(blendedColor, _LineColor.rgb, t);
+                        }
+                    }
+                    // else: no status cells nearby or beyond fade range, use default
                 }
 
-                float aFill = fillCol.a * (1.0 - lineMask);
-                float aLine = lineCol.a * lineMask;
-                float3 rgb  = fillCol.rgb * aFill + lineCol.rgb * aLine;
-                float  a    = saturate(aFill + aLine);
+                // Fill alpha (0 if fill disabled)
+                float fillA = _CellOpacity * (_EnableFill > 0.5 ? 1.0 : 0.0);
+                float lineA = _LineOpacity;
+
+                // Blend fill and line
+                float3 rgb = lerp(fillRgb, lineRgb, lineMask);
+                float  a   = lerp(fillA, lineA, lineMask);
+
                 return float4(rgb, a);
             }
             ENDHLSL
         }
     }
 }
+

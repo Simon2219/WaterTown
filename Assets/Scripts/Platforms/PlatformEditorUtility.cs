@@ -19,8 +19,6 @@ namespace Platforms
         #endregion
         
         
-        
-        
         #region Gizmo Settings
         
         
@@ -61,13 +59,11 @@ namespace Platforms
         #endregion
         
         
-        
-        
         #region Initialization
         
         
         /// Called by GamePlatform to inject dependencies
-        public void SetDependencies(GamePlatform platform, PlatformSocketSystem socketSystem)
+        public void Initialize(GamePlatform platform, PlatformSocketSystem socketSystem)
         {
             _platform = platform;
             _socketSystem = socketSystem;
@@ -77,11 +73,7 @@ namespace Platforms
         #endregion
         
         
-        
-        
 #if UNITY_EDITOR
-        
-        #region Editor Methods
         
         
         /// Editor-only method to reset connections and clean up NavMesh links with Undo support
@@ -91,28 +83,7 @@ namespace Platforms
             if (!_platform || !_socketSystem) return;
             
             _socketSystem.ResetConnections();
-
-            // Destroy all NavMeshLink GameObjects under "Links" in the editor with Undo
-            var linksParent = _platform.LinksParentTransform ?? transform.Find("Links");
-            if (linksParent)
-            {
-                for (int i = linksParent.childCount - 1; i >= 0; i--)
-                    UnityEditor.Undo.DestroyObjectImmediate(linksParent.GetChild(i).gameObject);
-            }
-            
-            // Only queue rebuild if we're active (skip during shutdown)
-            if (gameObject.activeInHierarchy)
-                _platform.QueueRebuild();
         }
-        
-        
-        #endregion
-        
-        
-        
-        
-        #region Gizmos
-        
         
         private void OnDrawGizmosSelected()
         {
@@ -161,22 +132,30 @@ namespace Platforms
 
                 if (GizmoSettings.ShowIndices)
                 {
-                    // Reconstruct pseudo edge+mark only for labeling (for debug)
+                    // Reconstruct edge+mark for labeling (matches BuildSockets order: N→E→S→W clockwise)
                     PlatformSocketSystem.Edge edge;
                     int mark;
-                    if (i < footprintWidth)                { edge = PlatformSocketSystem.Edge.North; mark = i; }
-                    else if (i < 2 * footprintWidth)       { edge = PlatformSocketSystem.Edge.South; mark = i - footprintWidth; }
-                    else if (i < 2 * footprintWidth + footprintLength)   { edge = PlatformSocketSystem.Edge.East;  mark = i - 2 * footprintWidth; }
-                    else                      { edge = PlatformSocketSystem.Edge.West;  mark = i - (2 * footprintWidth + footprintLength); }
+                    int northEnd = footprintWidth;
+                    int eastEnd = footprintWidth + footprintLength;
+                    int southEnd = 2 * footprintWidth + footprintLength;
+                    
+                    if (i < northEnd)           { edge = PlatformSocketSystem.Edge.North; mark = i; }
+                    else if (i < eastEnd)       { edge = PlatformSocketSystem.Edge.East;  mark = i - northEnd; }
+                    else if (i < southEnd)      { edge = PlatformSocketSystem.Edge.South; mark = i - eastEnd; }
+                    else                        { edge = PlatformSocketSystem.Edge.West;  mark = i - southEnd; }
 
                     string label = $"#{i} [{edge}:{mark}] {s.Status}";
                     UnityEditor.Handles.Label(wp + Vector3.up * 0.05f, label);
                 }
             }
         }
-        
-        
-        #endregion
+
+        public Vector2Int Editor_GetFootprint()
+        {
+            // Fallback to GetComponent (editor mode, or if called before SetDependencies)
+            var gp = GetComponent<GamePlatform>();
+            return gp ? gp.Footprint : Vector2Int.one;
+        }
         
         
 #endif

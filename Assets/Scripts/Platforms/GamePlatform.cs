@@ -1,588 +1,459 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
-using Unity.AI.Navigation;
 using UnityEngine;
 using Grid;
 using Interfaces;
+using static Platforms.PlatformSocketSystem;
 
 namespace Platforms
 {
-    /// <summary>
-    /// Core platform component - manages identity, lifecycle, footprint, NavMesh, and coordinates sub-systems
-    /// Sub-components handle specific responsibilities: Sockets, Railings, Pickup, Editor utilities
-    /// External systems should call facade methods on GamePlatform rather than accessing sub-components directly
-    /// </summary>
-    [DisallowMultipleComponent]
-    [RequireComponent(typeof(NavMeshSurface))]
-    [RequireComponent(typeof(PlatformSocketSystem))]
-    [RequireComponent(typeof(PlatformRailingSystem))]
-    [RequireComponent(typeof(PickupHandler))]
-    [RequireComponent(typeof(PlatformEditorUtility))]
-    public class GamePlatform : MonoBehaviour, IPickupable
+
+/// Core platform component
+/// Manages identity, lifecycle, footprint, and coordinates sub-systems
+/// Sub-components handle specific responsibilities: Sockets, Railings, Pickup, Editor utilities
+
+/// EXECUTION ORDER: This runs before PlatformManager to ensure Platform Updates finished
+
+[DisallowMultipleComponent]
+[DefaultExecutionOrder(-10)] // Run before PlatformManager (which is at 10)
+
+[RequireComponent(typeof(PlatformSocketSystem))]
+[RequireComponent(typeof(PlatformRailingSystem))]
+[RequireComponent(typeof(PickupHandler))]
+[RequireComponent(typeof(PlatformEditorUtility))]
+
+
+public class GamePlatform : MonoBehaviour, IPickupable
+{
+    #region Configuration
+    
+    
+    [Header("Footprint (cells @ 1m)")]
+    [Tooltip("Platform footprint in grid cells. X = width, Y = length.")]
+    
+    [SerializeField] private Vector2Int footprintSize = new Vector2Int(4, 4);
+    public Vector2Int Footprint => footprintSize;
+    
+    
+    private PlatformManager _platformManager;
+    private WorldGrid _worldGrid;
+    
+    
+    private PlatformSocketSystem _socketSystem;
+    private PlatformRailingSystem _railingSystem;
+    private PickupHandler _pickupHandler;
+    private PlatformEditorUtility _editorUtility;
+    
+    
+    public List<Vector2Int> occupiedCells = new();
+    public List<Vector2Int> previousOccupiedCells = new();
+    
+    private readonly List<PlatformModule> _platformModules = new();
+    private readonly List<PlatformRailing> _platformRailings = new();
+    private readonly List<Collider> _platformColliders = new();
+    
+    // Read-only access for sub-systems
+    public IReadOnlyList<PlatformModule> PlatformModules => _platformModules;
+    public IReadOnlyList<PlatformRailing> PlatformRailings => _platformRailings;
+    public IReadOnlyList<Collider> PlatformColliders => _platformColliders;
+    
+    
+    private Vector3 _lastPos;
+    private Quaternion _lastRot;
+    private Vector3 _lastScale;
+    
+    // Deferred railing update - processes one frame after socket status changes
+    // This eliminates race conditions where railings read socket status before all updates complete
+    private bool _updatePending;
+    
+    
+    #endregion
+    
+    
+    #region Events
+    
+    
+    public event Action<GamePlatform> ConnectionsChanged; // connection/railing state changes
+    
+    public event Action<GamePlatform> HasMoved; // (position/rotation/scale changes)
+    
+    public static event Action<GamePlatform> Created; // When ANY platform is created (for initial discovery)
+    
+    public static event Action<GamePlatform> Destroyed; // When ANY platform is destroyed (for cleanup)
+    
+    public event Action<GamePlatform> Enabled; // OnEnable
+    
+    public event Action<GamePlatform> Disabled; // OnDisable
+    
+    public event Action<GamePlatform> Placed; // When this platform is placed ( successful )
+    
+    public event Action<GamePlatform> PickedUp; // When this platform is picked up (before being moved)
+    
+    public event Action<GamePlatform> PlacementCancelled; // When placement is cancelled
+    
+    
+    #endregion
+    
+    
+    #region Initialization
+
+
+    public void InitializePlatform(PlatformManager platformManager, WorldGrid worldGrid)
     {
-        #region Events
+        _platformManager = platformManager;
+        _worldGrid = worldGrid;
         
+        // Cache all child components at initialization
+        CacheChildComponents();
         
-        /// Fired whenever this platform's connection/railing state changes
-        public event Action<GamePlatform> ConnectionsChanged;
-
-        /// Fired whenever this platform moves (position/rotation/scale changes)
-        public event Action<GamePlatform> HasMoved;
+        // Initialize Sub Systems
+        InitializeSubComponents();
         
-        /// Static event fired when ANY platform is created (for initial discovery)
-        public static event Action<GamePlatform> Created;
-        
-        /// Static event fired when ANY platform is destroyed (for cleanup)
-        public static event Action<GamePlatform> Destroyed;
-        
-        /// Fired when this platform becomes enabled
-        public event Action<GamePlatform> Enabled;
-        
-        /// Fired when this platform becomes disabled
-        public event Action<GamePlatform> Disabled;
-        
-        /// Fired when this platform is placed (after successful placement)
-        public event Action<GamePlatform> Placed;
-        
-        /// Fired when this platform is picked up (before being moved)
-        public event Action<GamePlatform> PickedUp;
-        
-        /// Fired when placement is cancelled
-        public event Action<GamePlatform> PlacementCancelled;
-        
-        
-        #endregion
-        
-        
-        
-        #region Dependencies
-        
-        
-        private PlatformManager _platformManager;
-        private WorldGrid _worldGrid;
-        
-        
-        #endregion
-        
-        
-        
-        #region Sub-Components
-        
-        
-        private PlatformSocketSystem _socketSystem;
-        private PlatformRailingSystem _railingSystem;
-        private PickupHandler _pickupHandler;
-        private PlatformEditorUtility _editorUtility;
-        
-        
-        #endregion
-        
-        
-        
-        #region Platform State
-        
-        
-        public List<Vector2Int> occupiedCells = new();
-        public List<Vector2Int> previousOccupiedCells = new();
-        
-        private readonly List<PlatformModule> _cachedModules = new();
-        private readonly List<PlatformRailing> _cachedRailings = new();
-        private readonly List<Collider> _cachedColliders = new();
-        
-        // Read-only access for sub-systems
-        public IReadOnlyList<PlatformModule> CachedModules => _cachedModules;
-        public IReadOnlyList<PlatformRailing> CachedRailings => _cachedRailings;
-        public IReadOnlyList<Collider> CachedColliders => _cachedColliders;
-        
-        
-        #endregion
-        
-        
-        
-        #region Footprint & NavMesh
-        
-        
-        [Header("Footprint (cells @ 1m)")]
-        [Tooltip("Platform footprint in grid cells. X = width, Y = length.")]
-        [SerializeField] private Vector2Int footprintSize = new Vector2Int(4, 4);
-        public Vector2Int Footprint => footprintSize;
-        
-        
-        [Header("NavMesh Rebuild")]
-        [SerializeField]
-        [Tooltip("Delay before rebuilding this platform's NavMesh after changes.")]
-        private float rebuildDebounceSeconds = 0.1f;
-
-        
-        // Cached transform for "Links" GameObject
-        private Transform _linksParentTransform;
-        public Transform LinksParentTransform => _linksParentTransform;
-        
-        private NavMeshSurface _navSurface;
-        public NavMeshSurface NavSurface => _navSurface;
-        
-        
-        private Vector3 _lastPos;
-        private Quaternion _lastRot;
-        private Vector3 _lastScale;
-
-        private Coroutine _pendingRebuild;
-        
-        
-        #endregion
-        
-        
-        
-        #region IPickupable Implementation
-
-        public bool IsPickedUp { get; private set; }
-
-        public bool IsNewObject { get; private set; }
-
-        public bool CanBePlaced => _pickupHandler?.CanBePlaced ?? false;
-        public Transform Transform => transform;
-        public GameObject GameObject => gameObject;
-        
-        
-        /// Initiates pickup - fires PickedUp event for sub-systems to react
-        public void PickUp(bool isNewObject)
-        {
-            IsNewObject = isNewObject;
-            IsPickedUp = true;
-            
-            // Fire event - sub-systems (PickupHandler) listen and react
-            // PlatformManager also listens to clear grid cells (safe for new objects - they have empty occupiedCells)
-            PickedUp?.Invoke(this);
-        }
-        
-        
-        /// Confirms placement - fires Placed event for sub-systems to react
-        public void Place()
-        {
-            IsPickedUp = false;
-            
-            // Compute cells for the new position
-            if (_platformManager)
-                occupiedCells = _platformManager.GetCellsForPlatform(this);
-            
-            // Fire event - sub-systems and managers react
-            Placed?.Invoke(this);
-        }
-        
-        
-        /// Cancels placement
-        /// For new objects: fires PlacementCancelled (handler destroys)
-        /// For existing objects: fires PlacementCancelled (handler restores position), then Place() is called
-        public void CancelPlacement()
-        {
-            IsPickedUp = false;
-            
-            // Fire event - PickupHandler restores position (existing) or marks for destroy (new)
-            PlacementCancelled?.Invoke(this);
-            
-            // For existing objects, re-place at original position (triggers Placed event)
-            // Note: PickupHandler handles the actual position restore before this
-            if (!IsNewObject)
-            {
-                // Compute cells at restored position
-                if (_platformManager)
-                    occupiedCells = _platformManager.GetCellsForPlatform(this);
-                
-                // Fire Placed to re-register and restore visuals
-                Placed?.Invoke(this);
-            }
-        }
-        
-        
-        /// Visual feedback during pickup - delegates to handler
-        public void UpdateValidityVisuals() => _pickupHandler?.UpdateValidityVisuals();
-        
-        
-        #endregion
-        
-        
-        
-        #region Unity Lifecycle
-        
-        
-        private void Awake()
-        {
-            if(!TryGetComponent(out _navSurface))
-                throw ErrorHandler.MissingDependency($"[GamePlatform] NavMesh Surface '{nameof(NavMeshSurface)}' not found.", this);
-            
-            if(!TryGetComponent(out _socketSystem))
-                throw ErrorHandler.MissingDependency($"[GamePlatform] Socket System '{nameof(PlatformSocketSystem)}' not found.", this);
-
-            if(!TryGetComponent(out _railingSystem))
-                throw ErrorHandler.MissingDependency($"[GamePlatform] Railing System '{nameof(PlatformRailingSystem)}' not found.", this);
-
-            if(!TryGetComponent(out _pickupHandler))
-                throw ErrorHandler.MissingDependency($"[GamePlatform] Pickup Handler '{nameof(PickupHandler)}' not found.", this);
-
-            if(!TryGetComponent(out _editorUtility))
-                throw ErrorHandler.MissingDependency($"[GamePlatform] Editor Utility '{nameof(PlatformEditorUtility)}' not found.", this);
-
-            
-            // Fire static creation event for managers to subscribe
-            Created?.Invoke(this);
-        }
-
-
-        private void OnEnable()
-        {
-            _lastPos = transform.position;
-            _lastRot = transform.rotation;
-            _lastScale = transform.localScale;
-            
-            Enabled?.Invoke(this);
-        }
-
-
-        private void OnDisable()
-        {
-            Disabled?.Invoke(this);
-        }
-
-
-        private void OnDestroy()
-        {
-            UnsubscribeFromSubComponentEvents();
-            Destroyed?.Invoke(this);
-        }
-
-
-        private void LateUpdate()
-        {
-            if (IsPickedUp)
-            {
-                if (transform.position != _lastPos ||
-                    transform.rotation != _lastRot ||
-                    transform.localScale != _lastScale)
-                {
-                    _lastPos = transform.position;
-                    _lastRot = transform.rotation;
-                    _lastScale = transform.localScale;
-
-                    HasMoved?.Invoke(this);
-                }
-            }
-        }
-        
-        
-        #endregion
-        
-        
-        
-        
-        #region Initialization
-        
-        
-        /// Called by PlatformManager to inject itself as a dependency
-        public void SetPlatformManager(PlatformManager platformManager)
-        {
-            _platformManager = platformManager;
-        }
-
-
-        public void SetWorldGrid(WorldGrid worldGrid)
-        {
-            _worldGrid = worldGrid;
-        }
-        
-        
-        
-
-
-        public void InitializePlatform()
-        {
-            // Cache all child components at initialization
-            CacheChildComponents();
-            
-            // Initialize Sub Systems
-            InitializeSubComponents();
-            
-            // Ensure Links parent exists for NavMesh links
-            EnsureLinksParentExists();
-        }
-        
-        
-        
-        /// Called after all dependencies are set to initialize sub-components
-        /// This ensures proper initialization order
-        private void InitializeSubComponents()
-        {
-            // Initialize sub-components with dependencies
-            _socketSystem?.SetDependencies(this, _platformManager, _worldGrid);
-            _pickupHandler?.SetDependencies(this, _platformManager);
-            _railingSystem?.SetDependencies(this, _socketSystem);
-            _editorUtility?.SetDependencies(this, _socketSystem);
-            
-            // Subscribe to sub-component events (only once)
-            SubscribeToSubComponentEvents();
-            
-            // Build sockets and register children
-            _socketSystem?.BuildSockets();
-            _socketSystem?.EnsureChildrenModulesRegistered();
-            _railingSystem?.EnsureChildrenRailingsRegistered();
-            _socketSystem?.RefreshAllSocketStatuses();
-        }
-        
-        
-        
-        private void SubscribeToSubComponentEvents()
-        {
-            _socketSystem.SocketsChanged += OnSocketsChanged;
-        }
-        
-        
-        private void UnsubscribeFromSubComponentEvents()
-        {
-            _socketSystem.SocketsChanged -= OnSocketsChanged;
-        }
-
-
-        private void EnsureLinksParentExists()
-        {
-            if (_linksParentTransform) return;
-            
-            _linksParentTransform = transform.Find("Links");
-            
-            if (!_linksParentTransform)
-            {
-                var go = new GameObject("Links");
-                _linksParentTransform = go.transform;
-                _linksParentTransform.SetParent(transform, false);
-                _linksParentTransform.localPosition = Vector3.zero;
-                _linksParentTransform.localRotation = Quaternion.identity;
-                _linksParentTransform.localScale = Vector3.one;
-            }
-        }
-
-
-        private void CacheChildComponents()
-        {
-            _cachedModules.Clear();
-            _cachedRailings.Clear();
-            _cachedColliders.Clear();
-            
-            _cachedModules.AddRange(GetComponentsInChildren<PlatformModule>(true));
-            _cachedRailings.AddRange(GetComponentsInChildren<PlatformRailing>(true));
-            _cachedColliders.AddRange(GetComponentsInChildren<Collider>(true));
-        }
-        
-        
-        #endregion
-        
-        
-        
-        #region Event Handlers
-        
-        
-        private void OnSocketsChanged()
-        {
-            // Refresh railing visibility when socket connections change
-            _railingSystem?.RefreshAllRailingsVisibility();
-            
-            ConnectionsChanged?.Invoke(this);
-        }
-        
-        
-        #endregion
-        
-        
-        
-        #region Socket Interface Methods & Type Aliases
-        
-        
-        // Type aliases for external compatibility - maps to PlatformSocketSystem enums
-        public enum Edge { North = 0, East = 1, South = 2, West = 3 }
-        public enum SocketStatus { Linkable = 0, Occupied = 1, Connected = 2, Locked = 3, Disabled = 4 }
-        public enum SocketLocation { Edge = 0, Corner = 1 }
-        
-        /// Access to socket system (read-only list)
-        public IReadOnlyList<PlatformSocketSystem.SocketData> Sockets => _socketSystem?.PlatformSockets;
-        
-        public int SocketCount => _socketSystem?.SocketCount ?? 0;
-
-
-        public PlatformSocketSystem.SocketData GetSocket(int index) 
-            => _socketSystem?.GetSocket(index) ?? default;
-
-
-        public Vector3 GetSocketWorldPosition(int index) 
-            => _socketSystem?.GetSocketWorldPosition(index) ?? transform.position;
-
-
-        public void SetSocketStatus(int index, SocketStatus status) 
-            => _socketSystem?.SetSocketStatus(index, (PlatformSocketSystem.SocketStatus)(int)status);
-
-
-        public bool IsSocketConnected(int socketIndex) 
-            => _socketSystem?.IsSocketConnected(socketIndex) ?? false;
-
-
-        public int EdgeLengthMeters(Edge edge) 
-            => _socketSystem?.EdgeLengthMeters((PlatformSocketSystem.Edge)(int)edge) ?? 0;
-
-
-        public void GetSocketIndexRangeForEdge(Edge edge, out int startIndex, out int endIndex)
-        {
-            if (_socketSystem)
-                _socketSystem.GetSocketIndexRangeForEdge((PlatformSocketSystem.Edge)(int)edge, out startIndex, out endIndex);
-            else
-            {
-                startIndex = 0;
-                endIndex = 0;
-            }
-        }
-
-
-        public int GetSocketIndexByEdgeMark(Edge edge, int mark) 
-            => _socketSystem?.GetSocketIndexByEdgeMark((PlatformSocketSystem.Edge)(int)edge, mark) ?? 0;
-
-
-        public int FindNearestSocketIndexLocal(Vector3 localPos) 
-            => _socketSystem?.FindNearestSocketIndexLocal(localPos) ?? -1;
-
-
-        public void FindNearestSocketIndicesLocal(Vector3 localPos, int maxCount, float maxDistance, List<int> result)
-            => _socketSystem?.FindNearestSocketIndicesLocal(localPos, maxCount, maxDistance, result);
-
-
-        public int FindNearestSocketIndexWorld(Vector3 worldPos) 
-            => _socketSystem?.FindNearestSocketIndexWorld(worldPos) ?? -1;
-
-
-        public Vector3 GetSocketWorldOutwardDirection(int socketIndex) 
-            => _socketSystem?.GetSocketWorldOutwardDirection(socketIndex) ?? Vector3.zero;
-
-
-        public Vector2Int GetAdjacentCellForSocket(int socketIndex) 
-            => _socketSystem?.GetAdjacentCellForSocket(socketIndex) ?? Vector2Int.zero;
-
-
-        public List<int> GetSocketsConnectedToNeighbor(GamePlatform neighbor) 
-            => _socketSystem?.GetSocketsConnectedToNeighbor(neighbor) ?? new List<int>();
-
-
-        public void ResetConnections() 
-            => _socketSystem?.ResetConnections();
-
-
-        public void RefreshSocketStatuses() 
-            => _socketSystem?.RefreshAllSocketStatuses();
-
-
-        public void BuildSockets() 
-            => _socketSystem?.BuildSockets();
-        
-        
-        #endregion
-        
-        
-        
-        #region Module Interface Methods
-        
-        
-        public void RegisterModuleOnSockets(PlatformModule module, bool occupiesSockets, IEnumerable<int> socketIndices) 
-            => _socketSystem?.RegisterModuleOnSockets(module, occupiesSockets, socketIndices);
-
-
-        public void UnregisterModule(PlatformModule module) 
-            => _socketSystem?.UnregisterModule(module);
-
-
-        public void SetModuleHidden(PlatformModule module, bool hidden) 
-            => _socketSystem?.SetModuleHidden(module, hidden);
-
-
-        public void EnsureChildrenModulesRegistered() 
-            => _socketSystem?.EnsureChildrenModulesRegistered();
-        
-        
-        #endregion
-        
-        
-        
-        #region Railing Interface Methods
-        
-        
-        public void RegisterRailing(PlatformRailing railing) 
-            => _railingSystem?.RegisterRailing(railing);
-
-
-        public void UnregisterRailing(PlatformRailing railing) 
-            => _railingSystem?.UnregisterRailing(railing);
-
-
-        public bool HasVisibleRailOnSockets(int[] socketIndices) 
-            => _railingSystem?.HasVisibleRailOnSockets(socketIndices) ?? false;
-
-
-        public void RefreshAllRailingsVisibility() 
-            => _railingSystem?.RefreshAllRailingsVisibility();
-
-
-        public void EnsureChildrenRailingsRegistered() 
-            => _railingSystem?.EnsureChildrenRailingsRegistered();
-        
-        
-        #endregion
-        
-        
-        
-        #region NavMesh Interface Methods
-        
-        
-        public void BuildLocalNavMesh()
-        {
-            if (NavSurface) NavSurface.BuildNavMesh();
-        }
-
-
-        public void QueueRebuild()
-        {
-            if (!NavSurface) return;
-            if (!gameObject.activeInHierarchy) return;
-            
-            if (_pendingRebuild != null)
-                StopCoroutine(_pendingRebuild);
-            _pendingRebuild = StartCoroutine(RebuildAfterDelay(rebuildDebounceSeconds));
-        }
-
-
-        private IEnumerator RebuildAfterDelay(float delay)
-        {
-            yield return new WaitForSeconds(delay);
-            if (NavSurface)
-                NavSurface.BuildNavMesh();
-            _pendingRebuild = null;
-        }
-        
-        
-        #endregion
-        
-        
-        
-        #region Utility Methods
-        
-        
-        public void ForceHasMoved()
-        {
-            _lastPos = transform.position;
-            _lastRot = transform.rotation;
-            _lastScale = transform.localScale;
-            HasMoved?.Invoke(this);
-        }
-        
-        
-#if UNITY_EDITOR
-        public void EditorResetAllConnections() 
-            => _editorUtility?.EditorResetAllConnections();
-#endif
-        
-        
-        #endregion
+        EnsureChildrenModulesRegistered();
     }
+    
+    
+    
+    /// Called after all dependencies are set to initialize sub-components
+    /// This ensures proper initialization order
+    private void InitializeSubComponents()
+    {
+        // Initialize sub-components with dependencies
+        _socketSystem?.Initialize(this, _worldGrid);
+        _pickupHandler?.Initialize(this);
+        _railingSystem?.Initialize(this, _socketSystem);
+        _editorUtility?.Initialize(this, _socketSystem);
+        
+        // Subscribe to sub-component events (only once)
+        SubscribeToSubComponentEvents();
+    }
+    
+    
+    
+    private void CacheChildComponents()
+    {
+        _platformModules.Clear();
+        _platformRailings.Clear();
+        _platformColliders.Clear();
+        
+        _platformModules.AddRange(GetComponentsInChildren<PlatformModule>(true));
+        _platformRailings.AddRange(GetComponentsInChildren<PlatformRailing>(true));
+        _platformColliders.AddRange(GetComponentsInChildren<Collider>(true));
+    }
+    
+    
+    
+    private void SubscribeToSubComponentEvents()
+    {
+        _socketSystem.SocketsChanged += OnSocketsChanged;
+    }
+    
+    
+    private void UnsubscribeFromSubComponentEvents()
+    {
+        _socketSystem.SocketsChanged -= OnSocketsChanged;
+    }
+    
+    
+    #endregion
+    
+    
+    #region Lifecycle
+    
+    
+    private void Awake()
+    {
+        if(!TryGetComponent(out _socketSystem))
+            throw ErrorHandler.MissingDependency($"[GamePlatform] Socket System '{nameof(PlatformSocketSystem)}' not found.", this);
+
+        if(!TryGetComponent(out _railingSystem))
+            throw ErrorHandler.MissingDependency($"[GamePlatform] Railing System '{nameof(PlatformRailingSystem)}' not found.", this);
+
+        if(!TryGetComponent(out _pickupHandler))
+            throw ErrorHandler.MissingDependency($"[GamePlatform] Pickup Handler '{nameof(PickupHandler)}' not found.", this);
+
+        if(!TryGetComponent(out _editorUtility))
+            throw ErrorHandler.MissingDependency($"[GamePlatform] Editor Utility '{nameof(PlatformEditorUtility)}' not found.", this);
+
+        
+        // Fire static creation event for managers to subscribe
+        Created?.Invoke(this);
+    }
+
+
+    private void OnEnable()
+    {
+        _lastPos = transform.position;
+        _lastRot = transform.rotation;
+        _lastScale = transform.localScale;
+        
+        Enabled?.Invoke(this);
+    }
+
+
+    private void OnDisable()
+    {
+        Disabled?.Invoke(this);
+    }
+
+
+    private void OnDestroy()
+    {
+        UnsubscribeFromSubComponentEvents();
+        Destroyed?.Invoke(this);
+    }
+
+
+    private void LateUpdate()
+    {
+        // Check for movement first
+        if(CheckPlatformMoved()) HasMoved?.Invoke(this);
+        
+        // Process deferred railing update (one frame after socket status changes)
+        // This ensures all platform socket statuses are fully updated before railings read them
+        if (_updatePending)
+        {
+            _updatePending = false;
+            _railingSystem?.RefreshAllRailingsVisibility();
+        }
+    }
+    
+    
+    #endregion
+    
+    
+    #region IPickupable Implementation
+
+    public bool IsPickedUp { get; private set; }
+
+    public bool IsNewObject { get; private set; }
+
+    public bool CanBePlaced => ValidatePlacement();
+    public Transform Transform => transform;
+    public GameObject GameObject => gameObject;
+    
+    
+    
+    /// Initiates pickup
+    public void PickUp(bool isNewObject)
+    {
+        IsNewObject = isNewObject;
+        IsPickedUp = true;
+        
+        PickedUp?.Invoke(this);
+    }
+    
+    
+    
+    /// Confirms Placement
+    public void Place()
+    {
+        IsPickedUp = false;
+        
+        occupiedCells = _platformManager.GetCellsForPlatform(this);
+        
+        Placed?.Invoke(this);
+    }
+    
+    
+    
+    /// Cancels placement
+    /// For new objects: fires PlacementCancelled (handler destroys)
+    /// For existing objects: fires PlacementCancelled (handler restores position), then Place() is called
+    public void CancelPlacement()
+    {
+        IsPickedUp = false;
+        
+        // PickupHandler restores position (existing) or marks for destroy (new)
+        PlacementCancelled?.Invoke(this);
+    }
+    
+    
+    
+    /// Visual feedback during pickup - delegates to handler
+    public void UpdateValidityVisuals() => _pickupHandler?.UpdateValidityVisuals();
+    
+    
+    #endregion
+    
+    
+    #region Event Handlers
+    
+    
+    private void OnSocketsChanged()
+    {
+        // Defer railing update to next frame to ensure everything is fully updated
+        _updatePending = true;
+        ConnectionsChanged?.Invoke(this);
+    }
+    
+    
+    #endregion
+    
+    
+    #region Socket Interface Methods & Type Aliases
+    
+    /// Access to socket system 
+    
+    public int SocketCount => _socketSystem?.SocketCount ?? 0;
+
+
+    public SocketData GetSocket(int index) 
+        => _socketSystem?.GetSocket(index) ?? null;
+
+
+    public Vector3 GetSocketWorldPosition(int index) 
+        => _socketSystem?.GetSocketWorldPosition(index) ?? transform.position;
+
+
+    public void SetSocketStatus(int index, SocketStatus status) 
+        => _socketSystem?.SetSocketStatus(index, status);
+
+
+    public bool IsSocketConnected(int socketIndex) 
+        => _socketSystem?.IsSocketConnected(socketIndex) ?? false;
+
+
+    public int EdgeLengthMeters(Edge edge)
+    {
+        return edge is Edge.North or Edge.South ? footprintSize.x : footprintSize.y;
+    }
+
+
+    public int FindNearestSocketIndexLocal(Vector3 localPos) 
+        => _socketSystem?.FindNearestSocketIndex(transform.TransformPoint(localPos)) ?? -1;
+
+
+    public List<int> FindNearestSocketIndices(Vector3 worldPos, int maxCount, float maxDistance)
+        => _socketSystem?.FindNearestSocketIndices(worldPos, maxCount, maxDistance);
+
+
+    public int FindNearestSocketIndex(Vector3 worldPos) 
+        => _socketSystem?.FindNearestSocketIndex(worldPos) ?? -1;
+
+
+    public Vector3 GetSocketWorldOutwardDirection(int socketIndex) 
+        => _socketSystem?.GetSocketWorldOutwardDirection(socketIndex) ?? Vector3.zero;
+
+
+    public Vector2Int GetAdjacentCellForSocket(int socketIndex) 
+        => _socketSystem?.GetSocketCellAdjacent(socketIndex) ?? Vector2Int.zero;
+    
+
+
+    public void ResetConnections() 
+        => _socketSystem?.ResetConnections();
+
+
+    public void RefreshSocketStatuses() 
+        => _socketSystem?.RefreshAllSocketStatuses();
+
+
+    public void BuildSockets() 
+        => _socketSystem?.ReBuildSockets();
+    
+    
+    #endregion
+    
+    
+    #region Module Registry
+    
+    
+    public void RegisterModule(PlatformModule module, List<int> socketIndices)
+    {
+        _platformModules.Add(module);
+        foreach (var socketIndex in socketIndices)
+        {
+            GetSocket(socketIndex).AttachedModule = module;
+            Vector2Int cellBehindSocket = _socketSystem.GetSocketCellBehind(socketIndex);
+            _worldGrid.GetCell(cellBehindSocket)?.SetExact(CellFlag.ModuleBlocked);
+        }
+    }
+
+
+    public void UnregisterModule(PlatformModule module)
+    {
+        if (!_platformModules.Contains(module)) return;
+        
+        foreach (var sIdx in module.BoundSocketIndices)
+        {
+            Vector2Int cellBehindSocket = _socketSystem.GetSocketCellBehind(sIdx);
+            _worldGrid.GetCell(cellBehindSocket)?.RemoveFlags(CellFlag.ModuleBlocked);
+        }
+    }
+
+
+    public void SetModuleHidden(PlatformModule module, bool hidden)
+    {
+        if (!module) return;
+
+        if(hidden) module.Hide();
+        else module.Show();
+        
+        RefreshSocketStatuses();
+    }
+
+
+    public void EnsureChildrenModulesRegistered()
+    {
+        
+        foreach (var m in PlatformModules)
+        {
+            if (m) m.EnsureRegistered();
+        }
+    }
+    
+    
+    
+    private void ShowAllModules()
+    {
+
+        foreach (var m in PlatformModules)
+        {
+            if (m) m.Show();
+        }
+    }
+    
+    #endregion
+    
+    
+    #region Utility Methods
+
+    private bool CheckPlatformMoved()
+    {
+        if (transform.position != _lastPos ||
+            transform.rotation != _lastRot ||
+            transform.localScale != _lastScale)
+        {
+            _lastPos = transform.position;
+            _lastRot = transform.rotation;
+            _lastScale = transform.localScale;
+            
+            return true;
+        }
+        return false;
+    }
+    
+    
+    
+    public void ForceHasMoved()
+    {
+        _lastPos = transform.position;
+        _lastRot = transform.rotation;
+        _lastScale = transform.localScale;
+        HasMoved?.Invoke(this);
+    }
+    
+    
+    
+    private bool ValidatePlacement()
+    {
+        List<Vector2Int> cells = _platformManager.GetCellsForPlatform(this);
+            
+        return cells.Count != 0 && _platformManager.IsAreaEmpty(cells);
+    }
+
+    
+    #endregion
+}
 }

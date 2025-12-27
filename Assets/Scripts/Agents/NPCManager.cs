@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.AI;
+using Pathfinding;
+using Pathfinding.RVO;
+using Navigation;
 
 namespace Agents
 {
@@ -9,6 +11,8 @@ namespace Agents
     /// Central manager for all NPC agents.
     /// Handles spawning, registration, and performance optimization via LOD and culling.
     /// Designed for 500+ agents with batched updates.
+    /// 
+    /// Uses A* Pathfinding Project for navigation.
     /// </summary>
     [DisallowMultipleComponent]
     public class NPCManager : MonoBehaviour
@@ -37,40 +41,67 @@ namespace Agents
         #region Configuration - Agent Settings
         
         [Header("Agent Prefab Settings")]
-        [Tooltip("Optional prefab with pre-configured NavMeshAgent.\n" +
-                 "RECOMMENDED: Create a prefab with NavMeshAgent already set to your agent type.\n" +
-                 "This avoids the 'not close enough to NavMesh' warning that occurs when\n" +
-                 "dynamically adding NavMeshAgent for non-default agent types.\n" +
+        [Tooltip("Optional prefab with pre-configured AIPath and Seeker components.\n" +
+                 "RECOMMENDED: Create a prefab with A* pathfinding components already set up.\n" +
                  "If null, agents are created procedurally as capsules.")]
         [SerializeField] private GameObject agentPrefab;
         
-        [Header("Default Agent Settings")]
-        [Tooltip("NavMesh Agent Type. Must match the agent type used when baking NavMeshSurfaces.")]
-        [SerializeField] private NavMeshAgentType agentType;
-        
+        [Header("Default Agent Movement Settings")]
         [SerializeField] private float defaultSpeed = 3.5f;
-        [SerializeField] private float defaultAngularSpeed = 120f;
+        [SerializeField] private float defaultRotationSpeed = 360f;
         [SerializeField] private float defaultAcceleration = 8f;
-        [SerializeField] private float defaultStoppingDistance = 0.1f;
+        [SerializeField] private float defaultEndReachedDistance = 0.2f;
+        
+        [Header("Default Agent Dimensions")]
         [SerializeField] private float agentRadius = 0.3f;
-        [SerializeField] private float agentHeight = 1.8f;
+        [SerializeField] private float agentHeight = 1.5f;
+        
+        [Header("Ground Detection")]
+        [Tooltip("Layer mask for AIPath ground detection. Should include your platform/ground layers.")]
+        [SerializeField] private LayerMask groundMask = ~0;
         
         [Header("Spawn Settings")]
-        [Tooltip("Maximum distance to search for NavMesh when spawning.")]
-        [SerializeField] private float navMeshSearchRadius = 2f;
-        
         [Tooltip("Layer to assign spawned agents to. Important for selection raycasts!")]
         [SerializeField] private string agentLayerName = "NPCAgent";
         
         [Header("Status Colors")]
-        [SerializeField] private Color idleColor = new Color(0.3f, 0.7f, 0.3f, 1f);
-        [SerializeField] private Color movingColor = new Color(0.3f, 0.5f, 0.9f, 1f);
+        [Tooltip("Green - Agent is idle with no destination")]
+        [SerializeField] private Color idleColor = new Color(0.2f, 0.8f, 0.2f, 1f);
+        
+        [Tooltip("Blue - Agent is actively moving")]
+        [SerializeField] private Color movingColor = new Color(0.2f, 0.4f, 0.9f, 1f);
+        
+        [Tooltip("Orange - Agent is calculating path or waiting")]
+        [SerializeField] private Color calculatingColor = new Color(1f, 0.6f, 0.1f, 1f);
+        
+        [Tooltip("Red - Agent encountered an error")]
+        [SerializeField] private Color errorColor = new Color(0.9f, 0.1f, 0.1f, 1f);
+        
+        [Header("Selection Visual")]
+        [Tooltip("Color when agent is selected (replaces status color)")]
         [SerializeField] private Color selectedColor = new Color(1f, 0.9f, 0.2f, 1f);
-        [SerializeField] private Color waitingColor = new Color(0.9f, 0.6f, 0.2f, 1f);
-        [SerializeField] private Color errorColor = new Color(0.9f, 0.2f, 0.2f, 1f);
         
         [Header("Selection Settings")]
         [SerializeField] private float selectedScaleMultiplier = 1.1f;
+        
+        [Header("Local Avoidance (RVO)")]
+        [Tooltip("Enable local avoidance so agents avoid each other")]
+        [SerializeField] private bool enableLocalAvoidance = true;
+        
+        [Tooltip("How much agents avoid each other. Higher = stronger avoidance")]
+        [SerializeField] [Range(0f, 1f)] private float avoidancePriority = 0.5f;
+        
+        [Tooltip("How far ahead agents look to avoid collisions (seconds)")]
+        [SerializeField] private float agentTimeHorizon = 2f;
+        
+        [Tooltip("How far ahead agents look for obstacles (seconds)")]
+        [SerializeField] private float obstacleTimeHorizon = 2f;
+        
+        [Tooltip("Max number of neighbors to consider for avoidance")]
+        [SerializeField] private int maxNeighbors = 10;
+        
+        [Tooltip("Locked agents stay in place during avoidance")]
+        [SerializeField] private bool lockWhenNotMoving = true;
         
         #endregion
         
@@ -111,18 +142,21 @@ namespace Agents
         #region Public Properties
         
         public float DefaultSpeed => defaultSpeed;
-        public float DefaultAngularSpeed => defaultAngularSpeed;
+        public float DefaultRotationSpeed => defaultRotationSpeed;
         public float DefaultAcceleration => defaultAcceleration;
-        public float DefaultStoppingDistance => defaultStoppingDistance;
+        public float DefaultEndReachedDistance => defaultEndReachedDistance;
         public float AgentRadius => agentRadius;
         public float AgentHeight => agentHeight;
         public float SelectedScaleMultiplier => selectedScaleMultiplier;
         
         public Color IdleColor => idleColor;
         public Color MovingColor => movingColor;
-        public Color SelectedColor => selectedColor;
-        public Color WaitingColor => waitingColor;
+        public Color CalculatingColor => calculatingColor;
         public Color ErrorColor => errorColor;
+        public Color SelectedColor => selectedColor;
+        
+        /// <summary>Whether local avoidance (RVO) is enabled.</summary>
+        public bool LocalAvoidanceEnabled => enableLocalAvoidance;
         
         /// <summary>All registered agents.</summary>
         public IReadOnlyList<NPCAgent> AllAgents => _agentsList;
@@ -172,6 +206,9 @@ namespace Agents
         private float _lastLODUpdateTime;
         private int _lodUpdateIndex;
         
+        // Local Avoidance
+        private RVOSimulator _rvoSimulator;
+        
         // Shared material
         private Material _sharedAgentMaterial;
         
@@ -180,6 +217,9 @@ namespace Agents
         
         // ID generation
         private static int _nextAgentId;
+        
+        // PathfindingManager reference
+        private PathfindingManager _pathfindingManager;
         
         #endregion
         
@@ -201,6 +241,65 @@ namespace Agents
             };
             
             _lodCamera = Camera.main;
+        }
+        
+        private void Start()
+        {
+            _pathfindingManager = PathfindingManager.Instance;
+            if (!_pathfindingManager)
+            {
+                Debug.LogWarning("[NPCManager] PathfindingManager not found. Agent spawning may fail.");
+            }
+            
+            // Initialize RVO local avoidance if enabled
+            if (enableLocalAvoidance)
+            {
+                InitializeLocalAvoidance();
+            }
+        }
+        
+        private void InitializeLocalAvoidance()
+        {
+            // Find existing RVOSimulator first
+            _rvoSimulator = FindFirstObjectByType<RVOSimulator>();
+            
+            if (_rvoSimulator)
+            {
+                if (debugSpawnLogs)
+                {
+                    Debug.Log($"[NPCManager] Found existing RVOSimulator on '{_rvoSimulator.gameObject.name}'");
+                }
+                return;
+            }
+            
+            // Create RVOSimulator on PathfindingManager if it exists
+            if (_pathfindingManager)
+            {
+                _rvoSimulator = _pathfindingManager.gameObject.GetComponent<RVOSimulator>();
+                if (!_rvoSimulator)
+                {
+                    _rvoSimulator = _pathfindingManager.gameObject.AddComponent<RVOSimulator>();
+                    
+                    if (debugSpawnLogs)
+                    {
+                        Debug.Log("[NPCManager] Added RVOSimulator to PathfindingManager");
+                    }
+                }
+            }
+            else
+            {
+                // Fallback: create on this manager if PathfindingManager doesn't exist
+                _rvoSimulator = gameObject.GetComponent<RVOSimulator>();
+                if (!_rvoSimulator)
+                {
+                    _rvoSimulator = gameObject.AddComponent<RVOSimulator>();
+                    
+                    if (debugSpawnLogs)
+                    {
+                        Debug.Log("[NPCManager] Added RVOSimulator to NPCManager (PathfindingManager not found)");
+                    }
+                }
+            }
         }
         
         private void Update()
@@ -399,45 +498,22 @@ namespace Agents
         
         /// <summary>
         /// Spawn an agent at the specified world position.
-        /// The position should already be on or very near a NavMesh (use NPCAgentSpawner for proper positioning).
+        /// Position should already be validated by caller (NPCAgentSpawner handles navmesh validation).
         /// </summary>
-        /// <param name="worldPosition">World position to spawn at</param>
-        /// <param name="overrideAgentTypeID">Optional: override the default agent type ID. Use -1 to use default.</param>
-        public NPCAgent SpawnAgent(Vector3 worldPosition, int overrideAgentTypeID = -1)
+        /// <param name="worldPosition">World position to spawn at (already validated)</param>
+        public NPCAgent SpawnAgent(Vector3 worldPosition)
         {
-            // Determine which agent type we're spawning
-            int finalAgentType = overrideAgentTypeID >= 0 ? overrideAgentTypeID : agentType.AgentTypeID;
-            
-            // Create a query filter for the specific agent type
-            var filter = new NavMeshQueryFilter
-            {
-                agentTypeID = finalAgentType,
-                areaMask = NavMesh.AllAreas
-            };
-            
-            // Find nearest NavMesh position for THIS agent type
-            if (!NavMesh.SamplePosition(worldPosition, out NavMeshHit navHit, navMeshSearchRadius, filter))
-            {
-                Debug.LogWarning($"[NPCManager] No NavMesh for agent type {finalAgentType} within {navMeshSearchRadius}m of {worldPosition}. " +
-                                 "Make sure you're clicking on a NavMesh area baked for this agent type!");
-                return null;
-            }
-            
-            // Use the NavMesh position
-            Vector3 navMeshPosition = navHit.position;
+            Vector3 spawnPosition = worldPosition;
             
             if (debugSpawnLogs)
             {
-                Debug.Log($"[NPCManager] Spawn:\n" +
-                          $"  Requested: {worldPosition}\n" +
-                          $"  NavMesh: {navMeshPosition}\n" +
-                          $"  AgentType: {finalAgentType}");
+                Debug.Log($"[NPCManager] Spawning agent at: {spawnPosition}");
             }
             
-            // Create GameObject AT NAVMESH POSITION
+            // Create GameObject
             GameObject agentGo = agentPrefab 
-                ? Instantiate(agentPrefab, navMeshPosition, Quaternion.identity)
-                : CreateProceduralAgent(navMeshPosition);
+                ? Instantiate(agentPrefab, spawnPosition, Quaternion.identity)
+                : CreateProceduralAgent(spawnPosition);
             
             // Set layer for selection raycasts
             int layer = LayerMask.NameToLayer(agentLayerName);
@@ -450,23 +526,17 @@ namespace Agents
                 Debug.LogWarning($"[NPCManager] Layer '{agentLayerName}' not found!");
             }
             
-            // Get/Add NavMeshAgent
-            // Note: Unity may log a warning here if default agent type differs from our type.
-            // This is harmless - we configure the correct type immediately after.
-            var navAgent = agentGo.GetComponent<NavMeshAgent>();
-            if (!navAgent)
+            // Ensure A* components exist
+            EnsurePathfindingComponents(agentGo);
+            
+            // Configure AIPath
+            var aiPath = agentGo.GetComponent<AIPath>();
+            if (aiPath)
             {
-                navAgent = agentGo.AddComponent<NavMeshAgent>();
+                ConfigureAIPath(aiPath);
             }
             
-            // Configure agent with correct type FIRST
-            navAgent.agentTypeID = finalAgentType;
-            ConfigureNavMeshAgent(navAgent);
-            
-            // Warp to ensure proper placement on the correct NavMesh
-            navAgent.Warp(navMeshPosition);
-            
-            // Now add NPCAgent (NavMeshAgent already exists)
+            // Get or add NPCAgent
             var npcAgent = agentGo.GetComponent<NPCAgent>();
             if (!npcAgent)
             {
@@ -480,7 +550,7 @@ namespace Agents
             
             if (debugSpawnLogs)
             {
-                Debug.Log($"[NPCManager] ✓ Agent {agentId} spawned at {navMeshPosition}. OnNavMesh: {navAgent.isOnNavMesh}");
+                Debug.Log($"[NPCManager] ✓ Agent {agentId} spawned at {spawnPosition}.");
             }
             
             return npcAgent;
@@ -499,53 +569,127 @@ namespace Agents
             return SpawnAgent(spawnPoint.position);
         }
         
+        private void EnsurePathfindingComponents(GameObject agentGo)
+        {
+            // Ensure Seeker exists
+            if (!agentGo.GetComponent<Seeker>())
+            {
+                agentGo.AddComponent<Seeker>();
+            }
+            
+            // Ensure AIPath exists
+            var aiPath = agentGo.GetComponent<AIPath>();
+            if (!aiPath)
+            {
+                aiPath = agentGo.AddComponent<AIPath>();
+            }
+            
+            // Ensure AgentNavigator exists (required by NPCAgent)
+            if (!agentGo.GetComponent<AgentNavigator>())
+            {
+                agentGo.AddComponent<AgentNavigator>();
+            }
+            
+            // Add RVOController for local avoidance if enabled
+            if (enableLocalAvoidance)
+            {
+                var rvoController = agentGo.GetComponent<RVOController>();
+                if (!rvoController)
+                {
+                    rvoController = agentGo.AddComponent<RVOController>();
+                }
+                ConfigureRVOController(rvoController);
+            }
+        }
+        
+        private void ConfigureRVOController(RVOController rvo)
+        {
+            // Agent dimensions
+            rvo.radius = agentRadius;
+            rvo.height = agentHeight;
+            rvo.center = agentHeight / 2f;  // Y offset from transform position
+            
+            // Avoidance behavior
+            rvo.agentTimeHorizon = agentTimeHorizon;
+            rvo.obstacleTimeHorizon = obstacleTimeHorizon;
+            rvo.maxNeighbours = maxNeighbors;
+            rvo.priority = avoidancePriority;
+            rvo.lockWhenNotMoving = lockWhenNotMoving;
+            
+            // Layer - default to same as agent layer
+            rvo.layer = RVOLayer.DefaultAgent;
+            rvo.collidesWith = RVOLayer.DefaultAgent | RVOLayer.DefaultObstacle;
+        }
+        
+        private void ConfigureAIPath(AIPath aiPath)
+        {
+            // Movement settings
+            aiPath.maxSpeed = defaultSpeed;
+            aiPath.rotationSpeed = defaultRotationSpeed;
+            aiPath.maxAcceleration = defaultAcceleration;
+            aiPath.endReachedDistance = defaultEndReachedDistance;
+            aiPath.slowdownDistance = 0.6f;
+            aiPath.pickNextWaypointDist = 2f;
+            
+            // Ground/gravity settings
+            // Note: With CharacterController, AIPath uses SimpleMove which handles gravity internally
+            aiPath.gravity = new Vector3(0, -9.81f, 0);
+            aiPath.groundMask = groundMask; // Use configured ground layers
+            
+            // Rotation settings
+            aiPath.enableRotation = true;
+            aiPath.orientation = OrientationMode.ZAxisForward; // Z-forward for 3D ground movement
+            
+            // Movement control - CRITICAL for movement to work
+            aiPath.simulateMovement = true;  // Actually move the transform
+            aiPath.updatePosition = true;    // Let AIPath update position
+            aiPath.updateRotation = true;    // Let AIPath update rotation
+            
+            // Start in idle state - NPCAgent will enable searching when destination is set
+            aiPath.canSearch = false;        // Don't auto-search until destination is set
+            aiPath.isStopped = true;         // Start stopped
+            aiPath.destination = aiPath.position;  // No destination initially
+        }
+        
         private GameObject CreateProceduralAgent(Vector3 position)
         {
-            var go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-            go.name = $"NPC_Agent_{_agentsList.Count}";
+            // Create empty GameObject instead of primitive to avoid scaling issues
+            var go = new GameObject($"NPC_Agent_{_agentsList.Count}");
             go.transform.position = position;
             
+            // Create visual mesh as child (properly scaled)
+            var visual = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            visual.name = "Visual";
+            visual.transform.SetParent(go.transform, false);
+            
             // Unity's default capsule is 2 units tall, 1 unit diameter
-            // Scale to match our agent dimensions
+            // Scale visual to match our agent dimensions
             float scaleY = agentHeight / 2f;
             float scaleXZ = agentRadius * 2f;
-            go.transform.localScale = new Vector3(scaleXZ, scaleY, scaleXZ);
+            visual.transform.localScale = new Vector3(scaleXZ, scaleY, scaleXZ);
+            visual.transform.localPosition = new Vector3(0, agentHeight / 2f, 0); // Offset to sit on ground
             
-            // Apply material
-            var renderer = go.GetComponent<Renderer>();
+            // Remove collider from visual - CharacterController will handle collision
+            var visualCollider = visual.GetComponent<CapsuleCollider>();
+            if (visualCollider) DestroyImmediate(visualCollider);
+            
+            // Apply material to visual
+            var renderer = visual.GetComponent<Renderer>();
             if (renderer)
             {
                 renderer.material = new Material(_sharedAgentMaterial);
             }
             
-            // Remove the default CapsuleCollider and add one sized for selection
-            var collider = go.GetComponent<CapsuleCollider>();
-            if (collider)
-            {
-                // Adjust collider to account for scale
-                collider.height = 2f; // Default capsule height before scale
-                collider.radius = 0.5f; // Default capsule radius before scale
-            }
+            // Add CharacterController to root (unscaled, correct dimensions)
+            var cc = go.AddComponent<CharacterController>();
+            cc.height = agentHeight;
+            cc.radius = agentRadius;
+            cc.center = new Vector3(0, agentHeight / 2f, 0); // Center at half height
+            cc.slopeLimit = 45f;
+            cc.stepOffset = Mathf.Min(0.3f, agentHeight * 0.2f); // 20% of height or 0.3, whichever is smaller
+            cc.skinWidth = 0.02f;
             
             return go;
-        }
-        
-        private void ConfigureNavMeshAgent(NavMeshAgent navAgent)
-        {
-            // Note: agentTypeID is set AFTER Warp() in SpawnAgent - must be on NavMesh first
-            navAgent.speed = defaultSpeed;
-            navAgent.angularSpeed = defaultAngularSpeed;
-            navAgent.acceleration = defaultAcceleration;
-            navAgent.stoppingDistance = defaultStoppingDistance;
-            navAgent.radius = agentRadius;
-            navAgent.height = agentHeight;
-            
-            // BaseOffset: capsule pivot is at center, so height/2 places bottom on ground
-            navAgent.baseOffset = agentHeight / 2f;
-            
-            navAgent.areaMask = NavMesh.AllAreas;
-            // Note: autoTraverseOffMeshLink is configured by NPCAgent based on its useAutoLinkTraversal setting
-            navAgent.autoBraking = true;
         }
         
         #endregion
@@ -580,9 +724,6 @@ namespace Agents
         
         #region Utility
         
-        /// <summary>
-        /// Set layer on GameObject and all its children.
-        /// </summary>
         private void SetLayerRecursively(GameObject obj, int layer)
         {
             obj.layer = layer;
@@ -592,17 +733,35 @@ namespace Agents
             }
         }
         
+        /// <summary>
+        /// Get the color for a given agent status.
+        /// Green = Idle, Blue = Moving, Orange = Calculating, Red = Error
+        /// </summary>
         public Color GetColorForStatus(AgentStatus status)
         {
             return status switch
             {
                 AgentStatus.Idle => idleColor,
                 AgentStatus.Moving => movingColor,
-                AgentStatus.Selected => selectedColor,
-                AgentStatus.Waiting => waitingColor,
+                AgentStatus.Calculating => calculatingColor,
                 AgentStatus.Error => errorColor,
                 _ => idleColor
             };
+        }
+        
+        /// <summary>
+        /// Get color for an agent, taking selection into account.
+        /// Selected agents show a distinct yellow color.
+        /// </summary>
+        public Color GetColorForAgent(NPCAgent agent)
+        {
+            // Selected agents get a distinct color (yellow)
+            if (agent.IsSelected)
+            {
+                return selectedColor;
+            }
+            
+            return GetColorForStatus(agent.Status);
         }
         
         public void SetLODCamera(Camera camera)

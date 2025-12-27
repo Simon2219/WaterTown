@@ -1,40 +1,30 @@
-using System.Collections.Generic;
 using Grid;
 using UnityEngine;
-using UnityEngine.Events;
 using Platforms;
 
 
 ///
 /// High-level town orchestration manager
-/// Coordinates specialized subsystems (PlatformManager, etc.) and provides
-/// designer-facing events and feedback
 ///
 [DisallowMultipleComponent]
 public class TownManager : MonoBehaviour
 {
-    #region Configuration & Dependencies
+    #region Configuration
 
-    [Header("Core Systems")]
-    
+    [Header("Core Systems")] 
     private WorldGrid _worldGrid;
     private PlatformManager _platformManager;
 
-    [Header("Town-Level Events")]
-    
-    [Tooltip("Invoked when a platform is successfully placed (designer-facing).")]
-    public UnityEvent OnPlatformPlaced;
-    
-    [Tooltip("Invoked when a platform is removed (designer-facing).")]
-    public UnityEvent OnPlatformRemoved;
+    [Header("Town-Level Events")] 
 
     // Cached reference to last placed/removed platform for event handlers/UI
     public GamePlatform LastPlacedPlatform { get; private set; }
     public GamePlatform LastRemovedPlatform { get; private set; }
-    
+
     #endregion
 
-    #region Unity Lifecycle
+
+    #region Lifecycle
 
     private void Awake()
     {
@@ -54,7 +44,7 @@ public class TownManager : MonoBehaviour
     /// Throws InvalidOperationException if any critical dependency is missing
     /// Injects dependencies between systems to avoid FindFirstObjectByType at runtime
     ///
-    private void FindDependencies() 
+    private void FindDependencies()
     {
         // Auto-find WorldGrid (once at startup)
         if (!_worldGrid)
@@ -75,9 +65,6 @@ public class TownManager : MonoBehaviour
                 throw ErrorHandler.MissingDependency(typeof(PlatformManager), this);
             }
         }
-        
-        // Inject WorldGrid into PlatformManager to avoid FindFirstObjectByType calls
-        _platformManager.SetWorldGrid(_worldGrid);
     }
 
 
@@ -95,74 +82,26 @@ public class TownManager : MonoBehaviour
         _platformManager.PlatformPlaced.RemoveListener(HandlePlatformPlaced);
         _platformManager.PlatformRemoved.RemoveListener(HandlePlatformRemoved);
     }
-    
+
     #endregion
+
 
     #region Event Handlers
 
     private void HandlePlatformPlaced(GamePlatform platform)
     {
         LastPlacedPlatform = platform;
-        OnPlatformPlaced?.Invoke();
     }
 
 
     private void HandlePlatformRemoved(GamePlatform platform)
     {
         LastRemovedPlatform = platform;
-        OnPlatformRemoved?.Invoke();
     }
-    
+
     #endregion
-
-    #region Public API (Delegation to Subsystems)
-
-    // Convenience API that delegates to PlatformManager
-
-    ///
-    /// Check if an area is free for building (delegates to PlatformManager)
-    ///
-    public bool IsAreaFree(List<Vector2Int> cells)
-    {
-        return _platformManager.IsAreaEmpty(cells);
-    }
-
-
-    ///
-    /// Register a platform (delegates to PlatformManager)
-    ///
-    public void RegisterPlatform(GamePlatform platform)
-    {
-        _platformManager.RegisterPlatform(platform);
-    }
-
-
-    public void RegisterPlatformOnArea(GamePlatform platform, List<Vector2Int> occupiedCells)
-    {
-        platform.occupiedCells = occupiedCells;
-        _platformManager.RegisterPlatform(platform);
-    }
-
-
-    ///
-    /// Unregister a platform (delegates to PlatformManager)
-    ///
-    public void UnregisterPlatform(GamePlatform platform)
-    {
-        _platformManager.UnregisterPlatform(platform);
-    }
-
-
-    ///
-    /// Trigger adjacency update (delegates to PlatformManager)
-    /// Pass a platform to only update that platform and its neighbors
-    /// Pass null to update all platforms (expensive)
-    ///
-    public void TriggerAdjacencyUpdate(GamePlatform platform = null)
-    {
-        _platformManager.TriggerAdjacencyUpdate(platform);
-    }
     
     
-    #endregion
 }
+    
+
