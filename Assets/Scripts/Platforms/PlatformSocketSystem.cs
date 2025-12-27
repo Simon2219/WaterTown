@@ -230,8 +230,8 @@ public class PlatformSocketSystem : MonoBehaviour
         {
             float localX = -halfWidth + halfCellSize + (i * WorldGrid.CellSize);
             Vector3 localPosition = new Vector3(localX, 0f, +halfLength);
+            _platformSockets.Add(socketIndex, new SocketData(socketIndex, localPosition, outwardNorth, SocketStatus.Linkable));
             socketIndex++;
-            _platformSockets.Add(socketIndex,new SocketData(socketIndex, localPosition, outwardNorth, SocketStatus.Linkable));
         }
 
         // East edge: top to bottom, NE → SE (outward = +X)
@@ -240,8 +240,8 @@ public class PlatformSocketSystem : MonoBehaviour
         {
             float localZ = +halfLength - halfCellSize - (i * WorldGrid.CellSize);
             Vector3 localPosition = new Vector3(+halfWidth, 0f, localZ);
-            socketIndex++;
             _platformSockets.Add(socketIndex, new SocketData(socketIndex, localPosition, outwardEast, SocketStatus.Linkable));
+            socketIndex++;
         }
 
         // South edge: right to left, SE → SW (outward = -Z)
@@ -250,8 +250,8 @@ public class PlatformSocketSystem : MonoBehaviour
         {
             float localX = +halfWidth - halfCellSize - (i * WorldGrid.CellSize);
             Vector3 localPosition = new Vector3(localX, 0f, -halfLength);
+            _platformSockets.Add(socketIndex, new SocketData(socketIndex, localPosition, outwardSouth, SocketStatus.Linkable));
             socketIndex++;
-            _platformSockets.Add(socketIndex, new SocketData(socketIndex++, localPosition, outwardSouth, SocketStatus.Linkable));
         }
 
         // West edge: bottom to top, SW → NW (outward = -X)
@@ -260,8 +260,8 @@ public class PlatformSocketSystem : MonoBehaviour
         {
             float localZ = -halfLength + halfCellSize + (i * WorldGrid.CellSize);
             Vector3 localPosition = new Vector3(-halfWidth, 0f, localZ);
+            _platformSockets.Add(socketIndex, new SocketData(socketIndex, localPosition, outwardWest, SocketStatus.Linkable));
             socketIndex++;
-            _platformSockets.Add(socketIndex, new SocketData(socketIndex++, localPosition, outwardWest, SocketStatus.Linkable));
         }
     }
     

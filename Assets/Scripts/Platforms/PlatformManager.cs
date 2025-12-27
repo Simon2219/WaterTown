@@ -22,7 +22,7 @@ namespace Platforms
 /// This batched approach eliminates race conditions from immediate cell modifications.
 ///
 [DisallowMultipleComponent]
-[DefaultExecutionOrder(10)] // Run after GamePlatform (which is at -10)
+[DefaultExecutionOrder(-20)] // Run BEFORE GamePlatform (which is at -10) so subscriptions are ready
 public class PlatformManager : MonoBehaviour
 {
     #region Configuration

@@ -1,79 +1,147 @@
 ﻿using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.Rendering.RenderGraphModule;
 using UnityEngine.Rendering.Universal;
-
-// Note: Removed 'UnityEngine.Experimental.Rendering.Universal' as RTHandle is now stable
-// and often available directly under UnityEngine.Rendering.Universal.
 
 namespace WaterWorks.Scripts
 {
+    /// <summary>
+    /// Water Volume post-processing effect using Unity 6's RenderGraph API.
+    /// Applies a fullscreen water distortion/tint effect.
+    /// </summary>
     public class Water_Volume : ScriptableRendererFeature
     {
-        class CustomRenderPass : ScriptableRenderPass
-        {
-            public RTHandle sourceHandle; // Changed to RTHandle for consistency
-            private Material _material;
-            private RTHandle _temporaryRT;
-            private const string ProfilerTag = "Water Volume Pass";
-            private static readonly int TemporaryColorTextureID = Shader.PropertyToID("_TemporaryColourTexture");
-
-            public CustomRenderPass(Material mat)
-            {
-                _material = mat;
-            }
-            public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
-            {
-                RenderTextureDescriptor descriptor = renderingData.cameraData.cameraTargetDescriptor;
-                descriptor.depthBufferBits = 0;
-                descriptor.colorFormat = RenderTextureFormat.Default;
-                RenderingUtils.ReAllocateIfNeeded(ref _temporaryRT, descriptor, FilterMode.Bilinear, TextureWrapMode.Clamp, name: TemporaryColorTextureID.ToString());
-            }
-            public override void Configure(CommandBuffer cmd, RenderTextureDescriptor cameraTextureDescriptor)
-            {
-                ConfigureTarget(sourceHandle);
-            }
-            public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
-            {
-                if (_material == null) return;
-
-                if (renderingData.cameraData.cameraType != CameraType.Reflection)
-                {
-                    CommandBuffer commandBuffer = CommandBufferPool.Get(ProfilerTag);
-                    Blit(commandBuffer, sourceHandle, _temporaryRT, _material, 0);
-                    Blit(commandBuffer, _temporaryRT, sourceHandle);
-                    context.ExecuteCommandBuffer(commandBuffer);
-                    CommandBufferPool.Release(commandBuffer);
-                }
-            }
-            public override void OnCameraCleanup(CommandBuffer cmd)
-            {
-                _temporaryRT?.Release();
-            }
-        }
-
         [System.Serializable]
-        public class _Settings
+        public class Settings
         {
-            public Material material = null;
-            public RenderPassEvent renderPass = RenderPassEvent.AfterRenderingSkybox;
+            public Material material;
+            public RenderPassEvent renderPassEvent = RenderPassEvent.AfterRenderingSkybox;
         }
-        public _Settings settings = new _Settings();
-        CustomRenderPass m_ScriptablePass;
+
+        public Settings settings = new();
+        private WaterVolumePass _waterVolumePass;
 
         public override void Create()
         {
             if (settings.material == null)
             {
-                settings.material = (Material)Resources.Load("Water_Volume");
+                settings.material = Resources.Load<Material>("Water_Volume");
             }
-            m_ScriptablePass = new CustomRenderPass(settings.material);
-            m_ScriptablePass.renderPassEvent = settings.renderPass;
+
+            _waterVolumePass = new WaterVolumePass(settings.material)
+            {
+                renderPassEvent = settings.renderPassEvent
+            };
         }
 
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
-            m_ScriptablePass.sourceHandle = renderer.cameraColorTargetHandle;
-            renderer.EnqueuePass(m_ScriptablePass);
+            // Skip if material is missing or camera is a preview/reflection camera
+            if (settings.material == null) return;
+            if (renderingData.cameraData.cameraType == CameraType.Preview) return;
+            if (renderingData.cameraData.cameraType == CameraType.Reflection) return;
+
+            renderer.EnqueuePass(_waterVolumePass);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            _waterVolumePass?.Dispose();
+        }
+
+        /// <summary>
+        /// Water Volume render pass using RenderGraph API
+        /// </summary>
+        private class WaterVolumePass : ScriptableRenderPass
+        {
+            private const string PassName = "Water Volume Pass";
+            private readonly Material _material;
+
+            public WaterVolumePass(Material material)
+            {
+                _material = material;
+                // Use ProfilingSampler for GPU profiling
+                profilingSampler = new ProfilingSampler(PassName);
+            }
+
+            public void Dispose()
+            {
+                // No managed resources to dispose in RenderGraph mode
+            }
+
+            /// <summary>
+            /// Pass data container for RenderGraph
+            /// </summary>
+            private class PassData
+            {
+                public TextureHandle Source;
+                public TextureHandle Destination;
+                public Material Material;
+            }
+
+            /// <summary>
+            /// Records the render graph pass - this is the new Unity 6 RenderGraph API
+            /// </summary>
+            public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
+            {
+                if (_material == null) return;
+
+                // Get frame resources from URP
+                UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
+                UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
+
+                // Get the active color texture (camera target)
+                TextureHandle source = resourceData.activeColorTexture;
+
+                // Create a temporary texture for the blit operation
+                RenderTextureDescriptor descriptor = cameraData.cameraTargetDescriptor;
+                descriptor.depthBufferBits = 0;
+                descriptor.msaaSamples = 1;
+
+                TextureHandle destination = UniversalRenderer.CreateRenderGraphTexture(
+                    renderGraph,
+                    descriptor,
+                    "_WaterVolumeTemp",
+                    false
+                );
+
+                // Add the blit pass: source -> destination (with material)
+                using (var builder = renderGraph.AddRasterRenderPass<PassData>(PassName, out var passData, profilingSampler))
+                {
+                    passData.Source = source;
+                    passData.Destination = destination;
+                    passData.Material = _material;
+
+                    // Declare texture usage
+                    builder.UseTexture(source, AccessFlags.Read);
+                    builder.SetRenderAttachment(destination, 0, AccessFlags.Write);
+
+                    builder.SetRenderFunc(static (PassData data, RasterGraphContext context) =>
+                    {
+                        // Set the source texture for the shader
+                        data.Material.SetTexture("_MainTex", data.Source);
+                        
+                        // Draw fullscreen quad with material
+                        Blitter.BlitTexture(context.cmd, data.Source, new Vector4(1, 1, 0, 0), data.Material, 0);
+                    });
+                }
+
+                // Blit back: destination -> source (copy result back to camera target)
+                using (var builder = renderGraph.AddRasterRenderPass<PassData>("Water Volume Copy Back", out var passData, profilingSampler))
+                {
+                    passData.Source = destination;
+                    passData.Destination = source;
+                    passData.Material = null;
+
+                    builder.UseTexture(destination, AccessFlags.Read);
+                    builder.SetRenderAttachment(source, 0, AccessFlags.Write);
+
+                    builder.SetRenderFunc(static (PassData data, RasterGraphContext context) =>
+                    {
+                        Blitter.BlitTexture(context.cmd, data.Source, new Vector4(1, 1, 0, 0), 0, false);
+                    });
+                }
+            }
         }
     }
 }

@@ -131,6 +131,8 @@ namespace Platforms
         /// Updates visual feedback during pickup - called each frame while picked up
         public void UpdateValidityVisuals()
         {
+            if (!_platform) return;
+            
             bool isValid = _platform.CanBePlaced;
             Material previewMaterial = GetAutoMaterial(isValid);
             
