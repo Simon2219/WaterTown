@@ -1,32 +1,36 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 namespace Platforms
 {
     [DisallowMultipleComponent]
     public class PlatformModule : MonoBehaviour
     {
-        [Header("Size (meters on 1m grid)")]
-        [Min(1)] public int sizeAlongMeters = 2;   // occupies exactly sizeAlongMeters segments
-        [Min(1)] public int sizeInwardMeters = 1;  // reserved for future (depth), not used for sockets
+        #region Configuration 
+        
+        
+        [Header("Size Along (Cells)")] [Min(1)]
+        public int moduleSize = 2;
 
-        [Header("Behavior")]
-        public bool blocksLink = false;     // true & active => socket becomes Occupied after Refresh
-
-        public enum EdgeOverride { Auto, North, East, South, West }
-
-        [Header("Attachment")]
-        [Tooltip("Lock to a specific edge if pivot proximity would otherwise choose the wrong edge.")]
-        public EdgeOverride attachEdge = EdgeOverride.Auto;
-
-        [SerializeField, HideInInspector] private List<int> _boundSocketIndices = new List<int>();
-        [SerializeField, HideInInspector] private bool _isHidden;
-
+        
+        [SerializeField, HideInInspector] private List<int> _boundSocketIndices = new();
+        public IReadOnlyList<int> BoundSocketIndices => _boundSocketIndices;
+        
+        
+        [SerializeField, HideInInspector] private bool _isVisible;
+        public bool IsVisible => _isVisible;
+        
+        
         private GamePlatform _platform;
 
-        public IReadOnlyList<int> BoundSocketIndices => _boundSocketIndices;
-        public bool IsHidden => _isHidden;
+        
+        #endregion
+        
 
+        #region Lifecycle
+        
+        
         private void Awake()
         {
             _platform = GetComponentInParent<GamePlatform>();
@@ -39,7 +43,7 @@ namespace Platforms
             if (IsEditingPrefab()) return;
             if (!_platform) { Awake(); if (!_platform) return; }
             RebindAndRegister();
-            ApplyVisibilityImmediate();
+            UpdateVisibility();
             _platform.RefreshSocketStatuses();
         }
 
@@ -54,24 +58,9 @@ namespace Platforms
             if (IsEditingPrefab()) return;
             if (_platform) { _platform.UnregisterModule(this); _platform.RefreshSocketStatuses(); }
         }
-
-#if UNITY_EDITOR
-        private void OnValidate()
-        {
-            sizeAlongMeters  = Mathf.Max(1, sizeAlongMeters);
-            sizeInwardMeters = Mathf.Max(1, sizeInwardMeters);
-            if (IsEditingPrefab()) return;
-
-            if (_platform && isActiveAndEnabled)
-            {
-                _platform.UnregisterModule(this);
-                RebindAndRegister();
-                ApplyVisibilityImmediate();
-                _platform.RefreshSocketStatuses();
-            }
-        }
-#endif
-
+        
+        
+        
         public void EnsureRegistered()
         {
             if (IsEditingPrefab()) return;
@@ -82,16 +71,39 @@ namespace Platforms
             if (!enabled) enabled = true;
 
             RebindAndRegister();
-            ApplyVisibilityImmediate();
+            UpdateVisibility();
             _platform.RefreshSocketStatuses();
         }
+        
+        
+        
+#if UNITY_EDITOR
+        private void OnValidate()
+        {
+            moduleSize  = Mathf.Max(1, moduleSize);
+
+            if (IsEditingPrefab()) return;
+
+            if (_platform && isActiveAndEnabled)
+            {
+                _platform.UnregisterModule(this);
+                RebindAndRegister();
+                UpdateVisibility();
+                _platform.RefreshSocketStatuses();
+            }
+        }
+#endif
+        
+        
+        #endregion
+        
 
         // ---------- Binding ----------
         private void RebindAndRegister()
         {
             _boundSocketIndices = ComputeSocketIndices(_platform);
             if (_boundSocketIndices.Count > 0)
-                _platform.RegisterModuleOnSockets(this, occupiesSockets: true, _boundSocketIndices);
+                _platform.RegisterModule(this, _boundSocketIndices);
         }
 
         private List<int> ComputeSocketIndices(GamePlatform platform)
@@ -100,40 +112,34 @@ namespace Platforms
             
             // Use the module's size to find that many nearest sockets
             // maxDistance covers the module size plus some buffer for edge cases
-            float maxDistance = (sizeAlongMeters + 1) * Grid.WorldGrid.CellSize;
+            float maxDistance = (moduleSize + 1) * Grid.WorldGrid.CellSize;
             
-            return platform.FindNearestSocketIndices(transform.position, sizeAlongMeters, maxDistance);
+            return platform.FindNearestSocketIndices(transform.position, moduleSize, maxDistance);
         }
         
 
         // ---------- Visibility ----------
-        public void Hide() => SetHidden(true);
-        public void Show() => SetHidden(false);
-
-        public void SetHidden(bool hidden)
-        {
-            _isHidden = hidden;
-            ApplyVisibilityImmediate();
-        }
-
-        /// <summary>
-        /// Hidden = GameObject inactive (NOT destroyed).
-        /// This matches the previous behavior the system relied on.
-        /// </summary>
-        private void ApplyVisibilityImmediate()
-        {
-            bool shouldBeActive = !_isHidden;
-            if (gameObject.activeSelf != shouldBeActive)
-                gameObject.SetActive(shouldBeActive);
-        }
+        public void Hide() => SetVisibility(false);
+        public void Show() => SetVisibility(true);
 
 
 
         public void UpdateVisibility()
         {
-            // Not sure how to handle visibility yet
-            // Old implementation was hiding Modules on Connection
+            SetVisibility(_isVisible);
         }
+
+
+        private void SetVisibility(bool visibility)
+        {
+            bool shouldBeActive = _isVisible;
+            if (gameObject.activeSelf != shouldBeActive)
+                gameObject.SetActive(shouldBeActive);
+            
+            _isVisible = visibility;
+        }
+        
+        
         
         private static bool IsEditingPrefab()
         {

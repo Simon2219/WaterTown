@@ -86,7 +86,7 @@ namespace Editor
         
         /// Gets the socket list from a platform in editor mode
         ///
-        public static IReadOnlyList<PlatformSocketSystem.SocketData> GetSockets(GamePlatform platform)
+        public static IReadOnlyDictionary<int,PlatformSocketSystem.SocketData> GetSockets(GamePlatform platform)
         {
             var socketSystem = GetSocketSystem(platform);
             return socketSystem?.PlatformSockets;
@@ -129,23 +129,6 @@ namespace Editor
             
             for (int i = 0; i < candidates.Count && i < maxCount; i++)
                 result.Add(candidates[i].idx);
-        }
-        
-        
-        #endregion
-        
-        
-        
-        
-        #region Module Operations
-        
-        
-        /// Registers a module on sockets in editor mode
-        ///
-        public static void RegisterModuleOnSockets(GamePlatform platform, PlatformModule module, bool occupiesSockets, IEnumerable<int> socketIndices)
-        {
-            var socketSystem = GetSocketSystem(platform);
-            socketSystem?.RegisterModuleOnSockets(module, occupiesSockets, socketIndices);
         }
         
         

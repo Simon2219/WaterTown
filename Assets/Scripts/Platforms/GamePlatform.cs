@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using Grid;
 using Interfaces;
+using static Platforms.PlatformSocketSystem;
 
 namespace Platforms
 {
@@ -107,6 +108,8 @@ public class GamePlatform : MonoBehaviour, IPickupable
         
         // Initialize Sub Systems
         InitializeSubComponents();
+        
+        EnsureChildrenModulesRegistered();
     }
     
     
@@ -116,7 +119,7 @@ public class GamePlatform : MonoBehaviour, IPickupable
     private void InitializeSubComponents()
     {
         // Initialize sub-components with dependencies
-        _socketSystem?.Initialize(this, _platformManager, _worldGrid);
+        _socketSystem?.Initialize(this, _worldGrid);
         _pickupHandler?.Initialize(this);
         _railingSystem?.Initialize(this, _socketSystem);
         _editorUtility?.Initialize(this, _socketSystem);
@@ -290,20 +293,13 @@ public class GamePlatform : MonoBehaviour, IPickupable
     
     #region Socket Interface Methods & Type Aliases
     
-    
-    // Type aliases for external compatibility - maps to PlatformSocketSystem enums
-    public enum Edge { North = 0, East = 1, South = 2, West = 3 }
-    public enum SocketStatus { Linkable = 0, Occupied = 1, Connected = 2, Locked = 3, Disabled = 4 }
-    public enum SocketLocation { Edge = 0, Corner = 1 }
-    
-    /// Access to socket system (read-only list)
-    public IReadOnlyList<PlatformSocketSystem.SocketData> Sockets => _socketSystem?.PlatformSockets;
+    /// Access to socket system 
     
     public int SocketCount => _socketSystem?.SocketCount ?? 0;
 
 
-    public PlatformSocketSystem.SocketData GetSocket(int index) 
-        => _socketSystem?.GetSocket(index) ?? default;
+    public SocketData GetSocket(int index) 
+        => _socketSystem?.GetSocket(index) ?? null;
 
 
     public Vector3 GetSocketWorldPosition(int index) 
@@ -311,7 +307,7 @@ public class GamePlatform : MonoBehaviour, IPickupable
 
 
     public void SetSocketStatus(int index, SocketStatus status) 
-        => _socketSystem?.SetSocketStatus(index, (PlatformSocketSystem.SocketStatus)(int)status);
+        => _socketSystem?.SetSocketStatus(index, status);
 
 
     public bool IsSocketConnected(int socketIndex) 
@@ -341,7 +337,7 @@ public class GamePlatform : MonoBehaviour, IPickupable
 
 
     public Vector2Int GetAdjacentCellForSocket(int socketIndex) 
-        => _socketSystem?.GetAdjacentCellForSocket(socketIndex) ?? Vector2Int.zero;
+        => _socketSystem?.GetSocketCellAdjacent(socketIndex) ?? Vector2Int.zero;
     
 
 
@@ -360,24 +356,63 @@ public class GamePlatform : MonoBehaviour, IPickupable
     #endregion
     
     
-    #region Module Interface Methods
+    #region Module Registry
     
     
-    public void RegisterModuleOnSockets(PlatformModule module, bool occupiesSockets, IEnumerable<int> socketIndices) 
-        => _socketSystem?.RegisterModuleOnSockets(module, occupiesSockets, socketIndices);
+    public void RegisterModule(PlatformModule module, List<int> socketIndices)
+    {
+        _platformModules.Add(module);
+        foreach (var socketIndex in socketIndices)
+        {
+            GetSocket(socketIndex).AttachedModule = module;
+            Vector2Int cellBehindSocket = _socketSystem.GetSocketCellBehind(socketIndex);
+            _worldGrid.GetCell(cellBehindSocket)?.SetExact(CellFlag.ModuleBlocked);
+        }
+    }
 
 
-    public void UnregisterModule(PlatformModule module) 
-        => _socketSystem?.UnregisterModule(module);
+    public void UnregisterModule(PlatformModule module)
+    {
+        if (!_platformModules.Contains(module)) return;
+        
+        foreach (var sIdx in module.BoundSocketIndices)
+        {
+            Vector2Int cellBehindSocket = _socketSystem.GetSocketCellBehind(sIdx);
+            _worldGrid.GetCell(cellBehindSocket)?.RemoveFlags(CellFlag.ModuleBlocked);
+        }
+    }
 
 
-    public void SetModuleHidden(PlatformModule module, bool hidden) 
-        => _socketSystem?.SetModuleHidden(module, hidden);
+    public void SetModuleHidden(PlatformModule module, bool hidden)
+    {
+        if (!module) return;
+
+        if(hidden) module.Hide();
+        else module.Show();
+        
+        RefreshSocketStatuses();
+    }
 
 
-    public void EnsureChildrenModulesRegistered() 
-        => _socketSystem?.EnsureChildrenModulesRegistered();
+    public void EnsureChildrenModulesRegistered()
+    {
+        
+        foreach (var m in PlatformModules)
+        {
+            if (m) m.EnsureRegistered();
+        }
+    }
     
+    
+    
+    private void ShowAllModules()
+    {
+
+        foreach (var m in PlatformModules)
+        {
+            if (m) m.Show();
+        }
+    }
     
     #endregion
     
@@ -418,12 +453,7 @@ public class GamePlatform : MonoBehaviour, IPickupable
         return cells.Count != 0 && _platformManager.IsAreaEmpty(cells);
     }
 
-
-
-    internal Vector2Int Editor_GetFootprint()
-    {
-        return _editorUtility.Editor_GetFootprint();
-    }
+    
     #endregion
 }
 }
