@@ -414,39 +414,6 @@ public class PlatformSocketSystem : MonoBehaviour
     
 
 
-    /// Gets the socket index range (start, end inclusive) for a given edge
-    /// Socket order: North → East → South → West (clockwise from NW corner)
-    public void GetSocketIndexRangeForEdge(Edge edge, out int startIndex, out int endIndex)
-    {
-        var footprintSize = GetFootprint();
-        int width = Mathf.Max(1, footprintSize.x);
-        int length = Mathf.Max(1, footprintSize.y);
-
-        switch (edge)
-        {
-            case Edge.North:
-                startIndex = 0;
-                endIndex = width - 1;
-                break;
-            
-            case Edge.East:
-                startIndex = width;
-                endIndex = width + length - 1;
-                break;
-            
-            case Edge.South:
-                startIndex = width + length;
-                endIndex = 2 * width + length - 1;
-                break;
-            
-            case Edge.West:
-            default:
-                startIndex = 2 * width + length;
-                endIndex = 2 * width + 2 * length - 1;
-                break;
-        }
-    }
-    
     
     
     /// Finds the nearest socket to a world position

@@ -324,12 +324,6 @@ public class GamePlatform : MonoBehaviour, IPickupable
     }
 
 
-    public void GetSocketIndexRangeForEdge(Edge edge, out int startIndex, out int endIndex)
-    {
-        _socketSystem.GetSocketIndexRangeForEdge((PlatformSocketSystem.Edge)(int)edge, out startIndex, out endIndex);
-    }
-
-
     public int FindNearestSocketIndexLocal(Vector3 localPos) 
         => _socketSystem?.FindNearestSocketIndex(transform.TransformPoint(localPos)) ?? -1;
 
