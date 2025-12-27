@@ -59,7 +59,7 @@ public class GridVisualizer : MonoBehaviour
 
     
     [Header("Display")]
-    [SerializeField] private bool _showGrid = true;
+    [SerializeField] private bool _showGrid = false;
     [SerializeField, Min(0.001f)] private float _lineThickness = 0.05f;
     [SerializeField, Range(0f, 1f)] private float _cellOpacity = 0.35f;
     [SerializeField, Range(0f, 1f)] private float _lineOpacity = 0.7f;
@@ -155,6 +155,24 @@ public class GridVisualizer : MonoBehaviour
         SyncRendererMaterial();
         ApplyParams(true);
         _gridDirty = true;
+        
+        // Sync with current build mode state
+        SyncWithBuildModeState();
+    }
+    
+    
+    private void SyncWithBuildModeState()
+    {
+        if (_buildModeManager != null && _buildModeManager.IsInBuildMode)
+        {
+            ShowGrid = true;
+            EnableCellColors = true;
+        }
+        else
+        {
+            ShowGrid = false;
+            EnableCellColors = false;
+        }
     }
 
 
@@ -269,6 +287,7 @@ public class GridVisualizer : MonoBehaviour
     
     private void OnBuildModeEntered()
     {
+        ShowGrid = true;
         EnableCellColors = true;
     }
     
@@ -276,6 +295,7 @@ public class GridVisualizer : MonoBehaviour
     private void OnBuildModeExited()
     {
         EnableCellColors = false;
+        ShowGrid = false;
     }
     
     
