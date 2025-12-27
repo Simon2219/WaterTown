@@ -15,7 +15,8 @@ namespace WaterWorks.Scripts
         public class Settings
         {
             public Material material;
-            public RenderPassEvent renderPassEvent = RenderPassEvent.AfterRenderingSkybox;
+            // Render before transparents so overlay UI/grid renders on top
+            public RenderPassEvent renderPassEvent = RenderPassEvent.BeforeRenderingTransparents;
         }
 
         public Settings settings = new();

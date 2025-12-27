@@ -23,12 +23,13 @@ Shader "WaterCity/Grid/URPGrid"
         // Depth helpers
         _YBias("Vertical Bias (m)", Float) = 0.005
         // Unity CompareFunction enum: 0 Disabled, 1 Never, 2 Less, 3 Equal, 4 LEqual, 5 Greater, 6 NotEqual, 7 GEqual, 8 Always
-        _ZTestMode("ZTest Mode", Float) = 4
+        _ZTestMode("ZTest Mode", Float) = 8
     }
 
     SubShader
     {
-        Tags { "RenderType"="Transparent" "Queue"="Transparent" "IgnoreProjector"="True" "RenderPipeline"="UniversalPipeline" }
+        // Queue="Overlay" renders after everything including post-processing
+        Tags { "RenderType"="Transparent" "Queue"="Overlay" "IgnoreProjector"="True" "RenderPipeline"="UniversalPipeline" }
         LOD 100
         ZWrite Off
         Cull Off
@@ -38,7 +39,8 @@ Shader "WaterCity/Grid/URPGrid"
         Pass
         {
             Name "URPGrid"
-            Tags { "LightMode"="UniversalForward" }
+            // Use SRPDefaultUnlit to avoid being affected by lighting passes
+            Tags { "LightMode"="SRPDefaultUnlit" }
 
             HLSLPROGRAM
             #pragma vertex vert
