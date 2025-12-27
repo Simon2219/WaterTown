@@ -109,7 +109,7 @@ public class GamePlatform : MonoBehaviour, IPickupable
         // Initialize Sub Systems
         InitializeSubComponents();
         
-        EnsureChildrenModulesRegistered();
+        //EnsureChildrenModulesRegistered();
     }
     
     
@@ -394,14 +394,14 @@ public class GamePlatform : MonoBehaviour, IPickupable
     }
 
 
-    public void EnsureChildrenModulesRegistered()
+    /*public void EnsureChildrenModulesRegistered()
     {
         
         foreach (var m in PlatformModules)
         {
             if (m) m.EnsureRegistered();
         }
-    }
+    }*/
     
     
     
